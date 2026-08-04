@@ -1,0 +1,270 @@
+import type { ToolDef } from './tools'
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TOOL DEFINITIONS ONLY — 13 CREATE + 9 UPDATE (lightweight, no db import)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export const TOOLS_WRITE: ToolDef[] = [
+  {
+    name: 'create_sales_order',
+    description: 'Create a new sales order for a customer with items, GST calculation, broker commission. Auto-generates order number SO-YYYYMMDD-NNN.',
+    parameters: {
+      customerName: { type: 'string', description: 'Customer company name (searched in database)', required: true },
+      items: { type: 'array', description: 'Array of {styleName, quantity, unitPrice, unitCost, colors?: [{color, quantity}]}', required: true },
+      deliveryDate: { type: 'string', description: 'Expected delivery date (YYYY-MM-DD or "today"/"this_month" etc.)' },
+      brokerName: { type: 'string', description: 'Broker name if order via broker' },
+      commissionPercent: { type: 'number', description: 'Broker commission percentage (e.g. 5)' },
+      quotationId: { type: 'string', description: 'Linked quotation ID if converted from quotation' },
+      notes: { type: 'string', description: 'Order notes' },
+      gstType: { type: 'string', description: 'GST type: IntraState (CGST+SGST) or InterState (IGST)', enum: ['IntraState', 'InterState'] },
+      gstPercent: { type: 'number', description: 'GST percentage (default 18)' },
+    },
+  },
+  {
+    name: 'create_production_job',
+    description: 'Create a new production job. Auto-generates job number PJ-YYYYMMDD-NNN.',
+    parameters: {
+      styleNo: { type: 'string', description: 'Style number e.g. DH-07', required: true },
+      styleName: { type: 'string', description: 'Style name e.g. Pleating Kurti', required: true },
+      targetQty: { type: 'number', description: 'Target production quantity', required: true },
+      salesOrderId: { type: 'string', description: 'Linked sales order ID' },
+      stage: { type: 'string', description: 'Starting stage (default: Fabric Issue)' },
+      fabricStockId: { type: 'string', description: 'Fabric stock ID to link' },
+      startDate: { type: 'string', description: 'Start date (YYYY-MM-DD)' },
+    },
+  },
+  {
+    name: 'create_purchase_order',
+    description: 'Create a new purchase order for fabric. Auto-generates PO-YYYYMMDD-NNN.',
+    parameters: {
+      supplierName: { type: 'string', description: 'Supplier name (searched in database)', required: true },
+      fabricName: { type: 'string', description: 'Fabric name', required: true },
+      quantity: { type: 'number', description: 'Quantity in meters', required: true },
+      unitRate: { type: 'number', description: 'Rate per meter', required: true },
+      expectedDelivery: { type: 'string', description: 'Expected delivery date' },
+      gstType: { type: 'string', description: 'GST type', enum: ['IntraState', 'InterState'] },
+      gstPercent: { type: 'number', description: 'GST percentage (default 18)' },
+    },
+  },
+  {
+    name: 'create_transaction',
+    description: 'Create a financial transaction (income, expense, or transfer).',
+    parameters: {
+      type: { type: 'string', description: 'Transaction type', enum: ['Income', 'Expense', 'Transfer'], required: true },
+      category: { type: 'string', description: 'Category (Income: Order Payment, Advance, Other Income. Expense: Fabric, Labor, Transport, Overhead, Salary, Utility, Rent, Other)', required: true },
+      amount: { type: 'number', description: 'Amount in rupees', required: true },
+      description: { type: 'string', description: 'Transaction description', required: true },
+      date: { type: 'string', description: 'Transaction date (default: today IST)' },
+      referenceNo: { type: 'string', description: 'Reference number (order no, PO no, etc.)' },
+    },
+  },
+  {
+    name: 'create_dispatch',
+    description: 'Create a dispatch record for an order. Auto-generates DP-YYYYMMDD-NNN.',
+    parameters: {
+      salesOrderId: { type: 'string', description: 'Sales order ID', required: true },
+      items: { type: 'array', description: 'Array of {styleNo, styleName, orderedQty, dispatchedQty}', required: true },
+      dispatchDate: { type: 'string', description: 'Dispatch date (default: today)' },
+      transporter: { type: 'string', description: 'Transporter name' },
+      vehicleNo: { type: 'string', description: 'Vehicle number' },
+      trackingNo: { type: 'string', description: 'Tracking/AWB number' },
+      notes: { type: 'string', description: 'Dispatch notes' },
+    },
+  },
+  {
+    name: 'create_grn_note',
+    description: 'Create a Goods Received Note for supplier delivery. Auto-generates GRN-YYYYMMDD-NNN.',
+    parameters: {
+      supplierName: { type: 'string', description: 'Supplier name', required: true },
+      items: { type: 'array', description: 'Array of {fabricName, orderedQty, receivedQty, acceptedQty, rejectedQty, ratePerUnit}', required: true },
+      purchaseOrderId: { type: 'string', description: 'Linked purchase order ID' },
+      receivedDate: { type: 'string', description: 'Date received (default: today)' },
+      notes: { type: 'string', description: 'GRN notes' },
+    },
+  },
+  {
+    name: 'create_sample',
+    description: 'Create a new sample/trial record. Auto-generates SMP-NNN.',
+    parameters: {
+      styleNo: { type: 'string', description: 'Style number', required: true },
+      styleName: { type: 'string', description: 'Style name', required: true },
+      customerName: { type: 'string', description: 'Customer name (optional)' },
+      stage: { type: 'string', description: 'Sample stage (default: Design)' },
+      cost: { type: 'number', description: 'Sample cost' },
+      notes: { type: 'string', description: 'Notes' },
+    },
+  },
+  {
+    name: 'create_quality_check',
+    description: 'Create a quality check record for a production job. Auto-generates QC-NNN. Auto-calculates pass/fail status.',
+    parameters: {
+      jobNo: { type: 'string', description: 'Production job number', required: true },
+      inspectionPoint: { type: 'string', description: 'Inspection point', enum: ['Fabric Check', 'Cutting Check', 'In-Process Check', 'Finishing Check', 'Final Inspection'], required: true },
+      checkedQty: { type: 'number', description: 'Quantity checked', required: true },
+      passedQty: { type: 'number', description: 'Quantity passed', required: true },
+      failedQty: { type: 'number', description: 'Quantity failed (default: checkedQty - passedQty)' },
+      defectType: { type: 'string', description: 'Type of defect found' },
+      defectCount: { type: 'number', description: 'Number of defects' },
+      severity: { type: 'string', description: 'Defect severity', enum: ['Minor', 'Major', 'Critical'] },
+      inspectorName: { type: 'string', description: 'Inspector name' },
+      notes: { type: 'string', description: 'QC notes' },
+    },
+  },
+  {
+    name: 'create_return',
+    description: 'Create a return record (customer or supplier return). Auto-generates RTN-NNN.',
+    parameters: {
+      returnType: { type: 'string', description: 'Type of return', enum: ['Customer', 'Supplier'], required: true },
+      referenceNo: { type: 'string', description: 'Reference number (order no or PO no)', required: true },
+      partyName: { type: 'string', description: 'Customer or supplier name', required: true },
+      reason: { type: 'string', description: 'Reason for return', required: true },
+      items: { type: 'array', description: 'Array of {itemName, quantity, unitValue}', required: true },
+      notes: { type: 'string', description: 'Return notes' },
+    },
+  },
+  {
+    name: 'create_customer',
+    description: 'Create a new customer in the database.',
+    parameters: {
+      companyName: { type: 'string', description: 'Company name', required: true },
+      buyerName: { type: 'string', description: 'Buyer/contact person name' },
+      phone: { type: 'string', description: 'Phone number' },
+      email: { type: 'string', description: 'Email address' },
+      gstNumber: { type: 'string', description: 'GST number' },
+      billingAddress: { type: 'string', description: 'Billing address' },
+      shippingAddress: { type: 'string', description: 'Shipping address' },
+      paymentTerms: { type: 'number', description: 'Payment terms in days (default 30)' },
+      creditLimit: { type: 'number', description: 'Credit limit (default 0)' },
+    },
+  },
+  {
+    name: 'create_supplier',
+    description: 'Create a new supplier in the database.',
+    parameters: {
+      name: { type: 'string', description: 'Supplier name', required: true },
+      supplierType: { type: 'string', description: 'Supplier type (default: Fabric)' },
+      contactPerson: { type: 'string', description: 'Contact person name' },
+      phone: { type: 'string', description: 'Phone number' },
+      email: { type: 'string', description: 'Email address' },
+      paymentTerms: { type: 'number', description: 'Payment terms in days (default 15)' },
+    },
+  },
+  {
+    name: 'create_employee',
+    description: 'Create a new employee/worker in the database.',
+    parameters: {
+      name: { type: 'string', description: 'Employee name', required: true },
+      department: { type: 'string', description: 'Department', required: true },
+      designation: { type: 'string', description: 'Designation/role', required: true },
+      salary: { type: 'number', description: 'Monthly salary', required: true },
+      phone: { type: 'string', description: 'Phone number' },
+      dailyWage: { type: 'number', description: 'Daily wage rate' },
+      skills: { type: 'string', description: 'Skills (comma-separated)' },
+      joinDate: { type: 'string', description: 'Join date (YYYY-MM-DD)' },
+    },
+  },
+  {
+    name: 'create_quotation_from_cost_sheet',
+    description: 'Create a quotation directly from an existing cost sheet. Auto-generates QT-YYYYMMDD-NNN.',
+    parameters: {
+      sheetNo: { type: 'string', description: 'Cost sheet number', required: true },
+      customerName: { type: 'string', description: 'Customer company name', required: true },
+      quantity: { type: 'number', description: 'Quantity (default: cost sheet target qty)' },
+      gstType: { type: 'string', description: 'GST type', enum: ['IntraState', 'InterState'] },
+      gstPercent: { type: 'number', description: 'GST percentage (default 18)' },
+      validDays: { type: 'number', description: 'Validity in days (default 30)' },
+      notes: { type: 'string', description: 'Quotation notes' },
+    },
+  },
+  // UPDATE TOOLS
+  {
+    name: 'update_order_status',
+    description: 'Update the status of a sales order with valid transition validation.',
+    parameters: {
+      orderNo: { type: 'string', description: 'Order number e.g. SO-20260704-001', required: true },
+      newStatus: { type: 'string', description: 'New status', required: true },
+      notes: { type: 'string', description: 'Notes for status change' },
+    },
+  },
+  {
+    name: 'update_production_job',
+    description: 'Update production job fields (completedQty, stage, status, endDate). Only provided fields are updated.',
+    parameters: {
+      jobNo: { type: 'string', description: 'Job number', required: true },
+      completedQty: { type: 'number', description: 'Completed quantity' },
+      stage: { type: 'string', description: 'Current stage' },
+      status: { type: 'string', description: 'Job status' },
+      endDate: { type: 'string', description: 'End date' },
+    },
+  },
+  {
+    name: 'record_payment',
+    description: 'Record a payment against a sales order. Creates a Transaction record and updates order payment status atomically.',
+    parameters: {
+      orderNo: { type: 'string', description: 'Order number', required: true },
+      amount: { type: 'number', description: 'Payment amount in rupees', required: true },
+      paymentMethod: { type: 'string', description: 'Payment method (default: Bank Transfer)' },
+      referenceNo: { type: 'string', description: 'Payment reference number' },
+      notes: { type: 'string', description: 'Payment notes' },
+    },
+  },
+  {
+    name: 'update_po_status',
+    description: 'Update purchase order status with transition validation.',
+    parameters: {
+      poNumber: { type: 'string', description: 'PO number', required: true },
+      newStatus: { type: 'string', description: 'New status', required: true },
+      paidAmount: { type: 'number', description: 'Update paid amount' },
+    },
+  },
+  {
+    name: 'update_dispatch_status',
+    description: 'Update dispatch status with transition validation (Packed → InTransit → Delivered).',
+    parameters: {
+      dispatchNo: { type: 'string', description: 'Dispatch number', required: true },
+      newStatus: { type: 'string', description: 'New status', required: true },
+      trackingNo: { type: 'string', description: 'Tracking number' },
+      notes: { type: 'string', description: 'Notes' },
+    },
+  },
+  {
+    name: 'update_inventory',
+    description: 'Adjust fabric inventory (add, reduce, or set available meters).',
+    parameters: {
+      fabricName: { type: 'string', description: 'Fabric name to search' },
+      fabricStockId: { type: 'string', description: 'Fabric stock ID (alternative to fabricName)' },
+      adjustmentType: { type: 'string', description: 'Type: add, reduce, or set', enum: ['add', 'reduce', 'set'], required: true },
+      quantity: { type: 'number', description: 'Quantity in meters', required: true },
+      averageCost: { type: 'number', description: 'Average cost (for set operations)' },
+    },
+  },
+  {
+    name: 'update_sample_status',
+    description: 'Update sample status with transition validation (In Progress → Submitted → Approved/Rejected).',
+    parameters: {
+      sampleNo: { type: 'string', description: 'Sample number', required: true },
+      newStatus: { type: 'string', description: 'New status', required: true },
+      submissionDate: { type: 'string', description: 'Submission date' },
+      approvedDate: { type: 'string', description: 'Approval/rejection date' },
+      notes: { type: 'string', description: 'Notes' },
+    },
+  },
+  {
+    name: 'update_quotation_status',
+    description: 'Update quotation status with transition validation (Draft → Sent → Accepted/Rejected → Converted).',
+    parameters: {
+      quotationNo: { type: 'string', description: 'Quotation number', required: true },
+      newStatus: { type: 'string', description: 'New status', required: true },
+      notes: { type: 'string', description: 'Notes' },
+    },
+  },
+  {
+    name: 'update_cost_sheet_status',
+    description: 'Update cost sheet status with transition validation (Draft → Approved → Finalized).',
+    parameters: {
+      sheetNo: { type: 'string', description: 'Cost sheet number', required: true },
+      newStatus: { type: 'string', description: 'New status', required: true },
+      notes: { type: 'string', description: 'Notes' },
+    },
+  },
+]
