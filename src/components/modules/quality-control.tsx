@@ -38,7 +38,29 @@ import {
   ChevronRight,
   Loader2,
   AlertTriangle,
+  Gauge,
+  TrendingDown,
+  Target,
+  Bug,
+  RefreshCw,
 } from 'lucide-react'
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip as RTooltip,
+  ResponsiveContainer,
+  Cell as RCell,
+  CartesianGrid,
+  PieChart,
+  Pie,
+  AreaChart,
+  Area,
+  RadialBarChart,
+  RadialBar,
+  PolarAngleAxis,
+} from 'recharts'
 import { toast } from 'sonner'
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -120,6 +142,79 @@ interface QualityData {
   }
 }
 
+// ─── QC Dashboard Types (NEW) ────────────────────────────────────────────────
+
+interface QCDashSummary {
+  totalChecks: number
+  totalChecked: number
+  totalPassed: number
+  totalFailed: number
+  passRate: number
+  failRate: number
+  criticalDefects: number
+  conditionalCount: number
+  reworkNeeded: number
+  qualityScore: number
+  grade: string
+  avgDefectsPerCheck: number
+}
+
+interface QCDashDefect {
+  type: string
+  count: number
+  percentage: number
+  color: string
+}
+
+interface QCDashPoint {
+  point: string
+  totalChecks: number
+  totalChecked: number
+  totalPassed: number
+  totalFailed: number
+  passRate: number
+}
+
+interface QCDashTrend {
+  date: string
+  checked: number
+  passed: number
+  failed: number
+  passRate: number
+}
+
+interface QCDashInspector {
+  name: string
+  checks: number
+  passRate: number
+  avgChecked: number
+}
+
+interface QCDashFailure {
+  id: string
+  checkNo: string
+  inspectionPoint: string
+  checkedQty: number
+  passedQty: number
+  failedQty: number
+  defectType: string | null
+  severity: string
+  status: string
+  inspectorName: string | null
+  checkedAt: string
+  jobNo: string | null
+  styleName: string | null
+}
+
+interface QCDashboardData {
+  summary: QCDashSummary
+  defectTypes: QCDashDefect[]
+  inspectionPoints: QCDashPoint[]
+  trend: QCDashTrend[]
+  inspectors: QCDashInspector[]
+  recentFailures: QCDashFailure[]
+}
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 function fmt(num: number): string {
@@ -191,6 +286,7 @@ export function QualityControlModule() {
   // Data
   const [data, setData] = useState<QualityData | null>(null)
   const [loading, setLoading] = useState(true)
+  const [dash, setDash] = useState<QCDashboardData | null>(null)
   const [page, setPage] = useState(1)
   const limit = 15
 
@@ -264,9 +360,21 @@ export function QualityControlModule() {
     }
   }, [])
 
+  const fetchDash = useCallback(async () => {
+    try {
+      const res = await fetch('/api/quality/dashboard')
+      if (!res.ok) return
+      const json = await res.json()
+      if (!json.error) setDash(json)
+    } catch {
+      // Dashboard is optional — fail silently
+    }
+  }, [])
+
   useEffect(() => {
     fetchData()
-  }, [fetchData])
+    fetchDash()
+  }, [fetchData, fetchDash])
 
   useEffect(() => {
     setPage(1)
@@ -1091,6 +1199,11 @@ export function QualityControlModule() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* ─── QC Dashboard (NEW FEATURE) ─────────────────────────────── */}
+      {dash && dash.summary.totalChecks > 0 && (
+        <QualityDashboardWidget data={dash} />
+      )}
     </div>
   )
 }
@@ -1152,6 +1265,340 @@ function EmptyState() {
       <p className="max-w-sm text-sm text-muted-foreground mt-2">
         No inspections recorded yet. Start by creating your first quality inspection for a production job.
       </p>
+    </div>
+  )
+}
+// ─── Quality Dashboard Widget (NEW FEATURE) ──────────────────────────────────
+// Comprehensive QC analytics: pass/fail rates, defect analysis, inspection point
+// performance, 14-day trend, inspector stats, and recent failures.
+
+function QCTrendTooltip({ active, payload, label }: { active?: boolean; payload?: Array<{ name: string; value: number; color: string }>; label?: string }) {
+  if (!active || !payload?.length) return null
+  return (
+    <div className="rounded-lg border border-border/50 bg-background/95 backdrop-blur-sm px-3 py-2 text-xs shadow-xl">
+      <p className="mb-1.5 font-medium text-muted-foreground">{label}</p>
+      {payload.map((item) => (
+        <div key={item.name} className="flex items-center justify-between gap-4">
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: item.color }} />
+            {item.name}
+          </span>
+          <span className="font-medium tabular-nums">{item.value}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function getScoreColor(score: number): string {
+  if (score >= 90) return 'oklch(0.72 0.18 145)' // green
+  if (score >= 75) return 'oklch(0.8 0.15 75)'   // gold
+  if (score >= 60) return 'oklch(0.75 0.15 65)'  // orange
+  return 'oklch(0.65 0.22 25)'                     // red
+}
+
+function QualityDashboardWidget({ data }: { data: QCDashboardData }) {
+  const { summary, defectTypes, inspectionPoints, trend, inspectors, recentFailures } = data
+  const hasCritical = summary.criticalDefects > 0
+  const hasRework = summary.reworkNeeded > 0
+
+  const scoreGauge = [{ name: 'quality', value: summary.qualityScore, fill: getScoreColor(summary.qualityScore) }]
+  const passGauge = [{ name: 'pass', value: summary.passRate, fill: 'oklch(0.72 0.18 145)' }]
+
+  return (
+    <div className="premium-card rounded-xl p-5">
+      {/* Header */}
+      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-3">
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/15 glow-ring">
+            <Gauge className="h-5 w-5 text-primary" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-semibold">Quality Control Dashboard</h3>
+              <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary">
+                <Sparkles className="h-2.5 w-2.5" />
+                Smart QA
+              </span>
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              {summary.totalChecks} inspections · {summary.totalChecked} units checked · {summary.passRate}% pass rate · Grade {summary.grade}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Metrics grid with radial gauges */}
+      <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {/* Quality Score gauge */}
+        <div className={`rounded-lg border p-3 ${summary.qualityScore >= 90 ? 'border-emerald-500/30 bg-emerald-500/5' : summary.qualityScore >= 75 ? 'border-amber-500/30 bg-amber-500/5' : 'border-red-500/30 bg-red-500/5'}`}>
+          <div className="flex items-center justify-between">
+            <div>
+              <div className={`flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider ${summary.qualityScore >= 90 ? 'text-emerald-400' : summary.qualityScore >= 75 ? 'text-amber-400' : 'text-red-400'}`}>
+                <Target className="h-3 w-3" />
+                Quality Score
+              </div>
+              <p className={`mt-1 text-lg font-bold tabular-nums ${summary.qualityScore >= 90 ? 'text-emerald-400' : summary.qualityScore >= 75 ? 'text-amber-400' : 'text-red-400'}`}>
+                {summary.qualityScore}
+              </p>
+              <p className="text-[10px] text-muted-foreground">Grade {summary.grade}</p>
+            </div>
+            <div className="h-14 w-14">
+              <ResponsiveContainer width="100%" height="100%">
+                <RadialBarChart cx="50%" cy="50%" innerRadius="60%" outerRadius="100%" data={scoreGauge} startAngle={90} endAngle={-270}>
+                  <PolarAngleAxis type="number" domain={[0, 100]} angleAxisId={0} tick={false} />
+                  <RadialBar background dataKey="value" cornerRadius={6} angleAxisId={0} />
+                </RadialBarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        </div>
+
+        {/* Pass Rate gauge */}
+        <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-emerald-400">
+                <CheckCircle className="h-3 w-3" />
+                Pass Rate
+              </div>
+              <p className="mt-1 text-lg font-bold tabular-nums text-emerald-400">{summary.passRate}%</p>
+              <p className="text-[10px] text-muted-foreground tabular-nums">{summary.totalPassed}/{summary.totalChecked} units</p>
+            </div>
+            <div className="h-14 w-14">
+              <ResponsiveContainer width="100%" height="100%">
+                <RadialBarChart cx="50%" cy="50%" innerRadius="60%" outerRadius="100%" data={passGauge} startAngle={90} endAngle={-270}>
+                  <PolarAngleAxis type="number" domain={[0, 100]} angleAxisId={0} tick={false} />
+                  <RadialBar background dataKey="value" cornerRadius={6} angleAxisId={0} fill="oklch(0.72 0.18 145)" />
+                </RadialBarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        </div>
+
+        {/* Critical Defects */}
+        <div className={`rounded-lg border p-3 ${hasCritical ? 'border-red-500/40 bg-red-500/10' : 'border-border/50 bg-muted/20'}`}>
+          <div className={`flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider ${hasCritical ? 'text-red-400' : 'text-muted-foreground'}`}>
+            <AlertTriangle className="h-3 w-3" />
+            Critical Defects
+          </div>
+          <p className={`mt-1 text-lg font-bold tabular-nums ${hasCritical ? 'text-red-400' : ''}`}>
+            {summary.criticalDefects}
+          </p>
+          <p className="text-[10px] text-muted-foreground tabular-nums">{summary.failRate}% fail rate</p>
+        </div>
+
+        {/* Rework Needed */}
+        <div className={`rounded-lg border p-3 ${hasRework ? 'border-amber-500/30 bg-amber-500/5' : 'border-border/50 bg-muted/20'}`}>
+          <div className={`flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider ${hasRework ? 'text-amber-400' : 'text-muted-foreground'}`}>
+            <RefreshCw className="h-3 w-3" />
+            Rework Needed
+          </div>
+          <p className={`mt-1 text-lg font-bold tabular-nums ${hasRework ? 'text-amber-400' : ''}`}>
+            {summary.reworkNeeded}
+          </p>
+          <p className="text-[10px] text-muted-foreground tabular-nums">{summary.avgDefectsPerCheck} defects/check avg</p>
+        </div>
+      </div>
+
+      {/* Trend + Defect breakdown */}
+      <div className="mb-5 grid grid-cols-1 gap-5 lg:grid-cols-3">
+        {/* 14-day pass rate trend */}
+        <div className="lg:col-span-2">
+          <h4 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            QC Pass Rate Trend (14 Days)
+          </h4>
+          <div className="h-[220px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={trend} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="gradQCPass" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="oklch(0.72 0.18 145)" stopOpacity={0.35} />
+                    <stop offset="100%" stopColor="oklch(0.72 0.18 145)" stopOpacity={0} />
+                  </linearGradient>
+                  <linearGradient id="gradQCFail" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="oklch(0.65 0.22 25)" stopOpacity={0.3} />
+                    <stop offset="100%" stopColor="oklch(0.65 0.22 25)" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.3 0.005 260)" opacity={0.25} />
+                <XAxis
+                  dataKey="date"
+                  tick={{ fill: 'oklch(0.6 0.01 260)', fontSize: 9 }}
+                  axisLine={false}
+                  tickLine={false}
+                  interval={1}
+                />
+                <YAxis
+                  tick={{ fill: 'oklch(0.6 0.01 260)', fontSize: 10 }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <RTooltip content={<QCTrendTooltip />} />
+                <Area
+                  type="monotone"
+                  dataKey="passed"
+                  name="Passed"
+                  stroke="oklch(0.72 0.18 145)"
+                  fill="url(#gradQCPass)"
+                  strokeWidth={2.5}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="failed"
+                  name="Failed"
+                  stroke="oklch(0.65 0.22 25)"
+                  fill="url(#gradQCFail)"
+                  strokeWidth={2}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* Defect type donut */}
+        <div>
+          <h4 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            Defect Types
+          </h4>
+          <div className="h-[180px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={defectTypes}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={40}
+                  outerRadius={70}
+                  dataKey="count"
+                  nameKey="type"
+                  paddingAngle={3}
+                  strokeWidth={0}
+                >
+                  {defectTypes.map((entry, i) => (
+                    <RCell key={`def-${i}`} fill={entry.color} />
+                  ))}
+                </Pie>
+                <RTooltip
+                  content={({ active, payload }: { active?: boolean; payload?: Array<{ name: string; value: number; payload: { percentage: number } }> }) =>
+                    active && payload?.length ? (
+                      <div className="rounded-lg border border-border/50 bg-background/95 px-3 py-2 text-xs shadow-xl">
+                        <p className="font-medium">{payload[0].name}</p>
+                        <p className="tabular-nums text-muted-foreground">{payload[0].value} defects · {payload[0].payload.percentage}%</p>
+                      </div>
+                    ) : null
+                  }
+                />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="mt-2 space-y-1 max-h-[100px] overflow-y-auto scrollbar-thin">
+            {defectTypes.map(d => (
+              <div key={d.type} className="flex items-center justify-between text-[11px]">
+                <span className="flex items-center gap-1.5 min-w-0">
+                  <span className="h-2 w-2 rounded-sm shrink-0" style={{ backgroundColor: d.color }} />
+                  <span className="text-muted-foreground truncate">{d.type}</span>
+                </span>
+                <span className="tabular-nums font-medium shrink-0 ml-2">{d.count} ({d.percentage}%)</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Inspection point analysis + Recent failures */}
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+        {/* Inspection point performance */}
+        <div>
+          <h4 className="mb-3 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            <Bug className="h-3.5 w-3.5" />
+            Inspection Point Performance
+          </h4>
+          <div className="space-y-2">
+            {inspectionPoints.map((ip, i) => {
+              const passColor = ip.passRate >= 90 ? 'text-emerald-400' : ip.passRate >= 75 ? 'text-amber-400' : 'text-red-400'
+              const barColor = ip.passRate >= 90 ? 'bg-emerald-500' : ip.passRate >= 75 ? 'bg-amber-500' : 'bg-red-500'
+              return (
+                <div key={ip.point} className="animate-slide-in rounded-lg border border-border/40 bg-muted/20 p-2.5" style={{ animationDelay: `${i * 60}ms` }}>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-medium">{ip.point}</span>
+                    <span className={`text-xs font-bold tabular-nums ${passColor}`}>{ip.passRate}%</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-[10px] text-muted-foreground mb-1.5">
+                    <span className="tabular-nums">{ip.totalChecks} checks</span>
+                    <span>·</span>
+                    <span className="tabular-nums">{ip.totalPassed}/{ip.totalChecked} passed</span>
+                    <span>·</span>
+                    <span className="text-red-400 tabular-nums">{ip.totalFailed} failed</span>
+                  </div>
+                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted/60">
+                    <div className={`h-full rounded-full transition-all duration-700 ${barColor}`} style={{ width: `${ip.passRate}%` }} />
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+
+        {/* Recent failures */}
+        <div>
+          <h4 className="mb-3 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            <AlertTriangle className="h-3.5 w-3.5 text-red-400" />
+            Recent Failures (Top 5)
+          </h4>
+          <div className="space-y-2">
+            {recentFailures.length === 0 ? (
+              <p className="text-xs text-muted-foreground py-4 text-center">No failures — excellent quality!</p>
+            ) : (
+              recentFailures.map((f, i) => (
+                <div key={f.id} className="animate-slide-in flex items-start gap-2.5 rounded-lg border border-red-500/20 bg-red-500/5 p-2.5" style={{ animationDelay: `${i * 60}ms` }}>
+                  <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-red-400 mt-0.5" />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-medium truncate">{f.styleName || 'Unknown'}</span>
+                      <span className="text-xs font-bold tabular-nums text-red-400 shrink-0">{f.failedQty} failed</span>
+                    </div>
+                    <div className="mt-0.5 flex items-center gap-2 text-[10px] text-muted-foreground">
+                      <span>{f.checkNo}</span>
+                      <span>·</span>
+                      <span>{f.inspectionPoint}</span>
+                    </div>
+                    <div className="mt-0.5 flex items-center gap-2 text-[10px]">
+                      {f.defectType && (
+                        <span className="rounded bg-red-500/15 px-1.5 py-0.5 text-red-400 font-medium">{f.defectType}</span>
+                      )}
+                      <span className={`rounded px-1.5 py-0.5 font-medium ${
+                        f.severity === 'Critical' ? 'bg-red-500/20 text-red-400' :
+                        f.severity === 'Major' ? 'bg-orange-500/20 text-orange-400' :
+                        'bg-amber-500/20 text-amber-400'
+                      }`}>
+                        {f.severity}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Quality alert */}
+      {hasCritical && (
+        <div className="mt-4 flex items-start gap-2.5 rounded-lg border border-red-500/30 bg-red-500/5 p-3 animate-slide-in">
+          <AlertTriangle className="h-4 w-4 shrink-0 text-red-400 mt-0.5" />
+          <div className="text-xs">
+            <p className="font-semibold text-red-400">Critical Quality Issues Detected</p>
+            <p className="text-muted-foreground mt-0.5">
+              <span className="font-medium text-foreground">{summary.criticalDefects} critical defect{summary.criticalDefects !== 1 ? 's' : ''}</span>{' '}
+              identified across {summary.totalChecks} inspections. Top defect types:{' '}
+              {defectTypes.slice(0, 2).map(d => d.type).join(', ')}.{' '}
+              {hasRework && `${summary.reworkNeeded} inspection${summary.reworkNeeded !== 1 ? 's' : ''} require rework. `}
+              Review production processes and implement corrective actions to improve quality.
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

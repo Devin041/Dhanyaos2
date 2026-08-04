@@ -739,3 +739,113 @@
 4. **Customer Insights** (Round 5) — `/api/customers/insights` — 5 segments, LTV, payment scores, revenue trends
 5. **Production Efficiency** (Round 6) — `/api/production/efficiency` — Stage analysis, bottleneck detection, at-risk jobs
 6. **Executive Analytics Hub** (Round 7) — `/api/analytics/hub` — Unified command-center view consolidating all 5 analytics + priority alerts
+
+---
+
+## Task ID: 15 (Cron: 15-min webDevReview)
+**Agent:** Main Agent (Z.ai Code) — automated review round 8
+**Task:** Assess project status, QA test, add Quality Control Dashboard, improve styling
+
+### Work Log:
+
+**1. QA Verification:**
+- Verified dev server running healthy (next-server v16.1.3)
+- Verified all analytics endpoints return 200 (dashboard, analytics/hub, quality)
+- App remains stable from round 7 — no new bugs found
+
+**2. New Feature — Quality Control Dashboard (API + Widget):**
+
+- Created new API endpoint `/api/quality/dashboard` (`src/app/api/quality/dashboard/route.ts`)
+  - Aggregates QC inspection metrics across pass/fail rates, defect types, severity, inspection points, and trends
+  - Computes:
+    - Overall pass rate, total checks, total checked/passed/failed units
+    - Quality score (0-100) using weighted formula: passRate * 0.6 + 40 - criticalPenalty - conditionalPenalty
+    - Grade: A+ (≥95), A (≥90), B+ (≥85), B (≥80), C+ (≥75), C (≥70), D (≥60), F (<60)
+    - Defect type breakdown (count + percentage, color-coded)
+    - Severity distribution (Critical/Major/Minor)
+    - Inspection point analysis (pass rate per stage, sorted by failures)
+    - 14-day QC trend (daily checked/passed/failed/passRate)
+    - Inspector performance (checks, pass rate, avg checked)
+    - Recent failures (top 5 by failed quantity)
+  - Uses `isMissingTableError()` for graceful degradation
+  - Verified with real data: 24 inspections, 779 units checked, 90.9% pass rate, 6 critical defects, 12 rework needed, quality score 73/100 (Grade C), top defects: Embroidery Error (25.4%), Color Variation (25.4%), Stitching Defect (14.1%)
+
+- Added `QualityDashboardWidget` component to Quality Control module (`src/components/modules/quality-control.tsx`)
+  - Premium card with "Smart QA" badge and Gauge icon with glow ring
+  - 4-metric grid with radial gauges:
+    - Quality Score (color-coded gauge: green ≥90, amber ≥75, red below, shows score + grade)
+    - Pass Rate (emerald radial gauge, shows % + passed/checked units)
+    - Critical Defects (red if present, shows count + fail rate)
+    - Rework Needed (amber if present, shows count + avg defects/check)
+  - Two-column layout:
+    - Left (2/3): Area chart "QC Pass Rate Trend (14 Days)" with dual gradient fills (emerald passed + red failed)
+    - Right (1/3): Donut pie chart "Defect Types" with scrollable legend (color-coded, count + percentage)
+  - Inspection Point Performance list:
+    - Each point shows pass rate, check count, passed/checked/failed units
+    - Color-coded pass rate (green ≥90, amber ≥75, red below)
+    - Progress bar with threshold-based color
+    - Staggered slide-in animation
+  - Recent Failures list (top 5):
+    - Red-tinted cards with AlertTriangle icon
+    - Style name, failed quantity, check number, inspection point
+    - Defect type badge (red) + severity badge (Critical=red, Major=orange, Minor=amber)
+    - Staggered slide-in animation
+  - Critical quality alert banner (red, animated) when critical defects exist, with top defect types and rework count
+  - Custom tooltips for charts
+  - Fully responsive
+
+**3. Styling Improvements:**
+- Applied `premium-card` class (gradient bg, hover lift, sheen sweep)
+- Used `glow-ring` on Gauge icon for radial glow on hover
+- RadialBarChart gauges for quality score (color-coded) and pass rate (emerald)
+- Dual-gradient area chart (emerald passed + red failed)
+- Donut pie chart with color-coded defect types and scrollable legend
+- Color-coded pass rates by threshold (green/amber/red)
+- Defect type badges with severity-based colors
+- Red-tinted failure cards with AlertTriangle icons
+- Staggered slide-in animations throughout
+- Consistent tabular-nums for all numeric values
+
+### Stage Summary:
+- **QA Status:** ✅ App stable, no new bugs, all previous features intact
+- **New Feature:** Quality Control Dashboard (API + Widget) — fully functional with real data (24 inspections, 90.9% pass rate, Grade C)
+- **Styling:** Premium card, radial gauges, dual-gradient trend chart, donut defect chart, color-coded performance bars, animated alerts, glow effects
+- **Verification:** Widget renders with "SMART QA" badge, all 4 metric cards with gauges, 14-day trend chart, defect donut, inspection point performance, recent failures with real data (Embroidery Error, Color Variation, Tunic Kurti, etc.)
+
+### Verification Results:
+- QC Dashboard API returns HTTP 200 with real data ✓
+- Widget renders "Quality Control Dashboard" heading + "SMART QA" badge ✓
+- "24 inspections · 779 units checked · 90.9% pass rate · Grade C" subtitle ✓
+- 4 metric cards with radial gauges (QUALITY SCORE 73, PASS RATE 90.9%, CRITICAL DEFECTS 6, REWORK NEEDED 12) ✓
+- QC Pass Rate Trend area chart renders (14 days) ✓
+- Defect Types donut chart renders with legend (Embroidery Error, Color Variation, Stitching Defect, etc.) ✓
+- Inspection Point Performance list renders (Fabric Check, Cutting Check, Final Inspection, etc.) ✓
+- Recent Failures list renders with real jobs (JOB-0012 Tunic Kurti - Linen, etc.) ✓
+- Critical quality alert banner renders ✓
+- No browser console errors ✓
+- No 500 server errors ✓
+
+### Unresolved Issues / Risks:
+1. **Missing Supabase tables:** `CapitalInvestment`, `SupplierReturn`, `CustomerReturn`, `FinishedGood` still don't exist (gracefully returning empty data)
+2. **Pre-existing lint error:** `src/components/module-resolver.tsx:226` react-hooks/set-state-in-effect warning — pre-existing from cloned repo
+3. **Memory usage:** Server stable at ~2.5GB RAM
+4. **Grade C quality:** Quality score 73/100 (Grade C) indicates room for improvement. Top defects are Embroidery Error and Color Variation (25.4% each) — these production processes need attention
+5. **Single inspector:** All 24 checks done by "QC Inspector" — no multi-inspector comparison data yet
+
+### Priority Recommendations for Next Phase:
+1. **Create missing Supabase tables** — run SQL migrations for CapitalInvestment, SupplierReturn, CustomerReturn, FinishedGood
+2. **Enhance AI Agent** — integrate all 7 analytics (including QC) into AI advisor insights
+3. **Add export functionality** — allow exporting all analytics data to Excel/PDF
+4. **Start the websocket mini-service** for real-time notifications
+5. **Add Collections Management module** — track collection efforts for At-Risk customers
+6. **Polish mobile responsiveness** — verify all new widgets work well on mobile viewport
+7. **Add Cost Analysis dashboard** — track cost breakdowns, variance analysis, cost trends
+
+### Analytics Features Summary (Rounds 2-8):
+1. **Cash Flow Forecast** (Round 2) — `/api/cashflow/forecast` — 30/60/90-day projection with breakeven detection
+2. **Inventory Aging** (Round 3) — `/api/inventory/aging` — 4 age buckets, dead stock detection
+3. **Supplier Performance** (Round 4) — `/api/suppliers/performance` — Composite scores, tier classification, radar profiles
+4. **Customer Insights** (Round 5) — `/api/customers/insights` — 5 segments, LTV, payment scores, revenue trends
+5. **Production Efficiency** (Round 6) — `/api/production/efficiency` — Stage analysis, bottleneck detection, at-risk jobs
+6. **Executive Analytics Hub** (Round 7) — `/api/analytics/hub` — Unified command-center view consolidating all 5 analytics
+7. **Quality Control Dashboard** (Round 8) — `/api/quality/dashboard` — Pass/fail rates, defect analysis, inspection trends, rework tracking
