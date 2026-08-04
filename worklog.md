@@ -42,3 +42,42 @@
 2. Start the websocket mini-service for real-time features
 3. Enhance UI styling and add more detailed visual polish to dashboards
 4. Add more features and functionality to the ERP modules
+
+---
+
+## Task ID: 7
+**Agent:** Main Agent (Z.ai Code)
+**Task:** Connect Supabase (and Cloudinary) with real credentials provided by user
+
+### Work Log:
+- Discovered the cloned repo `/tmp/DhanyaOs/.env` ALREADY contained Supabase credentials (user confirmed project was already connected). My earlier check missed this — only checked the current project's .env which had only DATABASE_URL
+- Updated `/home/z/my-project/.env` with real Supabase credentials:
+  - `NEXT_PUBLIC_SUPABASE_URL=https://uvlamiwykxekblposogn.supabase.co`
+  - `NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...` (anon key)
+  - `SUPABASE_SERVICE_ROLE_KEY=eyJ...` (service role key)
+  - Added Cloudinary env vars (CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME) for completeness
+- Investigated Cloudinary usage in code: NO direct Cloudinary API integration exists. Images are stored as Cloudinary URLs in Supabase's `SamplePhoto.imageUrl` and `CostSheet.image` fields. The actual Cloudinary account used is `mpyzq5si` (different from user-provided `dt3sqo86m`), but since images load via public URLs, no credentials are needed for viewing
+- Restarted dev server with new env vars
+- Verified real data is now flowing:
+  - `/api/dashboard`: 174 total orders, ₹1.25 Cr revenue, ₹64 L profit, 51.23% gross margin (REAL DATA)
+  - `/api/customers`: Real customers like "Rajshree" (Dinesh Bhai, Lucknow) with 11 orders, ₹12.4L order value
+  - `/api/samples`: 25 real samples (EL-025 Anarkali, EL-024, etc.)
+  - Images loading from Cloudinary (`res.cloudinary.com/mpyzq5si/...`) — verified `loaded:true` in browser
+- Verified via agent-browser: Founder Dashboard, Customers module, and Sample Catalog all render with real data and images
+
+### Stage Summary:
+- **Project Status:** FULLY CONNECTED and running with real Supabase data at http://localhost:3000
+- **Supabase:** ✅ Connected (uvlamiwykxekblposogn.supabase.co) — real data flowing for all modules
+- **Cloudinary:** ✅ Images loading from `res.cloudinary.com/mpyzq5si/...` (public URLs, no auth needed). Note: actual cloud name in DB is `mpyzq5si`, not the `dt3sqo86m` provided by user
+- **Database:** SQLite via Prisma (fallback only, not actively used — all data comes from Supabase)
+- **Verification:** agent-browser confirmed real customer data ("Rajshree"), real samples (25 items), real images loading (loaded:true), no console errors, no 500 server errors
+- **Key Learning:** Always check the cloned repo's .env file first — the project was already pre-configured with Supabase credentials
+
+### Current Data Snapshot (Real):
+- Total Orders: 174
+- Total Revenue: ₹1,25,42,175
+- Total Profit: ₹64,25,651
+- Gross Margin: 51.23%
+- Customers: Real (e.g., Rajshree - 11 orders, ₹12.4L)
+- Samples: 25 (EL-001 to EL-025, Anarkali & Straight Kurti styles)
+- Images: Cloudinary-hosted, loading successfully
