@@ -627,3 +627,115 @@
 3. **Supplier Performance** (Round 4) — `/api/suppliers/performance` — Composite scores, tier classification, radar profiles
 4. **Customer Insights** (Round 5) — `/api/customers/insights` — 5 segments, LTV, payment scores, revenue trends
 5. **Production Efficiency** (Round 6) — `/api/production/efficiency` — Stage analysis, bottleneck detection, at-risk jobs
+
+---
+
+## Task ID: 14 (Cron: 15-min webDevReview)
+**Agent:** Main Agent (Z.ai Code) — automated review round 7
+**Task:** Assess project status, QA test, add Executive Analytics Hub, improve styling
+
+### Work Log:
+
+**1. QA Verification:**
+- Verified dev server running healthy (next-server v16.1.3)
+- Verified all 5 analytics endpoints return 200 (cashflow/forecast, inventory/aging, suppliers/performance, customers/insights, production/efficiency)
+- App remains stable from round 6 — no new bugs found
+
+**2. New Feature — Executive Analytics Hub (API + Widget):**
+
+- Created new API endpoint `/api/analytics/hub` (`src/app/api/analytics/hub/route.ts`)
+  - Consolidates all 5 analytics modules into a single command-center response
+  - Aggregates in one request:
+    1. **Business Health Score** — 5 dimensions (Profitability, Liquidity, Collections, Operations, Risk) → overall score + label + color
+    2. **Cash Flow Snapshot** — currentBalance, 30-day projection, runway days, avg daily net, risk level (low/medium/high)
+    3. **Inventory Health** — totalValue, totalItems, deadStockValue/Pct, freshPct, avgAgeDays
+    4. **Supply Chain** — totalSuppliers, avgScore, topSupplier + score, outstandingPOs + value
+    5. **Customer Pulse** — totalCustomers, totalRevenue, atRiskCount, topCustomer + revenue, avgPaymentRate, repeatRate
+    6. **Production Status** — totalJobs, completionPct, efficiency, bottleneck, atRiskJobs, throughput
+  - Auto-generates priority alerts (critical/warning/info) based on thresholds:
+    - Cash flow risk (runway < 30 days or projected balance < 0)
+    - Dead stock alert (>20% of inventory value)
+    - At-risk customers (count > 0)
+    - Production behind schedule (at-risk jobs > 0)
+  - Returns compact 6-metric array for quick display
+  - Verified with real data: Health 55/100 (Moderate), Cash ₹12.48L → ₹10.37L (177d runway), Inventory ₹6.54L (100% fresh), Suppliers 56/100 avg, Customers ₹2.17Cr (6 at-risk), Production 69.7% (7 at-risk, Embroidery bottleneck), 2 priority alerts
+
+- Added `ExecutiveAnalyticsHub` widget to Founder Dashboard (`src/components/dashboard/founder-dashboard.tsx`)
+  - Premium card with "Command Center" badge and Sparkles icon with glow ring
+  - "Live · Auto-refresh 60s" indicator with pulsing dot
+  - 6 clickable domain cards in responsive grid (2 cols mobile, 3 cols tablet, 6 cols desktop):
+    1. **Health** — score/100, label, 5 mini dimension bars (color-coded by threshold)
+    2. **Cash** — current balance, 30-day projection, daily net trend (↑/↓ with color), runway days
+    3. **Inventory** — total value, item count + avg age, fresh% + dead% indicators
+    4. **Suppliers** — avg score/100, active count, outstanding POs + value
+    5. **Customers** — total revenue, count + top customer, payment rate + at-risk count
+    6. **Production** — completion %, efficiency + throughput, at-risk count + bottleneck stage
+  - Each card is a button that navigates to the corresponding detailed module (cashflow, inventory, suppliers, customers, production)
+  - Color-coded values per card based on health thresholds
+  - Staggered slide-in animation (60ms intervals)
+  - Priority Alerts section (top 3):
+    - Severity-coded (critical=red, warning=amber, info=sky)
+    - Pulsing severity dot, category label, title, message (line-clamp-2)
+    - Animated slide-in
+  - Footer legend with health status colors (Healthy/Warning/Critical)
+  - Hover effects: border-primary, shadow lift
+  - Fully responsive
+
+**3. Styling Improvements:**
+- Applied `premium-card` class (gradient bg, hover lift, sheen sweep)
+- Used `glow-ring` on Sparkles icon for radial glow on hover
+- 6 domain cards with consistent styling: border, muted bg, hover border-primary + shadow
+- Color-coded values per card (green/amber/red based on thresholds)
+- Mini dimension bars in Health card (5 bars, color + opacity by score)
+- Pulsing severity dots in alerts (animate-pulse-soft)
+- Staggered slide-in animations for cards and alerts
+- "Live" indicator with pulsing emerald dot
+- Footer legend with color dots
+- Consistent tabular-nums for all numeric values
+- Compact layout: all 6 domains + alerts visible without scrolling on desktop
+
+### Stage Summary:
+- **QA Status:** ✅ App stable, no new bugs, all previous features intact
+- **New Feature:** Executive Analytics Hub (API + Widget) — consolidates all 5 analytics into one command-center view on Founder Dashboard
+- **Styling:** Premium card, 6 clickable domain cards, color-coded values, mini dimension bars, pulsing alerts, staggered animations, glow effects
+- **Verification:** Widget renders with "COMMAND CENTER" badge, all 6 domain cards with real data, 2 priority alerts, click navigation works (Production card → Production module)
+
+### Verification Results:
+- Analytics Hub API returns HTTP 200 with real consolidated data ✓
+- Widget renders "Executive Analytics Hub" heading + "COMMAND CENTER" badge ✓
+- "Unified view across Cash Flow · Inventory · Supply Chain · Customers · Production" subtitle ✓
+- "Live · Auto-refresh 60s" indicator renders ✓
+- 6 domain cards render with real data:
+  - HEALTH: 55/100 Moderate ✓
+  - INVENTORY: 6.5L, 10 items, 8d, 100% fresh ✓
+  - SUPPLIERS: 56/100, 6 active, 15 POs, 6.0L ✓
+  - CUSTOMERS: 2.2Cr, 10 customers, Top: Meera Fashio…, 24.8% paid, 6 at-risk ✓
+  - PRODUCTION: 69.7%, 77.9% eff, 135.8/d, 7 at-risk, Embroidery ✓
+- Priority Alerts section renders (2 alerts: At-Risk Customers, Production Behind Schedule) ✓
+- Click navigation works (Production card → Production Efficiency Dashboard) ✓
+- No browser console errors ✓
+- No 500 server errors ✓
+
+### Unresolved Issues / Risks:
+1. **Missing Supabase tables:** `CapitalInvestment`, `SupplierReturn`, `CustomerReturn`, `FinishedGood` still don't exist (gracefully returning empty data)
+2. **Pre-existing lint error:** `src/components/module-resolver.tsx:226` react-hooks/set-state-in-effect warning — pre-existing from cloned repo
+3. **Memory usage:** Server stable at ~2.5GB RAM
+4. **Hub API response time:** ~1.6s (aggregates 6 data sources). Acceptable for a 60s auto-refresh interval
+5. **Health score calculation:** Simplified in hub (uses aggregated KPIs). The detailed BusinessHealthScore widget below uses the same formula — both show 55/100 consistently
+
+### Priority Recommendations for Next Phase:
+1. **Create missing Supabase tables** — run SQL migrations for CapitalInvestment, SupplierReturn, CustomerReturn, FinishedGood
+2. **Enhance AI Agent** — integrate all analytics (including hub) into AI advisor insights for natural language queries
+3. **Add export functionality** — allow exporting all analytics data to Excel/PDF
+4. **Start the websocket mini-service** for real-time notifications
+5. **Add Collections Management module** — track collection efforts for At-Risk customers
+6. **Add Quality Control dashboard** — track QC pass/fail rates, defect types, rework cycles
+7. **Polish mobile responsiveness** — verify hub widget works well on mobile viewport (6 cards stack to 2 cols)
+
+### Analytics Features Summary (Rounds 2-7):
+1. **Cash Flow Forecast** (Round 2) — `/api/cashflow/forecast` — 30/60/90-day projection with breakeven detection
+2. **Inventory Aging** (Round 3) — `/api/inventory/aging` — 4 age buckets, dead stock detection
+3. **Supplier Performance** (Round 4) — `/api/suppliers/performance` — Composite scores, tier classification, radar profiles
+4. **Customer Insights** (Round 5) — `/api/customers/insights` — 5 segments, LTV, payment scores, revenue trends
+5. **Production Efficiency** (Round 6) — `/api/production/efficiency` — Stage analysis, bottleneck detection, at-risk jobs
+6. **Executive Analytics Hub** (Round 7) — `/api/analytics/hub` — Unified command-center view consolidating all 5 analytics + priority alerts

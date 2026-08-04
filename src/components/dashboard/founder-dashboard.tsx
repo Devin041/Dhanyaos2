@@ -366,6 +366,261 @@ const fallbackInsights: string[] = [
   'Working capital is healthy. Consider deploying surplus cash into short-term fabric inventory for upcoming season orders.',
 ]
 
+// ─── Executive Analytics Hub (NEW FEATURE) ───────────────────────────────────
+// Consolidates all 5 analytics modules (cash flow, inventory, suppliers,
+// customers, production) into a single command-center widget for the Founder
+// Dashboard.  Shows 6 domain cards + priority alerts in one glance.
+
+const ICON_MAP: Record<string, React.ElementType> = {
+  Activity,
+  Wallet,
+  Package,
+  Truck: (props: any) => <svg {...props} />,
+  Users: (props: any) => <svg {...props} />,
+  Factory,
+}
+
+function ExecutiveAnalyticsHub({ hub, onNavigate }: { hub: any; onNavigate: (v: DashboardView) => void }) {
+  const { healthScore, cashFlow, inventory, supplyChain, customers, production, alerts, metrics } = hub
+
+  const severityConfig = {
+    critical: { color: 'oklch(0.65 0.22 25)', bg: 'bg-red-500/10', border: 'border-red-500/40', text: 'text-red-400' },
+    warning: { color: 'oklch(0.8 0.15 75)', bg: 'bg-amber-500/10', border: 'border-amber-500/40', text: 'text-amber-400' },
+    info: { color: 'oklch(0.7 0.15 250)', bg: 'bg-sky-500/10', border: 'border-sky-500/40', text: 'text-sky-400' },
+  }
+
+  return (
+    <div className="premium-card rounded-xl p-5">
+      {/* Header */}
+      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-3">
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/15 glow-ring">
+            <Sparkles className="h-5 w-5 text-primary" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-semibold">Executive Analytics Hub</h3>
+              <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary">
+                <Sparkles className="h-2.5 w-2.5" />
+                Command Center
+              </span>
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              Unified view across Cash Flow · Inventory · Supply Chain · Customers · Production
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse-soft" />
+          Live · Auto-refresh 60s
+        </div>
+      </div>
+
+      {/* 6 Domain Cards Grid */}
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
+        {/* Health Score */}
+        <button
+          onClick={() => onNavigate('founder')}
+          className="animate-slide-in group rounded-lg border border-border/50 bg-muted/20 p-3 text-left transition-all hover:border-primary/40 hover:shadow-md"
+          style={{ animationDelay: '0ms' }}
+        >
+          <div className="flex items-center justify-between">
+            <Activity className="h-3.5 w-3.5" style={{ color: healthScore.color }} />
+            <span className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">Health</span>
+          </div>
+          <p className="mt-1.5 text-lg font-bold tabular-nums" style={{ color: healthScore.color }}>
+            {healthScore.overall}
+            <span className="text-[10px] text-muted-foreground">/100</span>
+          </p>
+          <p className="text-[10px] text-muted-foreground">{healthScore.label}</p>
+          {/* Mini dimension dots */}
+          <div className="mt-2 flex items-center gap-0.5">
+            {healthScore.dimensions.map((d: any, i: number) => (
+              <div
+                key={i}
+                className="h-1 flex-1 rounded-full transition-all"
+                style={{
+                  backgroundColor: d.score >= 75 ? 'oklch(0.72 0.18 145)' : d.score >= 50 ? 'oklch(0.8 0.15 75)' : 'oklch(0.65 0.22 25)',
+                  opacity: 0.6 + (d.score / 100) * 0.4,
+                }}
+                title={`${d.label}: ${d.score}`}
+              />
+            ))}
+          </div>
+        </button>
+
+        {/* Cash Flow */}
+        <button
+          onClick={() => onNavigate('cashflow' as DashboardView)}
+          className="animate-slide-in group rounded-lg border border-border/50 bg-muted/20 p-3 text-left transition-all hover:border-primary/40 hover:shadow-md"
+          style={{ animationDelay: '60ms' }}
+        >
+          <div className="flex items-center justify-between">
+            <Wallet className="h-3.5 w-3.5" style={{ color: metrics[1].color }} />
+            <span className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">Cash</span>
+          </div>
+          <p className="mt-1.5 text-sm font-bold tabular-nums" style={{ color: metrics[1].color }}>
+            {formatCompact(cashFlow.currentBalance)}
+          </p>
+          <p className="text-[10px] text-muted-foreground tabular-nums">
+            30d: {formatCompact(cashFlow.projected30Day)}
+          </p>
+          <div className="mt-1 flex items-center gap-1 text-[9px]">
+            <span className={cashFlow.avgDailyNet >= 0 ? 'text-emerald-400' : 'text-red-400'}>
+              {cashFlow.avgDailyNet >= 0 ? '↑' : '↓'} {formatCompact(Math.abs(cashFlow.avgDailyNet))}/d
+            </span>
+            {cashFlow.runwayDays !== null && (
+              <span className="text-muted-foreground">· {cashFlow.runwayDays}d</span>
+            )}
+          </div>
+        </button>
+
+        {/* Inventory */}
+        <button
+          onClick={() => onNavigate('inventory' as DashboardView)}
+          className="animate-slide-in group rounded-lg border border-border/50 bg-muted/20 p-3 text-left transition-all hover:border-primary/40 hover:shadow-md"
+          style={{ animationDelay: '120ms' }}
+        >
+          <div className="flex items-center justify-between">
+            <Warehouse className="h-3.5 w-3.5" style={{ color: metrics[2].color }} />
+            <span className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">Inventory</span>
+          </div>
+          <p className="mt-1.5 text-sm font-bold tabular-nums" style={{ color: metrics[2].color }}>
+            {formatCompact(inventory.totalValue)}
+          </p>
+          <p className="text-[10px] text-muted-foreground tabular-nums">{inventory.totalItems} items · {inventory.avgAgeDays}d</p>
+          <div className="mt-1 flex items-center gap-1 text-[9px]">
+            <span className="text-emerald-400">{inventory.freshPct}% fresh</span>
+            {inventory.deadStockPct > 0 && (
+              <span className="text-red-400">· {inventory.deadStockPct}% dead</span>
+            )}
+          </div>
+        </button>
+
+        {/* Supply Chain */}
+        <button
+          onClick={() => onNavigate('suppliers' as DashboardView)}
+          className="animate-slide-in group rounded-lg border border-border/50 bg-muted/20 p-3 text-left transition-all hover:border-primary/40 hover:shadow-md"
+          style={{ animationDelay: '180ms' }}
+        >
+          <div className="flex items-center justify-between">
+            <Package className="h-3.5 w-3.5" style={{ color: metrics[3].color }} />
+            <span className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">Suppliers</span>
+          </div>
+          <p className="mt-1.5 text-sm font-bold tabular-nums" style={{ color: metrics[3].color }}>
+            {supplyChain.avgScore}<span className="text-[10px] text-muted-foreground">/100</span>
+          </p>
+          <p className="text-[10px] text-muted-foreground truncate" title={supplyChain.topSupplier}>
+            {supplyChain.totalSuppliers} active
+          </p>
+          <p className="text-[9px] text-amber-400 tabular-nums mt-0.5">
+            {supplyChain.outstandingPOs} POs · {formatCompact(supplyChain.outstandingValue)}
+          </p>
+        </button>
+
+        {/* Customers */}
+        <button
+          onClick={() => onNavigate('customers' as DashboardView)}
+          className="animate-slide-in group rounded-lg border border-border/50 bg-muted/20 p-3 text-left transition-all hover:border-primary/40 hover:shadow-md"
+          style={{ animationDelay: '240ms' }}
+        >
+          <div className="flex items-center justify-between">
+            <UserPlus className="h-3.5 w-3.5" style={{ color: metrics[4].color }} />
+            <span className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">Customers</span>
+          </div>
+          <p className="mt-1.5 text-sm font-bold tabular-nums" style={{ color: metrics[4].color }}>
+            {formatCompact(customers.totalRevenue)}
+          </p>
+          <p className="text-[10px] text-muted-foreground truncate" title={customers.topCustomer}>
+            {customers.totalCustomers} · Top: {customers.topCustomer.length > 12 ? customers.topCustomer.substring(0, 12) + '…' : customers.topCustomer}
+          </p>
+          <div className="mt-1 flex items-center gap-1 text-[9px]">
+            <span className={customers.avgPaymentRate >= 50 ? 'text-emerald-400' : 'text-red-400'}>
+              {customers.avgPaymentRate}% paid
+            </span>
+            {customers.atRiskCount > 0 && (
+              <span className="text-red-400">· {customers.atRiskCount} at-risk</span>
+            )}
+          </div>
+        </button>
+
+        {/* Production */}
+        <button
+          onClick={() => onNavigate('production' as DashboardView)}
+          className="animate-slide-in group rounded-lg border border-border/50 bg-muted/20 p-3 text-left transition-all hover:border-primary/40 hover:shadow-md"
+          style={{ animationDelay: '300ms' }}
+        >
+          <div className="flex items-center justify-between">
+            <Factory className="h-3.5 w-3.5" style={{ color: metrics[5].color }} />
+            <span className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">Production</span>
+          </div>
+          <p className="mt-1.5 text-sm font-bold tabular-nums" style={{ color: metrics[5].color }}>
+            {production.completionPct}%
+          </p>
+          <p className="text-[10px] text-muted-foreground tabular-nums">{production.efficiency}% eff · {production.throughput}/d</p>
+          <div className="mt-1 flex items-center gap-1 text-[9px]">
+            <span className={production.atRiskJobs > 0 ? 'text-amber-400' : 'text-emerald-400'}>
+              {production.atRiskJobs} at-risk
+            </span>
+            <span className="text-muted-foreground">· {production.bottleneck.substring(0, 8)}</span>
+          </div>
+        </button>
+      </div>
+
+      {/* Priority Alerts */}
+      {alerts && alerts.length > 0 && (
+        <div className="mt-4">
+          <h4 className="mb-2 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            <AlertTriangle className="h-3 w-3" />
+            Priority Alerts ({alerts.length})
+          </h4>
+          <div className="space-y-1.5">
+            {alerts.slice(0, 3).map((alert: any) => {
+              const cfg = severityConfig[alert.severity as keyof typeof severityConfig]
+              return (
+                <div
+                  key={alert.id}
+                  className={`animate-slide-in flex items-start gap-2 rounded-lg border ${cfg.border} ${cfg.bg} p-2`}
+                >
+                  <span
+                    className="mt-0.5 inline-block h-1.5 w-1.5 shrink-0 rounded-full animate-pulse-soft"
+                    style={{ backgroundColor: cfg.color }}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className={`text-[10px] font-semibold uppercase tracking-wide ${cfg.text}`}>
+                        {alert.category}
+                      </span>
+                      <span className="text-[10px] font-medium text-foreground">{alert.title}</span>
+                    </div>
+                    <p className="mt-0.5 text-[10px] text-muted-foreground line-clamp-2">{alert.message}</p>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Footer */}
+      <div className="mt-4 flex items-center justify-between border-t border-border/30 pt-3 text-[10px] text-muted-foreground">
+        <span>Click any card to view detailed analytics</span>
+        <span className="flex items-center gap-3">
+          <span className="flex items-center gap-1">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> Healthy
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="h-1.5 w-1.5 rounded-full bg-amber-500" /> Warning
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="h-1.5 w-1.5 rounded-full bg-red-500" /> Critical
+          </span>
+        </span>
+      </div>
+    </div>
+  )
+}
+
 // ─── Business Health Score (NEW FEATURE) ────────────────────────────────────
 // Aggregates multiple KPIs into a single 0-100 health score with a circular
 // progress ring and per-dimension breakdown bars.  Provides founders with an
@@ -543,6 +798,7 @@ export function FounderDashboard() {
   const [briefLoading, setBriefLoading] = useState(false)
   const [fgKpi, setFgKpi] = useState<any>(null)
   const [fgKpiLoading, setFgKpiLoading] = useState(true)
+  const [hub, setHub] = useState<any>(null)
   const [fetchError, setFetchError] = useState<string | null>(null)
   const retryCountRef = useRef(0)
   const { setActiveView } = useDashboardStore()
@@ -625,11 +881,23 @@ export function FounderDashboard() {
     }
   }, [])
 
+  const fetchHub = useCallback(async () => {
+    try {
+      const res = await fetch('/api/analytics/hub')
+      if (!res.ok) return
+      const json = await res.json()
+      if (!json.error) setHub(json)
+    } catch {
+      // Hub is optional — fail silently
+    }
+  }, [])
+
   useEffect(() => {
     fetchDashboard()
     fetchInsights()
     fetchBrief()
     fetchFgKpi()
+    fetchHub()
     // Retry aggressively for first 15s, then every 30s
     let attempts = 0
     const fastInterval = setInterval(() => {
@@ -641,9 +909,11 @@ export function FounderDashboard() {
     }, 3000)
     // Slow refresh interval (always running)
     const slowInterval = setInterval(fetchDashboard, 30000)
+    const hubInterval = setInterval(fetchHub, 60000)
     return () => {
       clearInterval(fastInterval)
       clearInterval(slowInterval)
+      clearInterval(hubInterval)
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -693,6 +963,9 @@ export function FounderDashboard() {
           </Button>
         ))}
       </div>
+
+      {/* ─── Executive Analytics Hub (NEW) ────────────────────────── */}
+      {hub && <ExecutiveAnalyticsHub hub={hub} onNavigate={setActiveView} />}
 
       {/* ─── Business Health Score (NEW) ─────────────────────────── */}
       <BusinessHealthScore kpis={kpis} unreadAlerts={unreadAlerts} />
