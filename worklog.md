@@ -526,3 +526,104 @@
 5. **Start the websocket mini-service** for real-time notifications
 6. **Add Collections Management module** — track collection efforts for At-Risk customers, payment follow-ups, dunning workflows
 7. **Polish mobile responsiveness** — verify all new widgets work well on mobile viewport
+
+---
+
+## Task ID: 13 (Cron: 15-min webDevReview)
+**Agent:** Main Agent (Z.ai Code) — automated review round 6
+**Task:** Assess project status, QA test, add Production Efficiency dashboard, improve styling
+
+### Work Log:
+
+**1. QA Verification:**
+- Verified dev server running healthy (next-server v16.1.3)
+- Verified all key endpoints return 200 (dashboard, customers/insights, suppliers/performance, production)
+- App remains stable from round 5 — no new bugs found
+
+**2. New Feature — Production Efficiency Dashboard (API + Widget):**
+
+- Created new API endpoint `/api/production/efficiency` (`src/app/api/production/efficiency/route.ts`)
+  - Aggregates production job metrics across stages, progress, throughput, and bottlenecks
+  - For each job computes:
+    - Progress (completedQty / targetQty)
+    - Days elapsed, days planned, expected progress (time-based)
+    - Efficiency (actual progress / expected progress * 100)
+    - Is behind (progress < expected - 10%)
+    - Is at-risk (behind + not completed + progress < 80%)
+    - Throughput (units per day)
+  - Per-stage stats: job count, total target/completed, avg progress, color-coded
+  - Bottleneck detection: stage with most jobs + lowest avg progress
+  - Summary: totalJobs, completedJobs, overallCompletion, onTimeRate, avgCycleTime, avgEfficiency, totalThroughput, bottleneckStage, atRiskCount
+  - Uses `isMissingTableError()` for graceful degradation
+  - Verified with real data: 12 jobs, 1086/1557 units (69.7% completion), 77.9% avg efficiency, 136 units/day throughput, bottleneck=Embroidery (2 jobs), 7 at-risk jobs
+
+- Added `ProductionEfficiencyWidget` component to Production module (`src/components/modules/production.tsx`)
+  - Premium card with "AI Tracked" badge and Gauge icon with glow ring
+  - 4-metric grid with radial gauges:
+    - Completion (gold radial gauge, shows % + done/active counts)
+    - Efficiency (color-coded radial gauge: green ≥75%, amber ≥50%, red below, shows % + on-time rate)
+    - Throughput (units/day + avg cycle time)
+    - Bottleneck (amber if detected, shows stage name + stuck job count)
+  - Stage-wise Production Analysis:
+    - Bar chart with dual bars per stage (completed solid + target translucent), color-coded by stage
+    - 6 stage progress mini-cards below chart with progress bars, job counts, units
+    - Staggered slide-in animation
+  - Two-column layout:
+    - Left: Top Performers list (by efficiency) with rank badges, progress bars, throughput, color-coded efficiency
+    - Right: At-Risk Jobs list (behind schedule) with red borders, actual vs expected progress bars (red actual + amber expected)
+  - Production Bottleneck alert banner (amber, animated) with actionable recommendations
+  - Custom tooltips for charts
+  - Fully responsive
+
+**3. Styling Improvements:**
+- Applied `premium-card` class (gradient bg, hover lift, sheen sweep)
+- Used `glow-ring` on Gauge icon for radial glow on hover
+- RadialBarChart gauges for completion (gold) and efficiency (color-coded)
+- Dual-bar chart (solid completed + translucent target) with stage colors
+- Color-coded efficiency values (green ≥100%, gold ≥75%, orange ≥50%, red below)
+- At-risk job cards with red borders and dual progress bars (actual vs expected)
+- Top performer cards with emerald rank badges and color-coded progress
+- Staggered slide-in animations throughout
+- Consistent tabular-nums for all numeric values
+
+### Stage Summary:
+- **QA Status:** ✅ App stable, no new bugs, all previous features intact
+- **New Feature:** Production Efficiency Dashboard (API + Widget) — fully functional with real data (12 jobs, 69.7% completion, 77.9% efficiency)
+- **Styling:** Premium card, radial gauges, dual-bar chart, color-coded efficiency, at-risk dual progress bars, animated alerts, glow effects
+- **Verification:** Widget renders with "AI TRACKED" badge, all 4 metric cards with gauges, stage analysis chart, top performers list, at-risk jobs list, bottleneck alert with real job data (JOB-0001 Anarkali Kurti, etc.)
+
+### Verification Results:
+- Production Efficiency API returns HTTP 200 with real data ✓
+- Widget renders "Production Efficiency Dashboard" heading + "AI TRACKED" badge ✓
+- 4 metric cards with radial gauges visible (COMPLETION 69.7%, EFFICIENCY 77.9%, THROUGHPUT 136/day, BOTTLENECK Embroidery) ✓
+- Stage-wise bar chart renders with 6 stages (Cutting, Embroidery, Stitching, Finishing, Packing, Dispatch) ✓
+- Stage progress mini-cards render with progress bars ✓
+- Top Performers list renders with real jobs ✓
+- At-Risk Jobs list renders with red borders and dual progress bars ✓
+- Production Bottleneck alert banner renders ✓
+- Real job data visible (JOB-0001 Anarkali Kurti - Rayon, Tunic Kurti, Palazzo Set, etc.) ✓
+- No browser console errors ✓
+- No 500 server errors ✓
+
+### Unresolved Issues / Risks:
+1. **Missing Supabase tables:** `CapitalInvestment`, `SupplierReturn`, `CustomerReturn`, `FinishedGood` still don't exist (gracefully returning empty data). To enable fully, run SQL migrations in Supabase dashboard
+2. **Pre-existing lint error:** `src/components/module-resolver.tsx:226` react-hooks/set-state-in-effect warning — pre-existing from cloned repo
+3. **Memory usage:** Server stable at ~2.5GB RAM
+4. **High at-risk count:** 7 of 10 active jobs are at-risk (behind schedule). This is expected since all jobs started 27 Jul 2026 (8 days ago) with varying planned durations — the widget correctly flags jobs where actual progress < expected progress
+5. **Efficiency calculation:** Uses daysPlanned from startDate→endDate. For jobs without endDate, defaults to 7 days assumption. Accuracy will improve as more endDate data is available
+
+### Priority Recommendations for Next Phase:
+1. **Create missing Supabase tables** — run SQL migrations for CapitalInvestment, SupplierReturn, CustomerReturn, FinishedGood
+2. **Enhance AI Agent** — integrate all 5 new analytics (insights/aging/forecast/performance/efficiency) into AI advisor insights
+3. **Add export functionality** — allow exporting all analytics data to Excel/PDF
+4. **Start the websocket mini-service** for real-time notifications
+5. **Add Collections Management module** — track collection efforts for At-Risk customers, payment follow-ups, dunning workflows
+6. **Add Quality Control dashboard** — track QC pass/fail rates, defect types, rework cycles
+7. **Polish mobile responsiveness** — verify all new widgets work well on mobile viewport
+
+### Analytics Features Summary (Rounds 3-6):
+1. **Cash Flow Forecast** (Round 2) — `/api/cashflow/forecast` — 30/60/90-day projection with breakeven detection
+2. **Inventory Aging** (Round 3) — `/api/inventory/aging` — 4 age buckets, dead stock detection
+3. **Supplier Performance** (Round 4) — `/api/suppliers/performance` — Composite scores, tier classification, radar profiles
+4. **Customer Insights** (Round 5) — `/api/customers/insights` — 5 segments, LTV, payment scores, revenue trends
+5. **Production Efficiency** (Round 6) — `/api/production/efficiency` — Stage analysis, bottleneck detection, at-risk jobs

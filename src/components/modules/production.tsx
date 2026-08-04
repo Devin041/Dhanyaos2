@@ -50,7 +50,26 @@ import {
   Edit3,
   Truck,
   Shirt,
+  Gauge,
+  Zap,
+  Sparkles,
+  Target,
+  AlertCircle,
+  TrendingDown,
 } from 'lucide-react'
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip as RTooltip,
+  ResponsiveContainer,
+  Cell as RCell,
+  CartesianGrid,
+  RadialBarChart,
+  RadialBar,
+  PolarAngleAxis,
+} from 'recharts'
 import { useDashboardStore } from '@/store/dashboard-store'
 import { toast } from 'sonner'
 
@@ -147,6 +166,61 @@ interface ProductionData {
   statusCounts: Record<string, number>
 }
 
+// ─── Production Efficiency Types (NEW) ──────────────────────────────────────
+
+interface EffStageStat {
+  stage: string
+  jobCount: number
+  totalTarget: number
+  totalCompleted: number
+  avgProgress: number
+  color: string
+}
+
+interface EffJob {
+  id: string
+  jobNo: string
+  styleNo: string
+  styleName: string
+  targetQty: number
+  completedQty: number
+  progress: number
+  stage: string
+  status: string
+  startDate: string
+  endDate: string | null
+  daysElapsed: number
+  daysPlanned: number
+  expectedProgress: number
+  efficiency: number
+  isBehind: boolean
+  isAtRisk: boolean
+  throughput: number
+}
+
+interface EffSummary {
+  totalJobs: number
+  completedJobs: number
+  inProgressJobs: number
+  totalTarget: number
+  totalCompleted: number
+  overallCompletion: number
+  onTimeRate: number
+  avgCycleTime: number
+  avgEfficiency: number
+  totalThroughput: number
+  bottleneckStage: string
+  bottleneckJobCount: number
+  atRiskCount: number
+}
+
+interface EffData {
+  summary: EffSummary
+  stages: EffStageStat[]
+  jobs: EffJob[]
+  statusDist: Array<{ status: string; count: number }>
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function formatNumber(num: number): string {
@@ -209,6 +283,7 @@ export function ProductionModule() {
   // Data
   const [data, setData] = useState<ProductionData | null>(null)
   const [loading, setLoading] = useState(true)
+  const [eff, setEff] = useState<EffData | null>(null)
 
   // Dialogs
   const [selectedJob, setSelectedJob] = useState<ProductionJob | null>(null)
@@ -494,9 +569,21 @@ export function ProductionModule() {
     }
   }, [statusFilter, stageFilter, search])
 
+  const fetchEff = useCallback(async () => {
+    try {
+      const res = await fetch('/api/production/efficiency')
+      if (!res.ok) return
+      const json = await res.json()
+      if (!json.error) setEff(json)
+    } catch {
+      // Efficiency is optional — fail silently
+    }
+  }, [])
+
   useEffect(() => {
     fetchData()
-  }, [fetchData])
+    fetchEff()
+  }, [fetchData, fetchEff])
 
   // ─── Actions ───────────────────────────────────────────────────────────
 
@@ -1948,6 +2035,304 @@ export function ProductionModule() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* ─── Production Efficiency Dashboard (NEW FEATURE) ─────────────── */}
+      {eff && eff.summary.totalJobs > 0 && (
+        <ProductionEfficiencyWidget data={eff} />
+      )}
+    </div>
+  )
+}
+
+// ─── Production Efficiency Widget (NEW FEATURE) ──────────────────────────────
+// Tracks production job progress, stage bottlenecks, throughput, and identifies
+// at-risk jobs that are behind schedule.
+
+function EffChartTooltip({ active, payload, label }: { active?: boolean; payload?: Array<{ name: string; value: number; payload: { jobCount: number; avgProgress: number } }>; label?: string }) {
+  if (!active || !payload?.length) return null
+  const p = payload[0].payload
+  return (
+    <div className="rounded-lg border border-border/50 bg-background/95 backdrop-blur-sm px-3 py-2 text-xs shadow-xl">
+      <p className="mb-1 font-medium">{label}</p>
+      <p className="font-semibold tabular-nums">{payload[0].value} units</p>
+      <p className="text-[10px] text-muted-foreground mt-0.5">
+        {p.jobCount} job{p.jobCount !== 1 ? 's' : ''} · {p.avgProgress}% avg progress
+      </p>
+    </div>
+  )
+}
+
+function getEffColor(efficiency: number): string {
+  if (efficiency >= 100) return 'oklch(0.72 0.18 145)' // green
+  if (efficiency >= 75) return 'oklch(0.8 0.15 75)'   // gold
+  if (efficiency >= 50) return 'oklch(0.75 0.15 65)'  // orange
+  return 'oklch(0.65 0.22 25)'                         // red
+}
+
+function ProductionEfficiencyWidget({ data }: { data: EffData }) {
+  const { summary, stages, jobs, statusDist } = data
+  const hasBottleneck = summary.bottleneckStage !== '—'
+  const hasAtRisk = summary.atRiskCount > 0
+
+  // Top 5 jobs by efficiency (excluding completed)
+  const activeJobs = jobs.filter(j => j.status !== 'Completed')
+  const topPerformers = [...activeJobs].sort((a, b) => b.efficiency - a.efficiency).slice(0, 5)
+  const atRiskJobs = jobs.filter(j => j.isAtRisk).sort((a, b) => a.efficiency - b.efficiency).slice(0, 5)
+
+  // Radial gauge data for overall completion
+  const completionGauge = [{ name: 'completion', value: summary.overallCompletion, fill: 'oklch(0.78 0.14 85)' }]
+  const efficiencyGauge = [{ name: 'efficiency', value: summary.avgEfficiency, fill: 'oklch(0.72 0.18 145)' }]
+
+  return (
+    <div className="premium-card rounded-xl p-5">
+      {/* Header */}
+      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-3">
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/15 glow-ring">
+            <Gauge className="h-5 w-5 text-primary" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-semibold">Production Efficiency Dashboard</h3>
+              <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary">
+                <Sparkles className="h-2.5 w-2.5" />
+                AI Tracked
+              </span>
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              {summary.totalJobs} jobs · {summary.totalCompleted}/{summary.totalTarget} units ({summary.overallCompletion}%) · {summary.avgEfficiency}% efficiency · {summary.totalThroughput} units/day
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Metrics grid with radial gauges */}
+      <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {/* Overall Completion gauge */}
+        <div className="rounded-lg border border-border/50 bg-muted/20 p-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                <Target className="h-3 w-3" />
+                Completion
+              </div>
+              <p className="mt-1 text-lg font-bold tabular-nums">{summary.overallCompletion}%</p>
+              <p className="text-[10px] text-muted-foreground tabular-nums">{summary.completedJobs} done · {summary.inProgressJobs} active</p>
+            </div>
+            <div className="h-14 w-14">
+              <ResponsiveContainer width="100%" height="100%">
+                <RadialBarChart cx="50%" cy="50%" innerRadius="60%" outerRadius="100%" data={completionGauge} startAngle={90} endAngle={-270}>
+                  <PolarAngleAxis type="number" domain={[0, 100]} angleAxisId={0} tick={false} />
+                  <RadialBar background dataKey="value" cornerRadius={6} angleAxisId={0} />
+                </RadialBarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        </div>
+
+        {/* Efficiency gauge */}
+        <div className={`rounded-lg border p-3 ${summary.avgEfficiency >= 75 ? 'border-emerald-500/30 bg-emerald-500/5' : summary.avgEfficiency >= 50 ? 'border-amber-500/30 bg-amber-500/5' : 'border-red-500/30 bg-red-500/5'}`}>
+          <div className="flex items-center justify-between">
+            <div>
+              <div className={`flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider ${summary.avgEfficiency >= 75 ? 'text-emerald-400' : summary.avgEfficiency >= 50 ? 'text-amber-400' : 'text-red-400'}`}>
+                <Gauge className="h-3 w-3" />
+                Efficiency
+              </div>
+              <p className={`mt-1 text-lg font-bold tabular-nums ${summary.avgEfficiency >= 75 ? 'text-emerald-400' : summary.avgEfficiency >= 50 ? 'text-amber-400' : 'text-red-400'}`}>{summary.avgEfficiency}%</p>
+              <p className="text-[10px] text-muted-foreground tabular-nums">On-time: {summary.onTimeRate}%</p>
+            </div>
+            <div className="h-14 w-14">
+              <ResponsiveContainer width="100%" height="100%">
+                <RadialBarChart cx="50%" cy="50%" innerRadius="60%" outerRadius="100%" data={efficiencyGauge} startAngle={90} endAngle={-270}>
+                  <PolarAngleAxis type="number" domain={[0, 100]} angleAxisId={0} tick={false} />
+                  <RadialBar background dataKey="value" cornerRadius={6} angleAxisId={0} fill={getEffColor(summary.avgEfficiency)} />
+                </RadialBarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        </div>
+
+        {/* Throughput */}
+        <div className="rounded-lg border border-border/50 bg-muted/20 p-3">
+          <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+            <Zap className="h-3 w-3" />
+            Throughput
+          </div>
+          <p className="mt-1 text-lg font-bold tabular-nums">{summary.totalThroughput}</p>
+          <p className="text-[10px] text-muted-foreground">units/day · cycle: {summary.avgCycleTime}d</p>
+        </div>
+
+        {/* Bottleneck */}
+        <div className={`rounded-lg border p-3 ${hasBottleneck ? 'border-amber-500/30 bg-amber-500/5' : 'border-border/50 bg-muted/20'}`}>
+          <div className={`flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider ${hasBottleneck ? 'text-amber-400' : 'text-muted-foreground'}`}>
+            <AlertCircle className="h-3 w-3" />
+            Bottleneck
+          </div>
+          <p className={`mt-1 text-sm font-bold ${hasBottleneck ? 'text-amber-400' : ''}`}>
+            {summary.bottleneckStage}
+          </p>
+          <p className="text-[10px] text-muted-foreground tabular-nums">{summary.bottleneckJobCount} jobs stuck</p>
+        </div>
+      </div>
+
+      {/* Stage analysis chart */}
+      <div className="mb-5">
+        <h4 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          Stage-wise Production Analysis
+        </h4>
+        <div className="h-[240px]">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={stages} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.3 0.005 260)" opacity={0.25} />
+              <XAxis
+                dataKey="stage"
+                tick={{ fill: 'oklch(0.6 0.01 260)', fontSize: 9 }}
+                axisLine={false}
+                tickLine={false}
+                interval={0}
+                angle={-15}
+                textAnchor="end"
+                height={50}
+              />
+              <YAxis
+                tick={{ fill: 'oklch(0.6 0.01 260)', fontSize: 10 }}
+                axisLine={false}
+                tickLine={false}
+              />
+              <RTooltip content={<EffChartTooltip />} cursor={{ fill: 'oklch(0.5 0.01 260 / 10%)' }} />
+              <Bar dataKey="totalCompleted" name="Completed" radius={[4, 4, 0, 0]} barSize={28}>
+                {stages.map((s, i) => (
+                  <RCell key={`comp-${i}`} fill={s.color} fillOpacity={0.9} />
+                ))}
+              </Bar>
+              <Bar dataKey="totalTarget" name="Target" radius={[4, 4, 0, 0]} barSize={28}>
+                {stages.map((s, i) => (
+                  <RCell key={`tgt-${i}`} fill={s.color} fillOpacity={0.3} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+        {/* Stage progress bars */}
+        <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+          {stages.map((s, i) => (
+            <div key={s.stage} className="animate-slide-in space-y-1" style={{ animationDelay: `${i * 60}ms` }}>
+              <div className="flex items-center justify-between text-[10px]">
+                <span className="font-medium truncate">{s.stage}</span>
+                <span className="tabular-nums font-semibold" style={{ color: s.color }}>{s.avgProgress}%</span>
+              </div>
+              <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted/60">
+                <div
+                  className="h-full rounded-full transition-all duration-700"
+                  style={{ width: `${s.avgProgress}%`, backgroundColor: s.color }}
+                />
+              </div>
+              <p className="text-[9px] text-muted-foreground tabular-nums">{s.jobCount} jobs · {s.totalCompleted}/{s.totalTarget}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Two columns: Top performers + At-risk jobs */}
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+        {/* Top performers */}
+        <div>
+          <h4 className="mb-3 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            <TrendingUp className="h-3.5 w-3.5 text-emerald-400" />
+            Top Performers (by efficiency)
+          </h4>
+          <div className="space-y-2">
+            {topPerformers.length === 0 ? (
+              <p className="text-xs text-muted-foreground py-4 text-center">No active jobs</p>
+            ) : (
+              topPerformers.map((j, i) => (
+                <div key={j.id} className="animate-slide-in flex items-center gap-3 rounded-lg border border-border/40 bg-muted/20 p-2.5" style={{ animationDelay: `${i * 60}ms` }}>
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-500/15 text-[10px] font-bold text-emerald-400">
+                    #{i + 1}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-medium truncate">{j.styleName}</span>
+                      <span className="text-xs font-bold tabular-nums shrink-0" style={{ color: getEffColor(j.efficiency) }}>
+                        {j.efficiency}%
+                      </span>
+                    </div>
+                    <div className="mt-1 flex items-center gap-2 text-[10px] text-muted-foreground">
+                      <span className="tabular-nums">{j.completedQty}/{j.targetQty}</span>
+                      <span>·</span>
+                      <span>{j.stage}</span>
+                      <span>·</span>
+                      <span className="tabular-nums">{j.throughput}/day</span>
+                    </div>
+                    <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-muted/60">
+                      <div
+                        className="h-full rounded-full transition-all duration-500"
+                        style={{ width: `${Math.min(100, j.progress)}%`, backgroundColor: getEffColor(j.efficiency) }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* At-risk jobs */}
+        <div>
+          <h4 className="mb-3 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            <AlertCircle className="h-3.5 w-3.5 text-red-400" />
+            At-Risk Jobs (behind schedule)
+          </h4>
+          <div className="space-y-2">
+            {atRiskJobs.length === 0 ? (
+              <p className="text-xs text-muted-foreground py-4 text-center">No at-risk jobs — all on track!</p>
+            ) : (
+              atRiskJobs.map((j, i) => (
+                <div key={j.id} className="animate-slide-in flex items-center gap-3 rounded-lg border border-red-500/30 bg-red-500/5 p-2.5" style={{ animationDelay: `${i * 60}ms` }}>
+                  <AlertCircle className="h-4 w-4 shrink-0 text-red-400" />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-medium truncate">{j.styleName}</span>
+                      <span className="text-xs font-bold tabular-nums text-red-400 shrink-0">{j.efficiency}%</span>
+                    </div>
+                    <div className="mt-1 flex items-center gap-2 text-[10px] text-muted-foreground">
+                      <span className="tabular-nums">{j.completedQty}/{j.targetQty}</span>
+                      <span>·</span>
+                      <span>{j.stage}</span>
+                      <span>·</span>
+                      <span className="text-red-400 tabular-nums">{j.progress}% vs {j.expectedProgress}% expected</span>
+                    </div>
+                    <div className="mt-1 flex items-center gap-1">
+                      <div className="h-1 flex-1 overflow-hidden rounded-full bg-muted/60">
+                        <div className="h-full rounded-full bg-red-500/60" style={{ width: `${Math.min(100, j.progress)}%` }} />
+                      </div>
+                      <div className="h-1 w-12 overflow-hidden rounded-full bg-muted/40" title="Expected progress">
+                        <div className="h-full rounded-full bg-amber-500/50" style={{ width: `${Math.min(100, j.expectedProgress)}%` }} />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Bottleneck alert */}
+      {hasBottleneck && (
+        <div className="mt-4 flex items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 animate-slide-in">
+          <AlertCircle className="h-4 w-4 shrink-0 text-amber-400 mt-0.5" />
+          <div className="text-xs">
+            <p className="font-semibold text-amber-400">Production Bottleneck Detected</p>
+            <p className="text-muted-foreground mt-0.5">
+              <span className="font-medium text-foreground">{summary.bottleneckStage}</span> stage has{' '}
+              <span className="font-medium text-amber-400">{summary.bottleneckJobCount} job{summary.bottleneckJobCount !== 1 ? 's' : ''}</span>{' '}
+              in progress. Reallocate resources, add workers, or prioritize these jobs to unblock the production pipeline.
+              {hasAtRisk && ` ${summary.atRiskCount} job${summary.atRiskCount !== 1 ? 's are' : ' is'} behind schedule.`}
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
