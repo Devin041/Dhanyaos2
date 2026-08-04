@@ -71,7 +71,30 @@ import {
   TrendingUp,
   ArrowLeft,
   ImagePlus,
+  Gauge,
+  Sparkles,
+  Target,
+  TrendingDown,
+  AlertTriangle,
+  PieChart as PieIcon,
 } from 'lucide-react'
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip as RTooltip,
+  ResponsiveContainer,
+  Cell as RCell,
+  CartesianGrid,
+  PieChart,
+  Pie,
+  AreaChart,
+  Area,
+  RadialBarChart,
+  RadialBar,
+  PolarAngleAxis,
+} from 'recharts'
 import { toast } from 'sonner'
 import { useDashboardStore } from '@/store/dashboard-store'
 
@@ -216,6 +239,72 @@ interface KPIData {
   activeSheets: number
 }
 
+// ─── Cost Analysis Types (NEW) ───────────────────────────────────────────────
+
+interface AnalysisSummary {
+  totalSheets: number
+  totalCost: number
+  totalSelling: number
+  totalProfit: number
+  avgMargin: number
+  avgCost: number
+  avgSelling: number
+  lowMarginCount: number
+  highMarginCount: number
+  draftCount: number
+  approvedCount: number
+  costEfficiencyScore: number
+  grade: string
+}
+
+interface AnalysisComponent {
+  name: string
+  totalCost: number
+  percentage: number
+  avgPerSheet: number
+  color: string
+}
+
+interface AnalysisTrend {
+  month: string
+  totalCost: number
+  totalSelling: number
+  totalProfit: number
+  avgMargin: number
+  count: number
+}
+
+interface AnalysisStyle {
+  id: string
+  sheetNo: string
+  styleNo: string
+  styleName: string
+  totalCost: number
+  sellingPrice: number
+  profit: number
+  margin: number
+  status: string
+  image: string | null
+}
+
+interface AnalysisOutlier {
+  id: string
+  sheetNo: string
+  styleNo: string
+  styleName: string
+  totalCost: number
+  sellingPrice: number
+  margin: number
+}
+
+interface AnalysisData {
+  summary: AnalysisSummary
+  components: AnalysisComponent[]
+  trend: AnalysisTrend[]
+  topExpensive: AnalysisStyle[]
+  marginOutliers: { low: AnalysisOutlier[]; high: AnalysisOutlier[] }
+}
+
 // ─── Print / PDF helper (uses dynamic categories from items) ────────────────
 
 function printCostSheet(sheet: CostSheet, categoryColorMap: Record<string, string>) {
@@ -314,6 +403,7 @@ export function CostingModule() {
   const [activeStatus, setActiveStatus] = useState<string | null>(null)
   const [statusCounts, setStatusCounts] = useState<Record<string, number>>({})
   const [kpi, setKpi] = useState<KPIData>({ totalSheets: 0, avgCost: 0, avgMargin: 0, activeSheets: 0 })
+  const [analysis, setAnalysis] = useState<AnalysisData | null>(null)
 
   // Create/Edit dialog
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -469,9 +559,21 @@ export function CostingModule() {
     }
   }, [search, activeStatus])
 
+  const fetchAnalysis = useCallback(async () => {
+    try {
+      const res = await fetch('/api/cost-sheets/analysis')
+      if (!res.ok) return
+      const json = await res.json()
+      if (!json.error) setAnalysis(json)
+    } catch {
+      // Analysis is optional — fail silently
+    }
+  }, [])
+
   useEffect(() => {
     fetchCostSheets()
-  }, [fetchCostSheets])
+    fetchAnalysis()
+  }, [fetchCostSheets, fetchAnalysis])
 
   useEffect(() => {
     fetch('/api/customers')
@@ -2198,6 +2300,340 @@ export function CostingModule() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* ─── Cost Analysis Dashboard (NEW FEATURE) ──────────────────── */}
+      {analysis && analysis.summary.totalSheets > 0 && (
+        <CostAnalysisWidget data={analysis} />
+      )}
+    </div>
+  )
+}
+// ─── Cost Analysis Widget (NEW FEATURE) ──────────────────────────────────────
+// Aggregates cost sheet data into component breakdown, margin analysis, trends,
+// and identifies margin outliers for pricing optimization.
+
+function CostTooltip({ active, payload, label }: { active?: boolean; payload?: Array<{ name: string; value: number; color: string }>; label?: string }) {
+  if (!active || !payload?.length) return null
+  return (
+    <div className="rounded-lg border border-border/50 bg-background/95 backdrop-blur-sm px-3 py-2 text-xs shadow-xl">
+      <p className="mb-1.5 font-medium text-muted-foreground">{label}</p>
+      {payload.map((item) => (
+        <div key={item.name} className="flex items-center justify-between gap-4">
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: item.color }} />
+            {item.name}
+          </span>
+          <span className="font-medium tabular-nums">{formatINR(item.value)}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function getScoreColor(score: number): string {
+  if (score >= 85) return 'oklch(0.72 0.18 145)' // green
+  if (score >= 70) return 'oklch(0.8 0.15 75)'   // gold
+  if (score >= 55) return 'oklch(0.75 0.15 65)'  // orange
+  return 'oklch(0.65 0.22 25)'                     // red
+}
+
+function CostAnalysisWidget({ data }: { data: AnalysisData }) {
+  const { summary, components, trend, topExpensive, marginOutliers } = data
+  const hasLowMargin = summary.lowMarginCount > 0
+
+  const scoreGauge = [{ name: 'efficiency', value: summary.costEfficiencyScore, fill: getScoreColor(summary.costEfficiencyScore) }]
+  const marginGauge = [{ name: 'margin', value: Math.min(100, summary.avgMargin * 2), fill: 'oklch(0.72 0.18 145)' }]
+
+  return (
+    <div className="premium-card rounded-xl p-5">
+      {/* Header */}
+      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-3">
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/15 glow-ring">
+            <Gauge className="h-5 w-5 text-primary" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-semibold">Cost Analysis Dashboard</h3>
+              <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary">
+                <Sparkles className="h-2.5 w-2.5" />
+                Smart Pricing
+              </span>
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              {summary.totalSheets} cost sheets · {formatINR(summary.totalCost)} total cost · {formatINR(summary.totalProfit)} profit · {summary.avgMargin}% avg margin · Grade {summary.grade}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Metrics grid with radial gauges */}
+      <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {/* Efficiency Score gauge */}
+        <div className={`rounded-lg border p-3 ${summary.costEfficiencyScore >= 85 ? 'border-emerald-500/30 bg-emerald-500/5' : summary.costEfficiencyScore >= 70 ? 'border-amber-500/30 bg-amber-500/5' : 'border-red-500/30 bg-red-500/5'}`}>
+          <div className="flex items-center justify-between">
+            <div>
+              <div className={`flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider ${summary.costEfficiencyScore >= 85 ? 'text-emerald-400' : summary.costEfficiencyScore >= 70 ? 'text-amber-400' : 'text-red-400'}`}>
+                <Target className="h-3 w-3" />
+                Efficiency
+              </div>
+              <p className={`mt-1 text-lg font-bold tabular-nums ${summary.costEfficiencyScore >= 85 ? 'text-emerald-400' : summary.costEfficiencyScore >= 70 ? 'text-amber-400' : 'text-red-400'}`}>
+                {summary.costEfficiencyScore}
+              </p>
+              <p className="text-[10px] text-muted-foreground">Grade {summary.grade}</p>
+            </div>
+            <div className="h-14 w-14">
+              <ResponsiveContainer width="100%" height="100%">
+                <RadialBarChart cx="50%" cy="50%" innerRadius="60%" outerRadius="100%" data={scoreGauge} startAngle={90} endAngle={-270}>
+                  <PolarAngleAxis type="number" domain={[0, 100]} angleAxisId={0} tick={false} />
+                  <RadialBar background dataKey="value" cornerRadius={6} angleAxisId={0} />
+                </RadialBarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        </div>
+
+        {/* Avg Margin gauge */}
+        <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-emerald-400">
+                <TrendingUp className="h-3 w-3" />
+                Avg Margin
+              </div>
+              <p className="mt-1 text-lg font-bold tabular-nums text-emerald-400">{summary.avgMargin}%</p>
+              <p className="text-[10px] text-muted-foreground tabular-nums">Profit: {formatINR(summary.totalProfit)}</p>
+            </div>
+            <div className="h-14 w-14">
+              <ResponsiveContainer width="100%" height="100%">
+                <RadialBarChart cx="50%" cy="50%" innerRadius="60%" outerRadius="100%" data={marginGauge} startAngle={90} endAngle={-270}>
+                  <PolarAngleAxis type="number" domain={[0, 100]} angleAxisId={0} tick={false} />
+                  <RadialBar background dataKey="value" cornerRadius={6} angleAxisId={0} fill="oklch(0.72 0.18 145)" />
+                </RadialBarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        </div>
+
+        {/* Total Cost */}
+        <div className="rounded-lg border border-border/50 bg-muted/20 p-3">
+          <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+            <IndianRupee className="h-3 w-3" />
+            Total Cost
+          </div>
+          <p className="mt-1 text-lg font-bold tabular-nums">{formatINR(summary.totalCost)}</p>
+          <p className="text-[10px] text-muted-foreground tabular-nums">Avg: {formatINR(summary.avgCost)}/sheet</p>
+        </div>
+
+        {/* Total Selling */}
+        <div className="rounded-lg border border-border/50 bg-muted/20 p-3">
+          <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+            <IndianRupee className="h-3 w-3" />
+            Total Selling
+          </div>
+          <p className="mt-1 text-lg font-bold tabular-nums">{formatINR(summary.totalSelling)}</p>
+          <p className="text-[10px] text-muted-foreground tabular-nums">Avg: {formatINR(summary.avgSelling)}/sheet</p>
+        </div>
+      </div>
+
+      {/* Cost components + trend */}
+      <div className="mb-5 grid grid-cols-1 gap-5 lg:grid-cols-3">
+        {/* Component donut */}
+        <div>
+          <h4 className="mb-3 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            <PieIcon className="h-3.5 w-3.5" />
+            Cost Components
+          </h4>
+          <div className="h-[180px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={components}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={45}
+                  outerRadius={75}
+                  dataKey="totalCost"
+                  nameKey="name"
+                  paddingAngle={3}
+                  strokeWidth={0}
+                >
+                  {components.map((entry, i) => (
+                    <RCell key={`comp-${i}`} fill={entry.color} />
+                  ))}
+                </Pie>
+                <RTooltip
+                  content={({ active, payload }: { active?: boolean; payload?: Array<{ name: string; value: number; payload: { percentage: number; avgPerSheet: number } }> }) =>
+                    active && payload?.length ? (
+                      <div className="rounded-lg border border-border/50 bg-background/95 px-3 py-2 text-xs shadow-xl">
+                        <p className="font-medium">{payload[0].name}</p>
+                        <p className="tabular-nums text-muted-foreground">{formatINR(payload[0].value)} · {payload[0].payload.percentage}%</p>
+                        <p className="text-[10px] text-muted-foreground">Avg: {formatINR(payload[0].payload.avgPerSheet)}/sheet</p>
+                      </div>
+                    ) : null
+                  }
+                />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="mt-2 space-y-1">
+            {components.map(c => (
+              <div key={c.name} className="flex items-center justify-between text-[11px]">
+                <span className="flex items-center gap-1.5">
+                  <span className="h-2 w-2 rounded-sm" style={{ backgroundColor: c.color }} />
+                  <span className="text-muted-foreground">{c.name}</span>
+                </span>
+                <span className="tabular-nums font-medium">{formatINR(c.totalCost)} · {c.percentage}%</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* 6-month trend */}
+        <div className="lg:col-span-2">
+          <h4 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            Cost vs Selling Price Trend (6 Months)
+          </h4>
+          <div className="h-[220px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={trend} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.3 0.005 260)" opacity={0.25} />
+                <XAxis
+                  dataKey="month"
+                  tick={{ fill: 'oklch(0.6 0.01 260)', fontSize: 10 }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <YAxis
+                  tick={{ fill: 'oklch(0.6 0.01 260)', fontSize: 10 }}
+                  axisLine={false}
+                  tickLine={false}
+                  tickFormatter={(v) => v >= 1000 ? `${(v / 1000).toFixed(0)}K` : String(v)}
+                />
+                <RTooltip content={<CostTooltip />} cursor={{ fill: 'oklch(0.5 0.01 260 / 10%)' }} />
+                <Bar dataKey="totalCost" name="Cost" fill="oklch(0.65 0.22 25)" radius={[4, 4, 0, 0]} barSize={20} />
+                <Bar dataKey="totalSelling" name="Selling" fill="oklch(0.72 0.18 145)" radius={[4, 4, 0, 0]} barSize={20} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      </div>
+
+      {/* Top expensive + Margin outliers */}
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+        {/* Top expensive styles */}
+        <div>
+          <h4 className="mb-3 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            <IndianRupee className="h-3.5 w-3.5 text-primary" />
+            Top 5 Most Expensive Styles
+          </h4>
+          <div className="space-y-2">
+            {topExpensive.map((s, i) => (
+              <div key={s.id} className="animate-slide-in flex items-center gap-3 rounded-lg border border-border/40 bg-muted/20 p-2.5" style={{ animationDelay: `${i * 60}ms` }}>
+                {s.image ? (
+                  <img src={s.image} alt={s.styleName} className="h-10 w-10 shrink-0 rounded object-cover" />
+                ) : (
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded bg-muted">
+                    <Calculator className="h-4 w-4 text-muted-foreground" />
+                  </div>
+                )}
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-medium truncate">{s.styleName}</span>
+                    <span className="text-xs font-bold tabular-nums shrink-0 text-primary">{formatINR(s.totalCost)}</span>
+                  </div>
+                  <div className="mt-1 flex items-center gap-2 text-[10px] text-muted-foreground">
+                    <span className="tabular-nums">Sell: {formatINR(s.sellingPrice)}</span>
+                    <span>·</span>
+                    <span className={`tabular-nums font-medium ${s.margin >= 40 ? 'text-emerald-400' : s.margin >= 20 ? 'text-amber-400' : 'text-red-400'}`}>
+                      {s.margin}% margin
+                    </span>
+                    <span>·</span>
+                    <span className="tabular-nums">Profit: {formatINR(s.profit)}</span>
+                  </div>
+                  {/* Cost vs selling bar */}
+                  <div className="mt-1.5 flex items-center gap-1">
+                    <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted/60">
+                      <div className="h-full rounded-full bg-red-500/60" style={{ width: `${(s.totalCost / s.sellingPrice) * 100}%` }} />
+                    </div>
+                    <span className="text-[9px] text-muted-foreground tabular-nums w-8 text-right">{Math.round((s.totalCost / s.sellingPrice) * 100)}%</span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Margin outliers */}
+        <div>
+          <h4 className="mb-3 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            <AlertTriangle className="h-3.5 w-3.5 text-amber-400" />
+            Margin Outliers
+          </h4>
+          {marginOutliers.low.length === 0 && marginOutliers.high.length === 0 ? (
+            <div className="flex items-center justify-center py-8 text-center">
+              <div>
+                <div className="flex h-10 w-10 mx-auto items-center justify-center rounded-full bg-emerald-500/10 mb-2">
+                  <TrendingUp className="h-5 w-5 text-emerald-400" />
+                </div>
+                <p className="text-xs text-muted-foreground">All margins within healthy range (20-40%)</p>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {/* Low margin */}
+              {marginOutliers.low.length > 0 && (
+                <div>
+                  <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-red-400">Low Margin (&lt;20%)</p>
+                  <div className="space-y-1.5">
+                    {marginOutliers.low.map((s, i) => (
+                      <div key={s.id} className="animate-slide-in flex items-center justify-between rounded-lg border border-red-500/30 bg-red-500/5 p-2" style={{ animationDelay: `${i * 60}ms` }}>
+                        <div className="min-w-0">
+                          <span className="text-xs font-medium truncate block">{s.styleName}</span>
+                          <span className="text-[10px] text-muted-foreground tabular-nums">{formatINR(s.totalCost)} → {formatINR(s.sellingPrice)}</span>
+                        </div>
+                        <span className="text-xs font-bold tabular-nums text-red-400 shrink-0">{s.margin}%</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {/* High margin */}
+              {marginOutliers.high.length > 0 && (
+                <div>
+                  <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-emerald-400">High Margin (≥40%)</p>
+                  <div className="space-y-1.5">
+                    {marginOutliers.high.map((s, i) => (
+                      <div key={s.id} className="animate-slide-in flex items-center justify-between rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-2" style={{ animationDelay: `${i * 60}ms` }}>
+                        <div className="min-w-0">
+                          <span className="text-xs font-medium truncate block">{s.styleName}</span>
+                          <span className="text-[10px] text-muted-foreground tabular-nums">{formatINR(s.totalCost)} → {formatINR(s.sellingPrice)}</span>
+                        </div>
+                        <span className="text-xs font-bold tabular-nums text-emerald-400 shrink-0">{s.margin}%</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Low margin alert */}
+      {hasLowMargin && (
+        <div className="mt-4 flex items-start gap-2.5 rounded-lg border border-red-500/30 bg-red-500/5 p-3 animate-slide-in">
+          <TrendingDown className="h-4 w-4 shrink-0 text-red-400 mt-0.5" />
+          <div className="text-xs">
+            <p className="font-semibold text-red-400">Low Margin Cost Sheets Detected</p>
+            <p className="text-muted-foreground mt-0.5">
+              <span className="font-medium text-foreground">{summary.lowMarginCount} cost sheet{summary.lowMarginCount !== 1 ? 's' : ''}</span>{' '}
+              have margins below 20%, indicating potential pricing issues. Review fabric/labor costs,
+              negotiate better supplier rates, or adjust selling prices to improve profitability.
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

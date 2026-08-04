@@ -849,3 +849,115 @@
 5. **Production Efficiency** (Round 6) — `/api/production/efficiency` — Stage analysis, bottleneck detection, at-risk jobs
 6. **Executive Analytics Hub** (Round 7) — `/api/analytics/hub` — Unified command-center view consolidating all 5 analytics
 7. **Quality Control Dashboard** (Round 8) — `/api/quality/dashboard` — Pass/fail rates, defect analysis, inspection trends, rework tracking
+
+---
+
+## Task ID: 16 (Cron: 15-min webDevReview)
+**Agent:** Main Agent (Z.ai Code) — automated review round 9
+**Task:** Assess project status, QA test, add Cost Analysis Dashboard, improve styling
+
+### Work Log:
+
+**1. QA Verification:**
+- Verified dev server running healthy (next-server v16.1.3)
+- Verified all analytics endpoints return 200 (dashboard, analytics/hub, quality/dashboard, cost-sheets)
+- App remains stable from round 8 — no new bugs found
+
+**2. New Feature — Cost Analysis Dashboard (API + Widget):**
+
+- Created new API endpoint `/api/cost-sheets/analysis` (`src/app/api/cost-sheets/analysis/route.ts`)
+  - Aggregates cost sheet metrics across cost components, margins, variance, and trends
+  - Computes:
+    - Total cost sheets, total cost, total selling price, total profit
+    - Average margin, average cost/sheet, average selling/sheet
+    - Low margin count (<20%), high margin count (≥40%)
+    - Draft/approved status counts
+    - Cost efficiency score (0-100) using weighted formula: marginScore * 0.5 + (100 - lowMarginPenalty) * 0.3 + highMarginBonus * 0.2
+    - Grade: A (≥85), B (≥70), C (≥55), D (≥40), F (<40)
+    - Cost component breakdown (Fabric, Trim, Labor, Wash, Packaging, Overhead, Other) with count, percentage, avg per sheet, color-coded
+    - 6-month cost trend (monthly totalCost, totalSelling, totalProfit, avgMargin, count)
+    - Top 5 most expensive styles (with images, cost, selling, profit, margin)
+    - Margin outliers (low margin <20% and high margin ≥40%, top 3 each)
+  - Uses `isMissingTableError()` for graceful degradation
+  - Verified with real data: 18 cost sheets, ₹12,121 total cost, ₹16,108 selling, ₹3,987 profit, 32.8% avg margin, Fabric 50.3% of cost, Labor 43.3%, efficiency score 63/100 (Grade C)
+
+- Added `CostAnalysisWidget` component to Costing module (`src/components/modules/costing.tsx`)
+  - Premium card with "Smart Pricing" badge and Gauge icon with glow ring
+  - 4-metric grid with radial gauges:
+    - Efficiency (color-coded gauge: green ≥85, amber ≥70, red below, shows score + grade)
+    - Avg Margin (emerald radial gauge, shows % + total profit)
+    - Total Cost (shows amount + avg/sheet)
+    - Total Selling (shows amount + avg/sheet)
+  - Two-column layout:
+    - Left (1/3): Donut pie chart "Cost Components" with color-coded legend (Fabric, Labor, Trim, Overhead)
+    - Right (2/3): Bar chart "Cost vs Selling Price Trend (6 Months)" with dual bars (red cost + emerald selling)
+  - Top 5 Most Expensive Styles list:
+    - Style image thumbnail (or Calculator icon placeholder)
+    - Style name, total cost (gold), selling price, profit, margin (color-coded)
+    - Cost-to-selling ratio progress bar (red portion = cost %)
+    - Staggered slide-in animation
+  - Margin Outliers section:
+    - Low Margin (<20%) cards with red borders + AlertTriangle
+    - High Margin (≥40%) cards with emerald borders
+    - Shows style name, cost → selling, margin %
+    - "All margins within healthy range" positive state when no outliers
+  - Low margin alert banner (red, animated) when low margin sheets exist, with pricing recommendations
+  - Custom tooltips for charts
+  - Fully responsive
+
+**3. Styling Improvements:**
+- Applied `premium-card` class (gradient bg, hover lift, sheen sweep)
+- Used `glow-ring` on Gauge icon for radial glow on hover
+- RadialBarChart gauges for efficiency score (color-coded) and avg margin (emerald)
+- Donut pie chart with color-coded cost components and detailed legend
+- Dual-bar chart (red cost + emerald selling) for trend visualization
+- Top 5 style cards with image thumbnails and cost-to-selling ratio bars
+- Color-coded margin values (green ≥40%, amber ≥20%, red below)
+- Margin outlier cards with severity-based borders (red/emerald)
+- Staggered slide-in animations throughout
+- Consistent tabular-nums for all numeric values
+
+### Stage Summary:
+- **QA Status:** ✅ App stable, no new bugs, all previous features intact
+- **New Feature:** Cost Analysis Dashboard (API + Widget) — fully functional with real data (18 sheets, 32.8% avg margin, Grade C)
+- **Styling:** Premium card, radial gauges, donut component chart, dual-bar trend, image thumbnails, color-coded margins, animated alerts, glow effects
+- **Verification:** Widget renders with "SMART PRICING" badge, all 4 metric cards with gauges, cost component donut, 6-month trend bar chart, top 5 expensive styles with images (Anarkali), margin outliers section
+
+### Verification Results:
+- Cost Analysis API returns HTTP 200 with real data ✓
+- Widget renders "Cost Analysis Dashboard" heading + "SMART PRICING" badge ✓
+- "18 cost sheets · ₹12,121 total cost · ₹3,987 profit · 32.8% avg margin · Grade C" subtitle ✓
+- 4 metric cards with radial gauges (EFFICIENCY 63, AVG MARGIN 32.8%, TOTAL COST ₹12,121, TOTAL SELLING ₹16,108) ✓
+- Cost Components donut chart renders (Fabric 50.3%, Labor 43.3%, Trim 4.9%, Overhead 1.5%) ✓
+- Cost vs Selling Price Trend bar chart renders (6 months) ✓
+- Top 5 Most Expensive Styles renders with images (Anarkali) and cost/selling/profit ✓
+- Margin Outliers section renders ✓
+- No browser console errors ✓
+- No 500 server errors ✓
+
+### Unresolved Issues / Risks:
+1. **Missing Supabase tables:** `CapitalInvestment`, `SupplierReturn`, `CustomerReturn`, `FinishedGood` still don't exist (gracefully returning empty data)
+2. **Pre-existing lint error:** `src/components/module-resolver.tsx:226` react-hooks/set-state-in-effect warning — pre-existing from cloned repo
+3. **Memory usage:** Server stable at ~2.5GB RAM
+4. **Grade C efficiency:** Cost efficiency score 63/100 (Grade C) indicates room for improvement. Fabric is 50.3% of cost — bulk fabric sourcing negotiations could improve margins
+5. **All drafts:** All 18 cost sheets are in Draft status (0 approved). Approval workflow needed for production readiness
+6. **Single month data:** All cost sheets created in Jul 2026 — trend chart only shows July data. More historical data needed for meaningful trend analysis
+
+### Priority Recommendations for Next Phase:
+1. **Create missing Supabase tables** — run SQL migrations for CapitalInvestment, SupplierReturn, CustomerReturn, FinishedGood
+2. **Enhance AI Agent** — integrate all 8 analytics into AI advisor insights for natural language queries
+3. **Add export functionality** — allow exporting all analytics data to Excel/PDF
+4. **Start the websocket mini-service** for real-time notifications
+5. **Add Collections Management module** — track collection efforts for At-Risk customers
+6. **Polish mobile responsiveness** — verify all new widgets work well on mobile viewport
+7. **Add Sales Performance dashboard** — track sales pipeline, conversion rates, sales rep performance
+
+### Analytics Features Summary (Rounds 2-9):
+1. **Cash Flow Forecast** (Round 2) — `/api/cashflow/forecast` — 30/60/90-day projection with breakeven detection
+2. **Inventory Aging** (Round 3) — `/api/inventory/aging` — 4 age buckets, dead stock detection
+3. **Supplier Performance** (Round 4) — `/api/suppliers/performance` — Composite scores, tier classification, radar profiles
+4. **Customer Insights** (Round 5) — `/api/customers/insights` — 5 segments, LTV, payment scores, revenue trends
+5. **Production Efficiency** (Round 6) — `/api/production/efficiency` — Stage analysis, bottleneck detection, at-risk jobs
+6. **Executive Analytics Hub** (Round 7) — `/api/analytics/hub` — Unified command-center view consolidating all 5 analytics
+7. **Quality Control Dashboard** (Round 8) — `/api/quality/dashboard` — Pass/fail rates, defect analysis, inspection trends, rework tracking
+8. **Cost Analysis Dashboard** (Round 9) — `/api/cost-sheets/analysis` — Cost components, margin analysis, trend, outliers, efficiency score
