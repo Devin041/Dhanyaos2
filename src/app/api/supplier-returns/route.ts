@@ -1,4 +1,4 @@
-import { supabase } from '@/lib/supabase-db'
+import { supabase, isMissingTableError } from '@/lib/supabase-db'
 import { NextRequest, NextResponse } from 'next/server'
 import { format } from 'date-fns'
 
@@ -22,7 +22,17 @@ export async function GET(request: NextRequest) {
     if (toDate) countQuery = countQuery.lte('returnDate', new Date(toDate).toISOString())
 
     const { count: total, error: countErr } = await countQuery
-    if (countErr) throw countErr
+    if (countErr) {
+      if (isMissingTableError(countErr)) {
+        return NextResponse.json({
+          returns: [],
+          pagination: { page, limit, total: 0, pages: 0 },
+          counts: { All: 0, Requested: 0, Sent: 0, Received: 0, 'Credit Received': 0, 'Replacement Received': 0, Rejected: 0 },
+          summary: { totalReturns: 0, pending: 0, creditValue: 0, sent: 0 },
+        })
+      }
+      throw countErr
+    }
 
     // ── data query ──
     let dataQuery = supabase
@@ -37,7 +47,17 @@ export async function GET(request: NextRequest) {
     if (toDate) dataQuery = dataQuery.lte('returnDate', new Date(toDate).toISOString())
 
     const { data: returns, error: dataErr } = await dataQuery
-    if (dataErr) throw dataErr
+    if (dataErr) {
+      if (isMissingTableError(dataErr)) {
+        return NextResponse.json({
+          returns: [],
+          pagination: { page, limit, total: 0, pages: 0 },
+          counts: { All: 0, Requested: 0, Sent: 0, Received: 0, 'Credit Received': 0, 'Replacement Received': 0, Rejected: 0 },
+          summary: { totalReturns: 0, pending: 0, creditValue: 0, sent: 0 },
+        })
+      }
+      throw dataErr
+    }
 
     // Filter by search
     let filteredReturns = returns ?? []

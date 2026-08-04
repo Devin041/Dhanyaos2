@@ -1,4 +1,4 @@
-import { supabase } from '@/lib/supabase-db'
+import { supabase, isMissingTableError } from '@/lib/supabase-db'
 import { NextRequest, NextResponse } from 'next/server'
 import { format, startOfDay } from 'date-fns'
 
@@ -10,7 +10,13 @@ export async function GET() {
       .select('*')
       .order('investmentDate', { ascending: true })
 
-    if (error) throw error
+    if (error) {
+      // Gracefully return empty if the table does not exist yet in Supabase
+      if (isMissingTableError(error)) {
+        return NextResponse.json({ investments: [], totalInvested: 0 })
+      }
+      throw error
+    }
 
     const totalInvested = (investments || []).reduce((sum: number, inv: any) => sum + (inv.amount || 0), 0)
 

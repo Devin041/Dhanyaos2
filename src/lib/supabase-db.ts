@@ -235,3 +235,44 @@ export async function runSequential<T>(
 export function searchFilter(field: string, term: string) {
   return { field, term }
 }
+
+// ============================================================================
+// Table Existence / Missing-Table Helper
+// ============================================================================
+// When a table does not yet exist in the Supabase database, the PostgREST
+// server returns error code PGRST205 ("schemaCacheMiss" / "Could not find the
+// table").  These helpers let API routes gracefully degrade to empty results
+// instead of returning HTTP 500, so the UI can render an "empty state".
+
+export function isMissingTableError(error: any): boolean {
+  if (!error) return false
+  const code = (error as any)?.code || (error as any)?.error_code
+  if (code === 'PGRST205' || code === '42P01') return true
+  const msg = String((error as any)?.message || (error as any)?.hint || '')
+  return /could not find the table|does not exist|perhaps you meant/i.test(msg)
+}
+
+/**
+ * Wraps a Supabase query promise. If the underlying error is a missing-table
+ * error, returns an empty result instead of throwing. Otherwise re-throws.
+ */
+export async function safeSelect<T = any>(
+  promise: Promise<{ data: T | null; error: any; count?: number }>,
+  fallback: T = [] as unknown as T,
+): Promise<{ data: T; error: null; count: number }> {
+  try {
+    const res = await promise
+    if (res.error) {
+      if (isMissingTableError(res.error)) {
+        return { data: fallback, error: null, count: 0 }
+      }
+      throw res.error
+    }
+    return { data: (res.data ?? fallback) as T, error: null, count: res.count ?? 0 }
+  } catch (error) {
+    if (isMissingTableError(error)) {
+      return { data: fallback, error: null, count: 0 }
+    }
+    throw error
+  }
+}

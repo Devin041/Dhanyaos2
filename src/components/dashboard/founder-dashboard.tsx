@@ -366,6 +366,172 @@ const fallbackInsights: string[] = [
   'Working capital is healthy. Consider deploying surplus cash into short-term fabric inventory for upcoming season orders.',
 ]
 
+// ─── Business Health Score (NEW FEATURE) ────────────────────────────────────
+// Aggregates multiple KPIs into a single 0-100 health score with a circular
+// progress ring and per-dimension breakdown bars.  Provides founders with an
+// at-a-glance view of overall business vitality.
+
+interface HealthDimension {
+  label: string
+  score: number // 0-100
+  hint: string
+}
+
+function computeHealthDimensions(kpis: KPIs, unreadAlerts: number): HealthDimension[] {
+  // 1. Profitability — based on gross margin (target ~30%+)
+  const profitability = Math.min(100, Math.max(0, Math.round((kpis.grossMargin / 30) * 100)))
+
+  // 2. Liquidity — cash vs monthly expenses (target: cash >= 3 months of expenses)
+  const liquidityTarget = kpis.monthlyExpenses * 3
+  const liquidity = kpis.monthlyExpenses > 0
+    ? Math.min(100, Math.max(0, Math.round((kpis.cashBalance / liquidityTarget) * 100)))
+    : 100
+
+  // 3. Collection efficiency — receivables vs total revenue (lower is better)
+  const collectionEff = kpis.totalRevenue > 0
+    ? Math.min(100, Math.max(0, Math.round(100 - (kpis.receivables / kpis.totalRevenue) * 100)))
+    : 50
+
+  // 4. Working capital health — positive working capital as % of revenue
+  const wcHealth = kpis.totalRevenue > 0
+    ? Math.min(100, Math.max(0, Math.round((kpis.workingCapital / kpis.totalRevenue) * 100)))
+    : 50
+
+  // 5. Operations — ratio of delivered orders to total orders
+  const operations = kpis.totalOrders > 0
+    ? Math.min(100, Math.round((kpis.deliveredOrders / kpis.totalOrders) * 100))
+    : 0
+
+  // 6. Risk — based on unread alerts (0 alerts = 100, 10+ alerts = 0)
+  const risk = Math.max(0, Math.min(100, 100 - (unreadAlerts * 10)))
+
+  return [
+    { label: 'Profitability', score: profitability, hint: `${kpis.grossMargin.toFixed(1)}% margin` },
+    { label: 'Liquidity', score: liquidity, hint: formatCompact(kpis.cashBalance) + ' cash' },
+    { label: 'Collections', score: collectionEff, hint: formatCompact(kpis.receivables) + ' due' },
+    { label: 'Working Capital', score: wcHealth, hint: formatCompact(kpis.workingCapital) },
+    { label: 'Operations', score: operations, hint: `${kpis.deliveredOrders}/${kpis.totalOrders} delivered` },
+    { label: 'Risk Control', score: risk, hint: `${unreadAlerts} alerts` },
+  ]
+}
+
+function getScoreColor(score: number): string {
+  if (score >= 75) return 'oklch(0.72 0.18 145)' // green
+  if (score >= 50) return 'oklch(0.8 0.15 75)'   // amber/gold
+  return 'oklch(0.65 0.22 25)'                     // red
+}
+
+function getScoreLabel(score: number): string {
+  if (score >= 85) return 'Excellent'
+  if (score >= 70) return 'Healthy'
+  if (score >= 50) return 'Moderate'
+  if (score >= 30) return 'At Risk'
+  return 'Critical'
+}
+
+function BusinessHealthScore({ kpis, unreadAlerts }: { kpis: KPIs; unreadAlerts: number }) {
+  const dimensions = computeHealthDimensions(kpis, unreadAlerts)
+  const overall = Math.round(dimensions.reduce((s, d) => s + d.score, 0) / dimensions.length)
+  const scoreColor = getScoreColor(overall)
+  const scoreLabel = getScoreLabel(overall)
+
+  // Circular progress geometry
+  const radius = 52
+  const circumference = 2 * Math.PI * radius
+  const offset = circumference - (overall / 100) * circumference
+
+  return (
+    <Card className="premium-card">
+      <CardContent className="p-5">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:gap-8">
+          {/* Score ring */}
+          <div className="flex items-center gap-5">
+            <div className="relative h-[140px] w-[140px] shrink-0">
+              <svg className="h-full w-full -rotate-90" viewBox="0 0 120 120">
+                <circle
+                  cx="60"
+                  cy="60"
+                  r={radius}
+                  strokeWidth="10"
+                  fill="none"
+                  className="health-ring-track"
+                />
+                <circle
+                  cx="60"
+                  cy="60"
+                  r={radius}
+                  strokeWidth="10"
+                  fill="none"
+                  stroke={scoreColor}
+                  strokeLinecap="round"
+                  strokeDasharray={circumference}
+                  strokeDashoffset={offset}
+                  style={{ transition: 'stroke-dashoffset 1s cubic-bezier(0.4,0,0.2,1)' }}
+                />
+              </svg>
+              <div className="absolute inset-0 flex flex-col items-center justify-center">
+                <span
+                  className="text-4xl font-bold tabular-nums leading-none"
+                  style={{ color: scoreColor }}
+                >
+                  {overall}
+                </span>
+                <span className="text-[10px] uppercase tracking-wider text-muted-foreground mt-1">
+                  / 100
+                </span>
+              </div>
+            </div>
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                  Business Health
+                </h3>
+                <span
+                  className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide"
+                  style={{ color: scoreColor, backgroundColor: `${scoreColor}20` }}
+                >
+                  {scoreLabel}
+                </span>
+              </div>
+              <p className="text-xs text-muted-foreground max-w-[200px]">
+                Aggregated score across profitability, liquidity, collections, operations & risk.
+              </p>
+              <div className="flex items-center gap-1.5 pt-1">
+                <Sparkles className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
+                <span className="text-[11px] font-medium text-primary">Auto-calculated · Live</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Dimension breakdown */}
+          <div className="grid flex-1 grid-cols-1 gap-x-6 gap-y-2.5 sm:grid-cols-2">
+            {dimensions.map((dim, i) => {
+              const color = getScoreColor(dim.score)
+              return (
+                <div key={dim.label} className="space-y-1 animate-slide-in" style={{ animationDelay: `${i * 60}ms` }}>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-medium text-foreground/80">{dim.label}</span>
+                    <span className="tabular-nums font-semibold" style={{ color }}>
+                      {dim.score}
+                    </span>
+                  </div>
+                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted/60">
+                    <div
+                      className="h-full rounded-full transition-all duration-700 ease-out"
+                      style={{ width: `${dim.score}%`, backgroundColor: color }}
+                    />
+                  </div>
+                  <p className="text-[10px] text-muted-foreground">{dim.hint}</p>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
 // ─── Main Component ──────────────────────────────────────────────────────────
 
 export function FounderDashboard() {
@@ -527,6 +693,9 @@ export function FounderDashboard() {
           </Button>
         ))}
       </div>
+
+      {/* ─── Business Health Score (NEW) ─────────────────────────── */}
+      <BusinessHealthScore kpis={kpis} unreadAlerts={unreadAlerts} />
 
       {/* ─── Row 1: KPI Cards (10 total) ─────────────────────────── */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5">

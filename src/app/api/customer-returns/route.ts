@@ -1,4 +1,4 @@
-import { supabase } from '@/lib/supabase-db'
+import { supabase, isMissingTableError } from '@/lib/supabase-db'
 import { NextRequest, NextResponse } from 'next/server'
 import { format, startOfMonth, endOfMonth } from 'date-fns'
 
@@ -15,6 +15,13 @@ export async function GET(request: NextRequest) {
     const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10))
     const limit = Math.min(100, Math.max(1, parseInt(searchParams.get('limit') || '20', 10)))
 
+    const _emptyResponse = (page: number, limit: number) => NextResponse.json({
+      returns: [],
+      pagination: { page, limit, total: 0, pages: 0 },
+      counts: { All: 0, Requested: 0, Approved: 0, 'In Process': 0, Completed: 0, Rejected: 0 },
+      summary: { totalReturns: 0, pendingResolution: 0, refundValue: 0, thisMonth: 0, totalReturnItems: 0 },
+    })
+
     // ── counts query ──
     let countQuery = supabase.from('CustomerReturn').select('*', { count: 'exact', head: true })
     if (status && status !== 'All') countQuery = countQuery.eq('status', status)
@@ -24,7 +31,10 @@ export async function GET(request: NextRequest) {
     if (toDate) countQuery = countQuery.lte('returnDate', new Date(toDate).toISOString())
 
     const { count: total, error: countErr } = await countQuery
-    if (countErr) throw countErr
+    if (countErr) {
+      if (isMissingTableError(countErr)) return _emptyResponse(page, limit)
+      throw countErr
+    }
 
     // ── data query ──
     let dataQuery = supabase
@@ -40,7 +50,10 @@ export async function GET(request: NextRequest) {
     if (toDate) dataQuery = dataQuery.lte('returnDate', new Date(toDate).toISOString())
 
     const { data: returns, error: dataErr } = await dataQuery
-    if (dataErr) throw dataErr
+    if (dataErr) {
+      if (isMissingTableError(dataErr)) return _emptyResponse(page, limit)
+      throw dataErr
+    }
 
     // Filter by search term (returnNo, customerName, salesOrder.orderNo)
     let filteredReturns = returns ?? []
