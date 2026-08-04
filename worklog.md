@@ -961,3 +961,120 @@
 6. **Executive Analytics Hub** (Round 7) — `/api/analytics/hub` — Unified command-center view consolidating all 5 analytics
 7. **Quality Control Dashboard** (Round 8) — `/api/quality/dashboard` — Pass/fail rates, defect analysis, inspection trends, rework tracking
 8. **Cost Analysis Dashboard** (Round 9) — `/api/cost-sheets/analysis` — Cost components, margin analysis, trend, outliers, efficiency score
+
+---
+
+## Task ID: 17 (Cron: 15-min webDevReview)
+**Agent:** Main Agent (Z.ai Code) — automated review round 10
+**Task:** Assess project status, QA test, add Sales Performance Dashboard, improve styling
+
+### Work Log:
+
+**1. QA Verification:**
+- Verified dev server running healthy (next-server v16.1.3)
+- Verified all analytics endpoints return 200 (dashboard, analytics/hub, orders, quotations)
+- App remains stable from round 9 — no new bugs found
+
+**2. New Feature — Sales Performance Dashboard (API + Widget):**
+
+- Created new API endpoint `/api/orders/sales-performance` (`src/app/api/orders/sales-performance/route.ts`)
+  - Aggregates sales pipeline, conversion rates, win/loss ratio, and performance metrics
+  - Computes:
+    - Sales pipeline: orders by status (Pending → Confirmed → In Production → Dispatched → Delivered) with count, value, percentage
+    - Conversion rate: quotations converted / total quotations
+    - Win rate: Accepted+Converted / (Accepted+Converted+Rejected)
+    - Average order value, total revenue, total profit
+    - 6-month sales trend (revenue, profit, order count, AOV)
+    - Top 5 customers by revenue (with order count, profit, margin)
+    - Average sales cycle time (quotation → order conversion days)
+    - Payment collection rate
+    - Quotation funnel (Draft → Sent → Accepted → Converted → Rejected)
+    - Sales efficiency score (0-100) using weighted formula:
+      - Conversion rate: 30%
+      - Win rate: 25%
+      - Avg margin: 20% (margin/50 * 100)
+      - Payment collection: 15%
+      - Order volume: 10%
+    - Grade: A (≥85), B (≥70), C (≥55), D (≥40), F (<40)
+  - Uses `isMissingTableError()` for graceful degradation
+  - Verified with real data: 174 orders, 15 quotations, ₹2.17 Cr revenue, ₹1.1 Cr profit, 51% margin, 26.7% conversion, 70% win rate, 24.8% payment collection, efficiency score 59/100 (Grade C)
+
+- Added `SalesPerformanceWidget` component to Sales Orders module (`src/components/modules/sales-orders.tsx`)
+  - Premium card with "Pipeline AI" badge and Gauge icon with glow ring
+  - 4-metric grid with radial gauges:
+    - Efficiency (color-coded gauge: green ≥85, amber ≥70, red below, shows score + grade)
+    - Conversion (color-coded gauge: green ≥50, amber ≥30, red below, shows % + win rate)
+    - Total Revenue (shows amount + total profit)
+    - Avg Order Value (shows AOV + payment collection rate)
+  - Two-column layout:
+    - Left (2/3): Area chart "Revenue & Profit Trend (6 Months)" with dual gradient fills (gold revenue + emerald profit)
+    - Right (1/3): Quotation Funnel with progress bars (Draft → Sent → Accepted → Converted → Rejected) + Win Rate summary card
+  - Two-column layout (bottom):
+    - Left: Bar chart "Sales Pipeline by Stage" with color-coded bars per stage
+    - Right: Top 5 Customers list with rank badges (#1 gold, #2 emerald, #3 amber), revenue, order count, profit, margin
+  - Alert banners:
+    - Low Conversion Rate (amber) when conversion < 30%, with actionable recommendations
+    - Low Payment Collection (red) when collection < 50%, with collection priorities
+  - Staggered slide-in animations
+  - Custom tooltips for all charts
+  - Fully responsive
+
+**3. Styling Improvements:**
+- Applied `premium-card` class (gradient bg, hover lift, sheen sweep)
+- Used `glow-ring` on Gauge icon for radial glow on hover
+- RadialBarChart gauges for efficiency (color-coded) and conversion (color-coded)
+- Dual-gradient area chart (gold revenue + emerald profit)
+- Quotation funnel with color-coded progress bars and win rate summary
+- Pipeline bar chart with stage-colored bars and rounded top corners
+- Top 5 customer cards with medal-style rank badges (gold/emerald/amber)
+- Color-coded metrics by threshold throughout
+- Alert banners with severity-based colors (amber/red)
+- Staggered slide-in animations throughout
+- Consistent tabular-nums for all numeric values
+
+### Stage Summary:
+- **QA Status:** ✅ App stable, no new bugs, all previous features intact
+- **New Feature:** Sales Performance Dashboard (API + Widget) — fully functional with real data (174 orders, 26.7% conversion, Grade C)
+- **Styling:** Premium card, radial gauges, dual-gradient trend, quotation funnel, pipeline bar chart, medal-style rankings, animated alerts, glow effects
+- **Verification:** Widget renders with "PIPELINE AI" badge, all 4 metric cards with gauges, revenue trend area chart, quotation funnel with win rate, pipeline bar chart, top 5 customers with real data (Meera Fashions, etc.), low conversion alert
+
+### Verification Results:
+- Sales Performance API returns HTTP 200 with real data ✓
+- Widget renders "Sales Performance Dashboard" heading + "PIPELINE AI" badge ✓
+- "174 orders · 15 quotations · ₹2,16,94,171 revenue · 51% margin · Grade C" subtitle ✓
+- 4 metric cards with radial gauges (EFFICIENCY 59, CONVERSION 26.7%, TOTAL REVENUE, AVG ORDER VALUE) ✓
+- Revenue & Profit Trend area chart renders (6 months) ✓
+- Quotation Funnel renders with progress bars (Draft → Sent → Accepted → Converted → Rejected) ✓
+- Win Rate summary renders (70%) ✓
+- Sales Pipeline by Stage bar chart renders (5 stages) ✓
+- Top 5 Customers list renders with real data (Meera Fashions, Trendy ethnic, Suhani Exports, Vastra Lifestyle, Rajeshwari Textiles) ✓
+- Low Conversion Rate alert banner renders ✓
+- No browser console errors ✓
+- No 500 server errors ✓
+
+### Unresolved Issues / Risks:
+1. **Missing Supabase tables:** `CapitalInvestment`, `SupplierReturn`, `CustomerReturn`, `FinishedGood` still don't exist (gracefully returning empty data)
+2. **Pre-existing lint error:** `src/components/module-resolver.tsx:226` react-hooks/set-state-in-effect warning — pre-existing from cloned repo
+3. **Memory usage:** Server stable at ~2.5GB RAM
+4. **Grade C efficiency:** Sales efficiency score 59/100 (Grade C). Low conversion (26.7%) and low payment collection (24.8%) are the main drag — focus on quotation follow-ups and receivables collection
+5. **Avg sales cycle 0 days:** Converted quotations have same-day conversion (0 days cycle). This is due to test data — real sales cycles will show meaningful durations
+
+### Priority Recommendations for Next Phase:
+1. **Create missing Supabase tables** — run SQL migrations for CapitalInvestment, SupplierReturn, CustomerReturn, FinishedGood
+2. **Enhance AI Agent** — integrate all 9 analytics into AI advisor insights for natural language queries
+3. **Add export functionality** — allow exporting all analytics data to Excel/PDF
+4. **Start the websocket mini-service** for real-time notifications
+5. **Add Collections Management module** — track collection efforts for At-Risk customers
+6. **Polish mobile responsiveness** — verify all new widgets work well on mobile viewport
+7. **Add Dispatch & Logistics dashboard** — track delivery performance, route optimization, carrier analysis
+
+### Analytics Features Summary (Rounds 2-10):
+1. **Cash Flow Forecast** (Round 2) — `/api/cashflow/forecast` — 30/60/90-day projection with breakeven detection
+2. **Inventory Aging** (Round 3) — `/api/inventory/aging` — 4 age buckets, dead stock detection
+3. **Supplier Performance** (Round 4) — `/api/suppliers/performance` — Composite scores, tier classification, radar profiles
+4. **Customer Insights** (Round 5) — `/api/customers/insights` — 5 segments, LTV, payment scores, revenue trends
+5. **Production Efficiency** (Round 6) — `/api/production/efficiency` — Stage analysis, bottleneck detection, at-risk jobs
+6. **Executive Analytics Hub** (Round 7) — `/api/analytics/hub` — Unified command-center view consolidating all 5 analytics
+7. **Quality Control Dashboard** (Round 8) — `/api/quality/dashboard` — Pass/fail rates, defect analysis, inspection trends, rework tracking
+8. **Cost Analysis Dashboard** (Round 9) — `/api/cost-sheets/analysis` — Cost components, margin analysis, trend, outliers, efficiency score
+9. **Sales Performance Dashboard** (Round 10) — `/api/orders/sales-performance` — Pipeline, conversion rates, win/loss, trends, top customers, quotation funnel

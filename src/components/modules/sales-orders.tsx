@@ -60,7 +60,28 @@ import {
   Loader2,
   Link2,
   Shirt,
+  Gauge,
+  Sparkles,
+  Target,
+  TrendingUp,
+  Trophy,
+  Filter,
 } from 'lucide-react'
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip as RTooltip,
+  ResponsiveContainer,
+  Cell as RCell,
+  CartesianGrid,
+  AreaChart,
+  Area,
+  RadialBarChart,
+  RadialBar,
+  PolarAngleAxis,
+} from 'recharts'
 import { useToast } from '@/hooks/use-toast'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -122,6 +143,59 @@ interface NewLineItem {
   unitCost: number
 }
 
+// ─── Sales Performance Types (NEW) ───────────────────────────────────────────
+
+interface PerfSummary {
+  totalOrders: number
+  totalQuotations: number
+  totalRevenue: number
+  totalProfit: number
+  avgOrderValue: number
+  avgMargin: number
+  conversionRate: number
+  winRate: number
+  avgSalesCycleDays: number
+  paymentCollectionRate: number
+  salesEfficiencyScore: number
+  grade: string
+  pendingValue: number
+  inProductionValue: number
+  deliveredValue: number
+}
+
+interface PerfPipelineStage {
+  stage: string
+  count: number
+  value: number
+  color: string
+  percentage: number
+}
+
+interface PerfTrend {
+  month: string
+  revenue: number
+  profit: number
+  orders: number
+  avgOrderValue: number
+}
+
+interface PerfTopCustomer {
+  id: string
+  name: string
+  orderCount: number
+  totalValue: number
+  totalProfit: number
+  avgMargin: number
+}
+
+interface PerfData {
+  summary: PerfSummary
+  pipeline: PerfPipelineStage[]
+  trend: PerfTrend[]
+  topCustomers: PerfTopCustomer[]
+  quotFunnel: { draft: number; sent: number; accepted: number; converted: number; rejected: number }
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function formatINR(amount: number): string {
@@ -176,6 +250,7 @@ export function SalesOrders() {
   const [expandedOrder, setExpandedOrder] = useState<string | null>(null)
   const [sortField, setSortField] = useState('createdAt')
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
+  const [perf, setPerf] = useState<PerfData | null>(null)
 
   // Create order dialog
   const [createOpen, setCreateOpen] = useState(false)
@@ -223,9 +298,21 @@ export function SalesOrders() {
     }
   }, [statusFilter, search, page, limit, sortField, sortOrder, toast])
 
+  const fetchPerf = useCallback(async () => {
+    try {
+      const res = await fetch('/api/orders/sales-performance')
+      if (!res.ok) return
+      const json = await res.json()
+      if (!json.error) setPerf(json)
+    } catch {
+      // Performance is optional — fail silently
+    }
+  }, [])
+
   useEffect(() => {
     fetchOrders()
-  }, [fetchOrders])
+    fetchPerf()
+  }, [fetchOrders, fetchPerf])
 
   // ─── Fetch Customers for Create Dialog ────────────────────────────────────
 
@@ -1178,6 +1265,11 @@ export function SalesOrders() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* ─── Sales Performance Dashboard (NEW FEATURE) ──────────────── */}
+      {perf && perf.summary.totalOrders > 0 && (
+        <SalesPerformanceWidget data={perf} />
+      )}
     </div>
   )
 }
@@ -1351,6 +1443,353 @@ function TimelineItem({
         <p className={`text-xs ${isActive ? 'font-medium text-foreground' : 'text-muted-foreground'}`}>{label}</p>
         <p className="text-[10px] text-muted-foreground">{relativeTime(time)}</p>
       </div>
+    </div>
+  )
+}
+// ─── Sales Performance Widget (NEW FEATURE) ──────────────────────────────────
+// Tracks sales pipeline, conversion rates, win/loss ratio, trends, and top
+// customers for comprehensive sales performance analysis.
+
+function PerfTooltip({ active, payload, label }: { active?: boolean; payload?: Array<{ name: string; value: number; color: string }>; label?: string }) {
+  if (!active || !payload?.length) return null
+  return (
+    <div className="rounded-lg border border-border/50 bg-background/95 backdrop-blur-sm px-3 py-2 text-xs shadow-xl">
+      <p className="mb-1.5 font-medium text-muted-foreground">{label}</p>
+      {payload.map((item) => (
+        <div key={item.name} className="flex items-center justify-between gap-4">
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: item.color }} />
+            {item.name}
+          </span>
+          <span className="font-medium tabular-nums">{formatINR(item.value)}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function getScoreColor(score: number): string {
+  if (score >= 85) return 'oklch(0.72 0.18 145)' // green
+  if (score >= 70) return 'oklch(0.8 0.15 75)'   // gold
+  if (score >= 55) return 'oklch(0.75 0.15 65)'  // orange
+  return 'oklch(0.65 0.22 25)'                     // red
+}
+
+function SalesPerformanceWidget({ data }: { data: PerfData }) {
+  const { summary, pipeline, trend, topCustomers, quotFunnel } = data
+  const hasLowConversion = summary.conversionRate < 30
+  const hasLowPayment = summary.paymentCollectionRate < 50
+
+  const scoreGauge = [{ name: 'efficiency', value: summary.salesEfficiencyScore, fill: getScoreColor(summary.salesEfficiencyScore) }]
+  const convGauge = [{ name: 'conversion', value: summary.conversionRate, fill: 'oklch(0.72 0.18 145)' }]
+
+  // Pipeline funnel data
+  const funnelSteps = [
+    { label: 'Draft', count: quotFunnel.draft, color: 'oklch(0.6 0.01 260)' },
+    { label: 'Sent', count: quotFunnel.sent, color: 'oklch(0.7 0.15 250)' },
+    { label: 'Accepted', count: quotFunnel.accepted, color: 'oklch(0.8 0.15 75)' },
+    { label: 'Converted', count: quotFunnel.converted, color: 'oklch(0.72 0.18 145)' },
+    { label: 'Rejected', count: quotFunnel.rejected, color: 'oklch(0.65 0.22 25)' },
+  ]
+  const maxFunnelCount = Math.max(...funnelSteps.map(f => f.count), 1)
+
+  return (
+    <div className="premium-card rounded-xl p-5">
+      {/* Header */}
+      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-3">
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/15 glow-ring">
+            <Gauge className="h-5 w-5 text-primary" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-semibold">Sales Performance Dashboard</h3>
+              <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary">
+                <Sparkles className="h-2.5 w-2.5" />
+                Pipeline AI
+              </span>
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              {summary.totalOrders} orders · {summary.totalQuotations} quotations · {formatINR(summary.totalRevenue)} revenue · {summary.avgMargin}% margin · Grade {summary.grade}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Metrics grid with radial gauges */}
+      <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {/* Efficiency Score gauge */}
+        <div className={`rounded-lg border p-3 ${summary.salesEfficiencyScore >= 85 ? 'border-emerald-500/30 bg-emerald-500/5' : summary.salesEfficiencyScore >= 70 ? 'border-amber-500/30 bg-amber-500/5' : 'border-red-500/30 bg-red-500/5'}`}>
+          <div className="flex items-center justify-between">
+            <div>
+              <div className={`flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider ${summary.salesEfficiencyScore >= 85 ? 'text-emerald-400' : summary.salesEfficiencyScore >= 70 ? 'text-amber-400' : 'text-red-400'}`}>
+                <Target className="h-3 w-3" />
+                Efficiency
+              </div>
+              <p className={`mt-1 text-lg font-bold tabular-nums ${summary.salesEfficiencyScore >= 85 ? 'text-emerald-400' : summary.salesEfficiencyScore >= 70 ? 'text-amber-400' : 'text-red-400'}`}>
+                {summary.salesEfficiencyScore}
+              </p>
+              <p className="text-[10px] text-muted-foreground">Grade {summary.grade}</p>
+            </div>
+            <div className="h-14 w-14">
+              <ResponsiveContainer width="100%" height="100%">
+                <RadialBarChart cx="50%" cy="50%" innerRadius="60%" outerRadius="100%" data={scoreGauge} startAngle={90} endAngle={-270}>
+                  <PolarAngleAxis type="number" domain={[0, 100]} angleAxisId={0} tick={false} />
+                  <RadialBar background dataKey="value" cornerRadius={6} angleAxisId={0} />
+                </RadialBarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        </div>
+
+        {/* Conversion Rate gauge */}
+        <div className={`rounded-lg border p-3 ${summary.conversionRate >= 50 ? 'border-emerald-500/30 bg-emerald-500/5' : summary.conversionRate >= 30 ? 'border-amber-500/30 bg-amber-500/5' : 'border-red-500/30 bg-red-500/5'}`}>
+          <div className="flex items-center justify-between">
+            <div>
+              <div className={`flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider ${summary.conversionRate >= 50 ? 'text-emerald-400' : summary.conversionRate >= 30 ? 'text-amber-400' : 'text-red-400'}`}>
+                <TrendingUp className="h-3 w-3" />
+                Conversion
+              </div>
+              <p className={`mt-1 text-lg font-bold tabular-nums ${summary.conversionRate >= 50 ? 'text-emerald-400' : summary.conversionRate >= 30 ? 'text-amber-400' : 'text-red-400'}`}>
+                {summary.conversionRate}%
+              </p>
+              <p className="text-[10px] text-muted-foreground tabular-nums">Win: {summary.winRate}%</p>
+            </div>
+            <div className="h-14 w-14">
+              <ResponsiveContainer width="100%" height="100%">
+                <RadialBarChart cx="50%" cy="50%" innerRadius="60%" outerRadius="100%" data={convGauge} startAngle={90} endAngle={-270}>
+                  <PolarAngleAxis type="number" domain={[0, 100]} angleAxisId={0} tick={false} />
+                  <RadialBar background dataKey="value" cornerRadius={6} angleAxisId={0} fill={summary.conversionRate >= 50 ? 'oklch(0.72 0.18 145)' : summary.conversionRate >= 30 ? 'oklch(0.8 0.15 75)' : 'oklch(0.65 0.22 25)'} />
+                </RadialBarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        </div>
+
+        {/* Total Revenue */}
+        <div className="rounded-lg border border-border/50 bg-muted/20 p-3">
+          <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+            <IndianRupee className="h-3 w-3" />
+            Total Revenue
+          </div>
+          <p className="mt-1 text-lg font-bold tabular-nums">{formatINR(summary.totalRevenue)}</p>
+          <p className="text-[10px] text-muted-foreground tabular-nums">Profit: {formatINR(summary.totalProfit)}</p>
+        </div>
+
+        {/* Avg Order Value */}
+        <div className="rounded-lg border border-border/50 bg-muted/20 p-3">
+          <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+            <CreditCard className="h-3 w-3" />
+            Avg Order Value
+          </div>
+          <p className="mt-1 text-lg font-bold tabular-nums">{formatINR(summary.avgOrderValue)}</p>
+          <p className="text-[10px] text-muted-foreground tabular-nums">Paid: {summary.paymentCollectionRate}%</p>
+        </div>
+      </div>
+
+      {/* Revenue trend + Pipeline */}
+      <div className="mb-5 grid grid-cols-1 gap-5 lg:grid-cols-3">
+        {/* 6-month revenue trend */}
+        <div className="lg:col-span-2">
+          <h4 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            Revenue & Profit Trend (6 Months)
+          </h4>
+          <div className="h-[220px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={trend} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="gradPerfRev" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="oklch(0.78 0.14 85)" stopOpacity={0.35} />
+                    <stop offset="100%" stopColor="oklch(0.78 0.14 85)" stopOpacity={0} />
+                  </linearGradient>
+                  <linearGradient id="gradPerfProfit" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="oklch(0.72 0.18 145)" stopOpacity={0.3} />
+                    <stop offset="100%" stopColor="oklch(0.72 0.18 145)" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.3 0.005 260)" opacity={0.25} />
+                <XAxis
+                  dataKey="month"
+                  tick={{ fill: 'oklch(0.6 0.01 260)', fontSize: 10 }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <YAxis
+                  tick={{ fill: 'oklch(0.6 0.01 260)', fontSize: 10 }}
+                  axisLine={false}
+                  tickLine={false}
+                  tickFormatter={(v) => v >= 10000000 ? `${(v / 10000000).toFixed(1)}Cr` : v >= 100000 ? `${(v / 100000).toFixed(0)}L` : v >= 1000 ? `${(v / 1000).toFixed(0)}K` : String(v)}
+                />
+                <RTooltip content={<PerfTooltip />} />
+                <Area
+                  type="monotone"
+                  dataKey="revenue"
+                  name="Revenue"
+                  stroke="oklch(0.78 0.14 85)"
+                  fill="url(#gradPerfRev)"
+                  strokeWidth={2.5}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="profit"
+                  name="Profit"
+                  stroke="oklch(0.72 0.18 145)"
+                  fill="url(#gradPerfProfit)"
+                  strokeWidth={2}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* Quotation funnel */}
+        <div>
+          <h4 className="mb-3 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            <Filter className="h-3.5 w-3.5" />
+            Quotation Funnel
+          </h4>
+          <div className="space-y-2">
+            {funnelSteps.map((f, i) => (
+              <div key={f.label} className="animate-slide-in" style={{ animationDelay: `${i * 60}ms` }}>
+                <div className="flex items-center justify-between text-[10px] mb-1">
+                  <span className="flex items-center gap-1.5">
+                    <span className="h-2 w-2 rounded-sm" style={{ backgroundColor: f.color }} />
+                    <span className="font-medium text-foreground/80">{f.label}</span>
+                  </span>
+                  <span className="tabular-nums font-semibold">{f.count}</span>
+                </div>
+                <div className="h-2 w-full overflow-hidden rounded-full bg-muted/60">
+                  <div
+                    className="h-full rounded-full transition-all duration-700"
+                    style={{ width: `${(f.count / maxFunnelCount) * 100}%`, backgroundColor: f.color }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 rounded-lg border border-border/40 bg-muted/20 p-2 text-center">
+            <p className="text-[10px] text-muted-foreground">Win Rate</p>
+            <p className={`text-lg font-bold tabular-nums ${summary.winRate >= 60 ? 'text-emerald-400' : summary.winRate >= 40 ? 'text-amber-400' : 'text-red-400'}`}>
+              {summary.winRate}%
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Pipeline stages + Top customers */}
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+        {/* Pipeline stages bar chart */}
+        <div>
+          <h4 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            Sales Pipeline by Stage
+          </h4>
+          <div className="h-[200px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={pipeline} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.3 0.005 260)" opacity={0.25} />
+                <XAxis
+                  dataKey="stage"
+                  tick={{ fill: 'oklch(0.6 0.01 260)', fontSize: 9 }}
+                  axisLine={false}
+                  tickLine={false}
+                  interval={0}
+                  angle={-15}
+                  textAnchor="end"
+                  height={50}
+                />
+                <YAxis
+                  tick={{ fill: 'oklch(0.6 0.01 260)', fontSize: 10 }}
+                  axisLine={false}
+                  tickLine={false}
+                  tickFormatter={(v) => v >= 10000000 ? `${(v / 10000000).toFixed(1)}Cr` : v >= 100000 ? `${(v / 100000).toFixed(0)}L` : v >= 1000 ? `${(v / 1000).toFixed(0)}K` : String(v)}
+                />
+                <RTooltip
+                  content={({ active, payload, label }: { active?: boolean; payload?: Array<{ value: number; payload: { count: number; percentage: number } }>; label?: string }) =>
+                    active && payload?.length ? (
+                      <div className="rounded-lg border border-border/50 bg-background/95 px-3 py-2 text-xs shadow-xl">
+                        <p className="font-medium">{label}</p>
+                        <p className="tabular-nums">{formatINR(payload[0].value)}</p>
+                        <p className="text-[10px] text-muted-foreground">{payload[0].payload.count} orders · {payload[0].payload.percentage}%</p>
+                      </div>
+                    ) : null
+                  }
+                  cursor={{ fill: 'oklch(0.5 0.01 260 / 10%)' }}
+                />
+                <Bar dataKey="value" name="Value" radius={[4, 4, 0, 0]} barSize={32}>
+                  {pipeline.map((s, i) => (
+                    <RCell key={`pipe-${i}`} fill={s.color} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* Top 5 customers */}
+        <div>
+          <h4 className="mb-3 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            <Trophy className="h-3.5 w-3.5 text-primary" />
+            Top 5 Customers by Revenue
+          </h4>
+          <div className="space-y-2">
+            {topCustomers.map((c, i) => (
+              <div key={c.id} className="animate-slide-in flex items-center gap-3 rounded-lg border border-border/40 bg-muted/20 p-2.5" style={{ animationDelay: `${i * 60}ms` }}>
+                <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] font-bold ${
+                  i === 0 ? 'bg-primary/20 text-primary' :
+                  i === 1 ? 'bg-emerald-500/15 text-emerald-400' :
+                  i === 2 ? 'bg-amber-500/15 text-amber-400' :
+                  'bg-muted text-muted-foreground'
+                }`}>
+                  #{i + 1}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-medium truncate">{c.name}</span>
+                    <span className="text-xs font-bold tabular-nums shrink-0 text-primary">{formatINR(c.totalValue)}</span>
+                  </div>
+                  <div className="mt-1 flex items-center gap-2 text-[10px] text-muted-foreground">
+                    <span className="tabular-nums">{c.orderCount} orders</span>
+                    <span>·</span>
+                    <span className="tabular-nums">{formatINR(c.totalProfit)} profit</span>
+                    <span>·</span>
+                    <span className="tabular-nums text-emerald-400">{c.avgMargin}%</span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Alerts */}
+      {(hasLowConversion || hasLowPayment) && (
+        <div className="mt-4 space-y-2">
+          {hasLowConversion && (
+            <div className="flex items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 animate-slide-in">
+              <TrendingUp className="h-4 w-4 shrink-0 text-amber-400 mt-0.5" />
+              <div className="text-xs">
+                <p className="font-semibold text-amber-400">Low Conversion Rate</p>
+                <p className="text-muted-foreground mt-0.5">
+                  Only {summary.conversionRate}% of quotations convert to orders ({summary.totalQuotations - Math.round(summary.totalQuotations * summary.conversionRate / 100)}/{summary.totalQuotations} not converted).
+                  Follow up on pending quotations and improve sales pitch to boost conversion.
+                </p>
+              </div>
+            </div>
+          )}
+          {hasLowPayment && (
+            <div className="flex items-start gap-2.5 rounded-lg border border-red-500/30 bg-red-500/5 p-3 animate-slide-in">
+              <CreditCard className="h-4 w-4 shrink-0 text-red-400 mt-0.5" />
+              <div className="text-xs">
+                <p className="font-semibold text-red-400">Low Payment Collection</p>
+                <p className="text-muted-foreground mt-0.5">
+                  Only {summary.paymentCollectionRate}% of revenue has been collected. Outstanding receivables need urgent attention.
+                  Prioritize follow-ups with customers who have large unpaid balances.
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
