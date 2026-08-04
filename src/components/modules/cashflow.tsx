@@ -23,6 +23,9 @@ import {
   Gauge,
   Clock,
   Construction,
+  Sparkles,
+  AlertTriangle,
+  TrendingDown,
 } from 'lucide-react'
 import {
   AreaChart,
@@ -37,6 +40,8 @@ import {
   CartesianGrid,
   Line,
   ReferenceLine,
+  ComposedChart,
+  Bar,
 } from 'recharts'
 import { differenceInDays, format, parseISO } from 'date-fns'
 
@@ -80,6 +85,39 @@ interface CashFlowData {
   outflowBreakdown: BreakdownItem[]
   upcomingOutflows: UpcomingItem[]
   upcomingInflows: UpcomingItem[]
+}
+
+// ─── Forecast Types (NEW) ────────────────────────────────────────────────────
+
+interface ForecastSummary {
+  currentBalance: number
+  avgDailyIn: number
+  avgDailyOut: number
+  avgDailyNet: number
+  runwayDays: number | null
+  breakevenDay: string | null
+  minBalance: number
+  minBalanceDate: string
+  projectedClosingBalance: number
+  totalProjectedInflow: number
+  totalProjectedOutflow: number
+  forecastDays: number
+}
+
+interface ForecastDay {
+  date: string
+  projectedInflow: number
+  projectedOutflow: number
+  netFlow: number
+  balance: number
+  isBreakeven: boolean
+}
+
+interface ForecastData {
+  summary: ForecastSummary
+  forecast: ForecastDay[]
+  upcomingInflowsCount: number
+  upcomingOutflowsCount: number
 }
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -350,6 +388,8 @@ export function CashFlowModule() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [period, setPeriod] = useState(30)
+  const [forecast, setForecast] = useState<ForecastData | null>(null)
+  const [forecastDays, setForecastDays] = useState(30)
 
   const fetchData = useCallback(async (p: number) => {
     setLoading(true)
@@ -366,9 +406,24 @@ export function CashFlowModule() {
     }
   }, [])
 
+  const fetchForecast = useCallback(async (days: number) => {
+    try {
+      const res = await fetch(`/api/cashflow/forecast?days=${days}`)
+      if (!res.ok) return
+      const json = await res.json()
+      if (!json.error) setForecast(json)
+    } catch {
+      // Forecast is optional — fail silently
+    }
+  }, [])
+
   useEffect(() => {
     fetchData(period)
   }, [period, fetchData])
+
+  useEffect(() => {
+    fetchForecast(forecastDays)
+  }, [forecastDays, fetchForecast])
 
   if (loading) return <LoadingSkeleton />
 
@@ -634,6 +689,15 @@ export function CashFlowModule() {
         </div>
       </div>
 
+      {/* ─── Cash Flow Forecast (NEW FEATURE) ─────────────────────── */}
+      {forecast && forecast.forecast.length > 0 && (
+        <CashFlowForecastWidget
+          data={forecast}
+          forecastDays={forecastDays}
+          onForecastDaysChange={setForecastDays}
+        />
+      )}
+
       {/* ─── Upcoming Cash Flows ───────────────────────────────────── */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Expected Inflows */}
@@ -667,6 +731,266 @@ export function CashFlowModule() {
           </div>
           <UpcomingTable items={upcomingOutflows} type="outflow" />
         </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Cash Flow Forecast Widget (NEW FEATURE) ─────────────────────────────────
+// Forward-looking projection of cash balance based on historical averages and
+// scheduled upcoming inflows/outflows.  Shows projected balance trajectory,
+// runway, breakeven day, and risk indicators.
+
+function ForecastTooltip({ active, payload, label }: { active?: boolean; payload?: Array<{ name: string; value: number; color: string }>; label?: string }) {
+  if (!active || !payload?.length) return null
+  return (
+    <div className="rounded-lg border border-border/50 bg-background/95 backdrop-blur-sm px-3 py-2 text-xs shadow-xl">
+      <p className="mb-1.5 font-medium text-muted-foreground">
+        {label ? format(parseISO(label), 'dd MMM yyyy') : ''}
+      </p>
+      {payload.map((item) => (
+        <div key={item.name} className="flex items-center justify-between gap-4">
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: item.color }} />
+            {item.name}
+          </span>
+          <span className="font-medium tabular-nums">{INR(item.value)}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function CashFlowForecastWidget({
+  data,
+  forecastDays,
+  onForecastDaysChange,
+}: {
+  data: ForecastData
+  forecastDays: number
+  onForecastDaysChange: (days: number) => void
+}) {
+  const { summary, forecast } = data
+  const isBurning = summary.avgDailyNet < 0
+  const hasBreakeven = summary.breakevenDay !== null
+  const projectedChange = summary.projectedClosingBalance - summary.currentBalance
+  const isProjectedGain = projectedChange >= 0
+
+  const FORECAST_OPTIONS = [
+    { label: '14D', value: 14 },
+    { label: '30D', value: 30 },
+    { label: '60D', value: 60 },
+    { label: '90D', value: 90 },
+  ]
+
+  // Chart data — sample every Nth day to avoid clutter
+  const step = forecast.length > 60 ? 3 : forecast.length > 30 ? 2 : 1
+  const chartData = forecast
+    .filter((_, i) => i % step === 0 || i === forecast.length - 1)
+    .map((d) => ({
+      date: d.date,
+      balance: d.balance,
+      inflow: d.projectedInflow,
+      outflow: d.projectedOutflow,
+    }))
+
+  return (
+    <div className="premium-card rounded-xl p-5">
+      {/* Header */}
+      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-3">
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/15 glow-ring">
+            <Sparkles className="h-5 w-5 text-primary" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-semibold">Cash Flow Forecast</h3>
+              <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary">
+                <Sparkles className="h-2.5 w-2.5" />
+                AI Projected
+              </span>
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              Next {summary.forecastDays} days · Based on 30-day history + scheduled transactions
+            </p>
+          </div>
+        </div>
+
+        {/* Forecast period selector */}
+        <div className="flex items-center gap-1.5 rounded-lg bg-muted/30 p-1">
+          {FORECAST_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              onClick={() => onForecastDaysChange(opt.value)}
+              className={`rounded-md px-2.5 py-1 text-[11px] font-semibold transition-all ${
+                forecastDays === opt.value
+                  ? 'bg-primary text-primary-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Forecast metrics grid */}
+      <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {/* Current Balance */}
+        <div className="rounded-lg border border-border/50 bg-muted/20 p-3">
+          <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+            <Wallet className="h-3 w-3" />
+            Current
+          </div>
+          <p className="mt-1 text-lg font-bold tabular-nums">{INR(summary.currentBalance)}</p>
+        </div>
+
+        {/* Projected Closing */}
+        <div className={`rounded-lg border p-3 ${isProjectedGain ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-red-500/30 bg-red-500/5'}`}>
+          <div className={`flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider ${isProjectedGain ? 'text-emerald-400' : 'text-red-400'}`}>
+            {isProjectedGain ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
+            Projected ({summary.forecastDays}d)
+          </div>
+          <p className={`mt-1 text-lg font-bold tabular-nums ${isProjectedGain ? 'text-emerald-400' : 'text-red-400'}`}>
+            {INR(summary.projectedClosingBalance)}
+          </p>
+          <p className="text-[10px] text-muted-foreground tabular-nums">
+            {isProjectedGain ? '+' : ''}{INR(projectedChange)}
+          </p>
+        </div>
+
+        {/* Daily Net */}
+        <div className={`rounded-lg border p-3 ${isBurning ? 'border-red-500/30 bg-red-500/5' : 'border-emerald-500/30 bg-emerald-500/5'}`}>
+          <div className={`flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider ${isBurning ? 'text-red-400' : 'text-emerald-400'}`}>
+            <Gauge className="h-3 w-3" />
+            Daily Net
+          </div>
+          <p className={`mt-1 text-lg font-bold tabular-nums ${isBurning ? 'text-red-400' : 'text-emerald-400'}`}>
+            {isBurning ? '' : '+'}{INR(summary.avgDailyNet)}
+          </p>
+          <p className="text-[10px] text-muted-foreground tabular-nums">
+            In: {INR(summary.avgDailyIn)} · Out: {INR(summary.avgDailyOut)}
+          </p>
+        </div>
+
+        {/* Runway / Breakeven */}
+        <div className={`rounded-lg border p-3 ${hasBreakeven ? 'border-red-500/40 bg-red-500/10' : 'border-emerald-500/30 bg-emerald-500/5'}`}>
+          <div className={`flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider ${hasBreakeven ? 'text-red-400' : 'text-emerald-400'}`}>
+            <Clock className="h-3 w-3" />
+            {hasBreakeven ? 'Breakeven' : 'Runway'}
+          </div>
+          {hasBreakeven ? (
+            <>
+              <p className="mt-1 text-lg font-bold tabular-nums text-red-400">
+                {format(parseISO(summary.breakevenDay!), 'dd MMM')}
+              </p>
+              <p className="text-[10px] text-muted-foreground">Cash hits zero</p>
+            </>
+              ) : summary.runwayDays !== null ? (
+            <>
+              <p className="mt-1 text-lg font-bold tabular-nums text-emerald-400">
+                {summary.runwayDays}d
+              </p>
+              <p className="text-[10px] text-muted-foreground">At current burn</p>
+            </>
+              ) : (
+            <>
+              <p className="mt-1 text-lg font-bold tabular-nums text-emerald-400">∞</p>
+              <p className="text-[10px] text-muted-foreground">Cash growing</p>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Forecast chart */}
+      <div className="h-[260px] w-full">
+        <ResponsiveContainer width="100%" height="100%">
+          <ComposedChart data={chartData} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+            <defs>
+              <linearGradient id="gradForecastBalance" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="oklch(0.78 0.14 85)" stopOpacity={0.35} />
+                <stop offset="100%" stopColor="oklch(0.78 0.14 85)" stopOpacity={0} />
+              </linearGradient>
+            </defs>
+            <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.3 0.005 260)" opacity={0.25} />
+            <XAxis
+              dataKey="date"
+              tick={{ fill: 'oklch(0.6 0.01 260)', fontSize: 10 }}
+              axisLine={false}
+              tickLine={false}
+              tickFormatter={(v) => format(parseISO(v), 'dd MMM')}
+              interval={Math.floor(chartData.length / 6)}
+            />
+            <YAxis
+              tick={{ fill: 'oklch(0.6 0.01 260)', fontSize: 10 }}
+              axisLine={false}
+              tickLine={false}
+              tickFormatter={(v) => formatCompact(v)}
+            />
+            <Tooltip content={<ForecastTooltip />} />
+            <ReferenceLine y={0} stroke="oklch(0.65 0.2 25)" strokeDasharray="4 4" strokeWidth={1} />
+            <Area
+              type="monotone"
+              dataKey="balance"
+              name="Projected Balance"
+              stroke="oklch(0.78 0.14 85)"
+              fill="url(#gradForecastBalance)"
+              strokeWidth={2.5}
+            />
+            <Bar
+              dataKey="inflow"
+              name="Inflow"
+              fill="oklch(0.65 0.18 155)"
+              opacity={0.5}
+              barSize={4}
+            />
+            <Bar
+              dataKey="outflow"
+              name="Outflow"
+              fill="oklch(0.65 0.2 25)"
+              opacity={0.5}
+              barSize={4}
+            />
+          </ComposedChart>
+        </ResponsiveContainer>
+      </div>
+
+      {/* Risk alert banner */}
+      {hasBreakeven && (
+        <div className="mt-4 flex items-start gap-2.5 rounded-lg border border-red-500/30 bg-red-500/5 p-3 animate-slide-in">
+          <AlertTriangle className="h-4 w-4 shrink-0 text-red-400 mt-0.5" />
+          <div className="text-xs">
+            <p className="font-semibold text-red-400">Cash Flow Risk Detected</p>
+            <p className="text-muted-foreground mt-0.5">
+              At current burn rate, cash balance is projected to drop below zero on{' '}
+              <span className="font-medium text-foreground">
+                {format(parseISO(summary.breakevenDay!), 'dd MMM yyyy')}
+              </span>
+              . Min projected balance: <span className="font-medium text-red-400">{INR(summary.minBalance)}</span>{' '}
+              on {format(parseISO(summary.minBalanceDate), 'dd MMM')}. Consider accelerating receivables collection
+              or deferring non-essential outflows.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Footer info */}
+      <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] text-muted-foreground">
+        <span className="flex items-center gap-1">
+          <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: 'oklch(0.78 0.14 85)' }} />
+          Projected Balance
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: 'oklch(0.65 0.18 155)' }} />
+          Daily Inflow
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: 'oklch(0.65 0.2 25)' }} />
+          Daily Outflow
+        </span>
+        <span className="ml-auto">
+          {data.upcomingInflowsCount} scheduled inflows · {data.upcomingOutflowsCount} scheduled outflows
+        </span>
       </div>
     </div>
   )

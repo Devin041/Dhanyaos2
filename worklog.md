@@ -162,3 +162,81 @@
 4. **Add more features:** Consider adding a "Cash Flow Forecast" widget, "Inventory Aging" chart, or "Supplier Performance" scorecard
 5. **Start the websocket mini-service** for real-time notifications
 6. **Polish mobile responsiveness** — verify all modules work well on mobile viewport
+
+---
+
+## Task ID: 9 (Cron: 15-min webDevReview)
+**Agent:** Main Agent (Z.ai Code) — automated review round 2
+**Task:** Assess project status, QA test all modules, improve styling, add new feature
+
+### Work Log:
+
+**1. Comprehensive QA Testing — ALL modules tested (zero errors):**
+- Tested all 7 dashboards via agent-browser: Founder, CFO, COO, Sales, Purchase, Brand, Investor — all render with no console errors
+- Tested all 24 modules via agent-browser: Style Master, Workers, Costing, Client Catalog, Sample Catalog, Production, Sampling, Quality Control, Vendors, Sales Orders, Customers, Quotations, Suppliers, Purchase Orders, Fabric Stock, Inventory, GRN, Dispatch, Returns, Consumption, Reservations, Finished Goods, Accounts, Cash Flow, Reports, GST Reports, Analytics — ALL render with zero console errors
+- Verified previously-fixed endpoints still return 200 (capital-investments, supplier-returns, customer-returns)
+- App is very stable — no bugs found this round
+
+**2. New Feature — Cash Flow Forecast API + Widget:**
+- Created new API endpoint `/api/cashflow/forecast?days=30` (`src/app/api/cashflow/forecast/route.ts`)
+  - Generates forward-looking cash flow projection based on:
+    1. Current cash balance (latest DailySnapshot)
+    2. Historical average daily net flow (last 30 days)
+    3. Upcoming confirmed inflows (SalesOrders with future deliveryDate, unpaid)
+    4. Upcoming confirmed outflows (PurchaseOrders with future expectedDelivery, unpaid)
+  - Returns day-by-day projected balance for next 7-90 days
+  - Computes: runway days, breakeven day, min balance, projected closing balance
+  - Uses `isMissingTableError()` for graceful degradation if DailySnapshot table missing
+  - Verified with real data: Current ₹12.48L, Avg Daily Net -₹2,924, Runway 426 days, Projected ₹14.3L in 30 days
+
+- Added `CashFlowForecastWidget` component to Cash Flow module (`src/components/modules/cashflow.tsx`)
+  - Premium card with "AI Projected" badge and Sparkles icon
+  - 4-metric grid: Current Balance, Projected Closing (with gain/loss color), Daily Net (burn/grow indicator), Runway/Breakeven
+  - Interactive forecast period selector (14D / 30D / 60D / 90D)
+  - ComposedChart with:
+    - Area chart for projected balance trajectory (gold gradient fill)
+    - Bar chart for daily inflows (emerald) and outflows (red)
+    - ReferenceLine at y=0 (breakeven threshold)
+    - Custom tooltip with formatted INR values and dates
+  - Risk alert banner (red) appears when breakeven day is detected, showing exact date and min balance with actionable recommendation
+  - Footer legend with scheduled inflows/outflows counts
+  - All metrics color-coded: green for positive, red for negative/breakeven
+  - Responsive layout
+
+**3. Styling Improvements:**
+- Applied `premium-card` class to forecast widget (gradient bg, hover lift, sheen sweep)
+- Used `glow-ring` on Sparkles icon for radial glow on hover
+- Used `animate-slide-in` for risk alert banner entrance animation
+- Color-coded metric cards (emerald for gains, red for losses/breakeven)
+- Consistent tabular-nums for all numeric values
+- Responsive grid: 2 cols on mobile, 4 cols on desktop
+
+### Stage Summary:
+- **QA Status:** ✅ ALL 7 dashboards + 24 modules tested — ZERO console errors. App is very stable.
+- **New Feature:** Cash Flow Forecast with AI projection (API + Widget) — fully functional with real data
+- **Styling:** Premium card styling with glow effects, color-coded metrics, animated risk alerts
+- **Interactivity:** Forecast period selector (14D/30D/60D/90D) all working, chart updates dynamically
+
+### Verification Results:
+- All 7 dashboards render without errors ✓
+- All 24 modules render without errors ✓
+- Cash Flow Forecast API returns real projected data (₹12.48L → ₹14.3L in 30 days) ✓
+- Forecast widget renders with "AI PROJECTED" badge, 4 metrics, composed chart ✓
+- All 4 forecast period buttons (14D/30D/60D/90D) work without errors ✓
+- No browser console errors ✓
+- No 500 server errors ✓
+
+### Unresolved Issues / Risks:
+1. **Missing Supabase tables:** `CapitalInvestment`, `SupplierReturn`, `CustomerReturn` still don't exist (gracefully returning empty data from Task 8 fix). To enable fully, run SQL migrations in Supabase dashboard
+2. **Pre-existing lint error:** `src/components/module-resolver.tsx:226` react-hooks/set-state-in-effect warning — pre-existing from cloned repo, not introduced by this round
+3. **Memory usage:** Server stable at ~2GB RAM
+4. **Forecast accuracy:** Forecast uses historical 30-day average as baseline; for better accuracy, could weight recent days more heavily or add seasonality detection
+
+### Priority Recommendations for Next Phase:
+1. **Create missing Supabase tables** — run SQL migrations for CapitalInvestment, SupplierReturn, CustomerReturn to enable those modules fully
+2. **Add Inventory Aging chart** — visualize how long inventory items have been in stock, identify dead stock
+3. **Add Supplier Performance scorecard** — aggregate supplier metrics (on-time delivery, quality, pricing)
+4. **Enhance AI Agent** — integrate the forecast data into AI advisor insights
+5. **Start the websocket mini-service** for real-time notifications
+6. **Add export functionality** — allow exporting forecast data to Excel/PDF
+7. **Polish mobile responsiveness** — verify all new widgets work well on mobile viewport
