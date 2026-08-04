@@ -329,3 +329,100 @@
 5. **Start the websocket mini-service** for real-time notifications
 6. **Add Customer Insights dashboard** — top customers by revenue, payment behavior, order frequency
 7. **Polish mobile responsiveness** — verify all new widgets work well on mobile viewport
+
+---
+
+## Task ID: 11 (Cron: 15-min webDevReview)
+**Agent:** Main Agent (Z.ai Code) — automated review round 4
+**Task:** Assess project status, QA test, add Supplier Performance Scorecard, improve styling
+
+### Work Log:
+
+**1. QA Verification:**
+- Verified dev server running healthy (next-server v16.1.3)
+- Verified all key endpoints return 200 (dashboard, suppliers, inventory/aging, cashflow/forecast)
+- App remains stable from round 3 — no new bugs found
+
+**2. New Feature — Supplier Performance Scorecard (API + Widget):**
+
+- Created new API endpoint `/api/suppliers/performance` (`src/app/api/suppliers/performance/route.ts`)
+  - Aggregates supplier metrics across PurchaseOrders, deliveries, quality ratings, and payment behavior
+  - For each supplier computes:
+    - PO count, total PO value, paid/unpaid breakdown, outstanding payables
+    - On-time delivery rate (delivered POs by expectedDelivery date)
+    - Average lead time (createdAt → expectedDelivery)
+    - Fill rate (receivedQty / orderedQty)
+    - Quality rating (from Supplier.rating, 1-5)
+    - Composite performance score (0-100) using weighted formula:
+      - On-time delivery: 30%
+      - Fill rate: 25%
+      - Quality rating: 25%
+      - Payment discipline (paid/total): 10%
+      - Volume (normalized): 10%
+    - Score grade: A (≥85), B (≥70), C (≥50), D (<50)
+    - Tier: Strategic (≥85 + 3+ POs), Preferred (≥70), Approved (≥50), Conditional (<50)
+  - Returns ranked supplier list + summary stats (avgScore, avgOnTimeRate, avgFillRate, tier counts, grade distribution)
+  - Uses `isMissingTableError()` for graceful degradation
+  - Verified with real data: 6 suppliers, avg score 71/100, 3 Preferred + 3 Approved, 2 Grade A, 1 Grade B, 3 Grade C
+
+- Added `SupplierPerformanceWidget` component to Suppliers module (`src/components/modules/suppliers.tsx`)
+  - Premium card with "AI Ranked" badge and Trophy icon with glow ring
+  - 4-metric grid: Avg Score (/100), On-Time Rate (emerald), Total PO Value, Outstanding payables (amber)
+  - Tier distribution badges: Strategic (primary/gold), Preferred (emerald), Approved (sky), Conditional (amber) with counts
+  - Grade distribution legend (A/B/C/D with color dots and counts)
+  - Two-column layout:
+    - Left (2/3): Horizontal bar chart "Top 5 Suppliers by Composite Score" with color-coded bars by grade
+    - Right (1/3): Radar chart "#1 Profile" showing 5-dimension breakdown (On-Time, Fill Rate, Quality, Volume, Payment) for top supplier
+  - Complete ranking table with 11 columns:
+    - Rank #, Supplier name+type, Tier badge, Score+Grade badge, POs, PO Value, On-Time%, Fill Rate%, Lead Time, Rating, Outstanding
+    - Color-coded on-time and fill rate values (green ≥90/80, amber ≥70/50, red below)
+    - Color-coded score with grade badge (colored square with letter)
+    - Staggered slide-in animation for rows
+  - Performance review alert banner (amber, animated) when Conditional suppliers exist
+  - Custom tooltips for both charts
+  - Fully responsive (2 cols mobile, 4 cols desktop for metrics; 1 col mobile, 3 cols desktop for charts)
+
+**3. Styling Improvements:**
+- Applied `premium-card` class (gradient bg, hover lift, sheen sweep)
+- Used `glow-ring` on Trophy icon for radial glow on hover
+- Color-coded grade badges (A=green, B=gold, C=orange, D=red) as colored squares with white letter
+- Color-coded tier badges (Strategic=primary, Preferred=emerald, Approved=sky, Conditional=amber)
+- Color-coded metric values (on-time, fill rate) based on threshold
+- Staggered slide-in animations for table rows
+- Radar chart with gold fill (35% opacity) for top supplier profile
+- Horizontal bar chart with rounded right corners and grade-colored cells
+- Consistent tabular-nums for all numeric values
+
+### Stage Summary:
+- **QA Status:** ✅ App stable, no new bugs, all previous features intact
+- **New Feature:** Supplier Performance Scorecard (API + Widget) — fully functional with real data (6 suppliers, avg score 71/100)
+- **Styling:** Premium card, color-coded grades/tiers/metrics, radar chart, animated alerts, glow effects
+- **Verification:** Widget renders with "AI RANKED" badge, all 4 metric cards, tier distribution, top 5 bar chart, #1 radar profile, complete rankings table with all 6 real suppliers
+
+### Verification Results:
+- Supplier Performance API returns HTTP 200 with real data ✓
+- Widget renders "Supplier Performance Scorecard" heading + "AI RANKED" badge ✓
+- 4 metric cards visible (AVG SCORE, ON-TIME RATE, TOTAL PO VALUE, OUTSTANDING) ✓
+- Tier distribution badges render (Strategic, Preferred, Approved, Conditional) ✓
+- Grade distribution legend renders (A: 2, B: 1, C: 3, D: 0) ✓
+- Top 5 bar chart renders with color-coded bars ✓
+- #1 Profile radar chart renders for Mumbai Accessories Ltd ✓
+- Complete rankings table shows all 6 real suppliers (Mumbai Accessories, Delhi Embroidery, Rajasthan Print, Ahmedabad Textile, Surat Fabric, Kolkata Silk) ✓
+- No browser console errors ✓
+- No 500 server errors ✓
+
+### Unresolved Issues / Risks:
+1. **Missing Supabase tables:** `CapitalInvestment`, `SupplierReturn`, `CustomerReturn`, `FinishedGood` still don't exist (gracefully returning empty data). To enable fully, run SQL migrations in Supabase dashboard
+2. **Pre-existing lint error:** `src/components/module-resolver.tsx:226` react-hooks/set-state-in-effect warning — pre-existing from cloned repo
+3. **Memory usage:** Server stable at ~2.2GB RAM
+4. **Low fill rates:** Most suppliers show low fill rates (0-10%) because POs are mostly Pending (13 of 15) with minimal receivedQty. This is expected for early-stage data
+5. **On-time rate 100%:** All delivered POs (2 Partial) are on-time since expectedDelivery dates haven't passed yet. Real on-time tracking will improve as more POs are fulfilled
+
+### Priority Recommendations for Next Phase:
+1. **Create missing Supabase tables** — run SQL migrations for CapitalInvestment, SupplierReturn, CustomerReturn, FinishedGood
+2. **Add Customer Insights dashboard** — top customers by revenue, payment behavior, order frequency, lifetime value
+3. **Enhance AI Agent** — integrate performance/aging/forecast data into AI advisor insights
+4. **Add export functionality** — allow exporting performance/aging/forecast data to Excel/PDF
+5. **Start the websocket mini-service** for real-time notifications
+6. **Add Production Efficiency dashboard** — track production job progress, stage bottlenecks, worker productivity
+7. **Polish mobile responsiveness** — verify all new widgets work well on mobile viewport

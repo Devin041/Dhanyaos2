@@ -60,7 +60,28 @@ import {
   Package,
   Layers,
   Clock,
+  Trophy,
+  Award,
+  TrendingUp,
+  Sparkles,
+  ShieldCheck,
+  Zap,
 } from 'lucide-react'
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip as RTooltip,
+  ResponsiveContainer,
+  Cell as RCell,
+  CartesianGrid,
+  RadarChart,
+  Radar,
+  PolarGrid,
+  PolarAngleAxis,
+  PolarRadiusAxis,
+} from 'recharts'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -119,6 +140,54 @@ interface SupplierSummary {
   avgRating: number
   uniqueTypes: number
   pendingPayments: number
+}
+
+// ─── Supplier Performance Types (NEW) ────────────────────────────────────────
+
+interface PerfSupplier {
+  id: string
+  name: string
+  supplierType: string
+  contactPerson: string | null
+  phone: string | null
+  rating: number
+  paymentTerms: number
+  poCount: number
+  totalPOValue: number
+  paidAmount: number
+  outstandingPayables: number
+  deliveredCount: number
+  pendingCount: number
+  onTimeCount: number
+  lateCount: number
+  onTimeRate: number
+  avgLeadTimeDays: number
+  totalOrderedQty: number
+  totalReceivedQty: number
+  fillRate: number
+  compositeScore: number
+  scoreGrade: 'A' | 'B' | 'C' | 'D'
+  tier: 'Strategic' | 'Preferred' | 'Approved' | 'Conditional'
+}
+
+interface PerfSummary {
+  totalSuppliers: number
+  avgScore: number
+  avgOnTimeRate: number
+  avgFillRate: number
+  avgRating: number
+  totalPOValue: number
+  totalOutstanding: number
+  strategicCount: number
+  preferredCount: number
+  approvedCount: number
+  conditionalCount: number
+  gradeDist: { A: number; B: number; C: number; D: number }
+}
+
+interface PerfData {
+  summary: PerfSummary
+  suppliers: PerfSupplier[]
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -235,6 +304,7 @@ export function Suppliers() {
   const [search, setSearch] = useState('')
   const [typeFilter, setTypeFilter] = useState('All')
   const [statusFilter, setStatusFilter] = useState('All')
+  const [perf, setPerf] = useState<PerfData | null>(null)
 
   // Detail panel
   const [selectedSupplier, setSelectedSupplier] = useState<Supplier | null>(null)
@@ -281,10 +351,22 @@ export function Suppliers() {
     }
   }, [search, typeFilter, statusFilter])
 
+  const fetchPerf = useCallback(async () => {
+    try {
+      const res = await fetch('/api/suppliers/performance')
+      if (!res.ok) return
+      const json = await res.json()
+      if (!json.error) setPerf(json)
+    } catch {
+      // Performance is optional — fail silently
+    }
+  }, [])
+
   useEffect(() => {
     const timer = setTimeout(() => fetchSuppliers(), 200)
+    fetchPerf()
     return () => clearTimeout(timer)
-  }, [fetchSuppliers])
+  }, [fetchSuppliers, fetchPerf])
 
   const openDetail = async (supplier: Supplier) => {
     setSelectedSupplier(supplier)
@@ -1294,6 +1376,333 @@ export function Suppliers() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* ─── Supplier Performance Scorecard (NEW FEATURE) ─────────────── */}
+      {perf && perf.summary.totalSuppliers > 0 && (
+        <SupplierPerformanceWidget data={perf} />
+      )}
+    </div>
+  )
+}
+
+// ─── Supplier Performance Scorecard Widget (NEW FEATURE) ─────────────────────
+// Aggregates supplier metrics into a composite score (0-100) with tier
+// classification (Strategic/Preferred/Approved/Conditional).  Shows ranking,
+// grade distribution, and per-supplier radar breakdown.
+
+function PerfChartTooltip({ active, payload, label }: { active?: boolean; payload?: Array<{ name: string; value: number; payload: { tier: string; scoreGrade: string } }>; label?: string }) {
+  if (!active || !payload?.length) return null
+  const p = payload[0].payload
+  return (
+    <div className="rounded-lg border border-border/50 bg-background/95 backdrop-blur-sm px-3 py-2 text-xs shadow-xl">
+      <p className="mb-1 font-medium">{label}</p>
+      <p className="font-semibold tabular-nums text-primary">{payload[0].value}/100</p>
+      <p className="text-[10px] text-muted-foreground mt-0.5">
+        Grade {p.scoreGrade} · {p.tier}
+      </p>
+    </div>
+  )
+}
+
+function getGradeColor(grade: string): string {
+  switch (grade) {
+    case 'A': return 'oklch(0.72 0.18 145)' // green
+    case 'B': return 'oklch(0.8 0.15 75)'   // gold
+    case 'C': return 'oklch(0.75 0.15 65)'  // orange
+    case 'D': return 'oklch(0.65 0.22 25)'  // red
+    default: return 'oklch(0.6 0.01 260)'
+  }
+}
+
+function getTierColor(tier: string): { text: string; bg: string; border: string } {
+  switch (tier) {
+    case 'Strategic':
+      return { text: 'text-primary', bg: 'bg-primary/10', border: 'border-primary/40' }
+    case 'Preferred':
+      return { text: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/40' }
+    case 'Approved':
+      return { text: 'text-sky-400', bg: 'bg-sky-500/10', border: 'border-sky-500/40' }
+    case 'Conditional':
+      return { text: 'text-amber-400', bg: 'bg-amber-500/10', border: 'border-amber-500/40' }
+    default:
+      return { text: 'text-muted-foreground', bg: 'bg-muted/30', border: 'border-border' }
+  }
+}
+
+function SupplierPerformanceWidget({ data }: { data: PerfData }) {
+  const { summary, suppliers } = data
+  const top5 = suppliers.slice(0, 5)
+
+  // Radar data for top supplier (highest score)
+  const topSupplier = suppliers[0]
+  const radarData = topSupplier ? [
+    { metric: 'On-Time', value: topSupplier.onTimeRate, fullMark: 100 },
+    { metric: 'Fill Rate', value: topSupplier.fillRate, fullMark: 100 },
+    { metric: 'Quality', value: (topSupplier.rating / 5) * 100, fullMark: 100 },
+    { metric: 'Volume', value: Math.min(100, (topSupplier.poCount / 10) * 100), fullMark: 100 },
+    { metric: 'Payment', value: topSupplier.totalPOValue > 0 ? (topSupplier.paidAmount / topSupplier.totalPOValue) * 100 : 100, fullMark: 100 },
+  ] : []
+
+  return (
+    <div className="premium-card rounded-xl p-5">
+      {/* Header */}
+      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-3">
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/15 glow-ring">
+            <Trophy className="h-5 w-5 text-primary" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-semibold">Supplier Performance Scorecard</h3>
+              <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary">
+                <Sparkles className="h-2.5 w-2.5" />
+                AI Ranked
+              </span>
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              {summary.totalSuppliers} suppliers · Avg score {summary.avgScore}/100 · {summary.strategicCount} Strategic, {summary.preferredCount} Preferred
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Metrics grid */}
+      <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <div className="rounded-lg border border-border/50 bg-muted/20 p-3">
+          <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+            <Award className="h-3 w-3" />
+            Avg Score
+          </div>
+          <p className="mt-1 text-lg font-bold tabular-nums">{summary.avgScore}<span className="text-xs text-muted-foreground">/100</span></p>
+          <p className="text-[10px] text-muted-foreground">Across {summary.totalSuppliers} suppliers</p>
+        </div>
+
+        <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3">
+          <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-emerald-400">
+            <Clock className="h-3 w-3" />
+            On-Time Rate
+          </div>
+          <p className="mt-1 text-lg font-bold tabular-nums text-emerald-400">{summary.avgOnTimeRate}%</p>
+          <p className="text-[10px] text-muted-foreground">Avg fill: {summary.avgFillRate}%</p>
+        </div>
+
+        <div className="rounded-lg border border-border/50 bg-muted/20 p-3">
+          <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+            <IndianRupee className="h-3 w-3" />
+            Total PO Value
+          </div>
+          <p className="mt-1 text-lg font-bold tabular-nums">{formatINR(summary.totalPOValue)}</p>
+          <p className="text-[10px] text-muted-foreground tabular-nums">★ {summary.avgRating}/5 avg rating</p>
+        </div>
+
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
+          <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-amber-400">
+            <ShieldCheck className="h-3 w-3" />
+            Outstanding
+          </div>
+          <p className="mt-1 text-lg font-bold tabular-nums text-amber-400">{formatINR(summary.totalOutstanding)}</p>
+          <p className="text-[10px] text-muted-foreground">Unpaid payables</p>
+        </div>
+      </div>
+
+      {/* Tier distribution */}
+      <div className="mb-5 flex flex-wrap items-center gap-2">
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mr-1">Tiers:</span>
+        {[
+          { label: 'Strategic', count: summary.strategicCount, icon: Trophy, color: 'text-primary border-primary/40 bg-primary/10' },
+          { label: 'Preferred', count: summary.preferredCount, icon: Award, color: 'text-emerald-400 border-emerald-500/40 bg-emerald-500/10' },
+          { label: 'Approved', count: summary.approvedCount, icon: ShieldCheck, color: 'text-sky-400 border-sky-500/40 bg-sky-500/10' },
+          { label: 'Conditional', count: summary.conditionalCount, icon: Zap, color: 'text-amber-400 border-amber-500/40 bg-amber-500/10' },
+        ].map(t => (
+          <div key={t.label} className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-semibold ${t.color}`}>
+            <t.icon className="h-3 w-3" />
+            {t.label}
+            <span className="tabular-nums">{t.count}</span>
+          </div>
+        ))}
+        <div className="ml-auto flex items-center gap-3 text-[10px] text-muted-foreground">
+          <span>Grades:</span>
+          {['A', 'B', 'C', 'D'].map(g => (
+            <span key={g} className="flex items-center gap-1">
+              <span className="h-2 w-2 rounded-sm" style={{ backgroundColor: getGradeColor(g) }} />
+              {g}: <span className="tabular-nums font-medium">{summary.gradeDist[g as 'A' | 'B' | 'C' | 'D']}</span>
+            </span>
+          ))}
+        </div>
+      </div>
+
+      {/* Top 5 ranking + radar */}
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
+        {/* Ranking bars */}
+        <div className="lg:col-span-2">
+          <h4 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            Top 5 Suppliers by Composite Score
+          </h4>
+          <div className="h-[240px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={top5} layout="vertical" margin={{ top: 5, right: 30, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.3 0.005 260)" opacity={0.25} horizontal={false} />
+                <XAxis
+                  type="number"
+                  domain={[0, 100]}
+                  tick={{ fill: 'oklch(0.6 0.01 260)', fontSize: 10 }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <YAxis
+                  type="category"
+                  dataKey="name"
+                  tick={{ fill: 'oklch(0.6 0.01 260)', fontSize: 10 }}
+                  axisLine={false}
+                  tickLine={false}
+                  width={120}
+                  tickFormatter={(v) => v.length > 16 ? v.substring(0, 16) + '…' : v}
+                />
+                <RTooltip content={<PerfChartTooltip />} cursor={{ fill: 'oklch(0.5 0.01 260 / 10%)' }} />
+                <Bar dataKey="compositeScore" name="Score" radius={[0, 6, 6, 0]}>
+                  {top5.map((s, i) => (
+                    <RCell key={`cell-${i}`} fill={getGradeColor(s.scoreGrade)} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* Radar for top supplier */}
+        {topSupplier && (
+          <div>
+            <h4 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              #1 Profile: <span className="text-foreground font-medium">{topSupplier.name.length > 20 ? topSupplier.name.substring(0, 20) + '…' : topSupplier.name}</span>
+            </h4>
+            <div className="h-[240px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <RadarChart data={radarData} margin={{ top: 10, right: 10, left: 10, bottom: 10 }}>
+                  <PolarGrid stroke="oklch(0.3 0.005 260)" opacity={0.4} />
+                  <PolarAngleAxis dataKey="metric" tick={{ fill: 'oklch(0.6 0.01 260)', fontSize: 9 }} />
+                  <PolarRadiusAxis domain={[0, 100]} tick={{ fill: 'oklch(0.6 0.01 260)', fontSize: 8 }} angle={90} />
+                  <Radar
+                    name="Score"
+                    dataKey="value"
+                    stroke="oklch(0.78 0.14 85)"
+                    fill="oklch(0.78 0.14 85)"
+                    fillOpacity={0.35}
+                    strokeWidth={2}
+                  />
+                </RadarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Full ranking table */}
+      <div className="mt-5">
+        <h4 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          Complete Supplier Rankings
+        </h4>
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow className="border-border/30 hover:bg-transparent">
+                <TableHead className="text-xs w-8">#</TableHead>
+                <TableHead className="text-xs">Supplier</TableHead>
+                <TableHead className="text-xs">Tier</TableHead>
+                <TableHead className="text-xs text-right">Score</TableHead>
+                <TableHead className="text-xs text-right">POs</TableHead>
+                <TableHead className="text-xs text-right">PO Value</TableHead>
+                <TableHead className="text-xs text-right">On-Time</TableHead>
+                <TableHead className="text-xs text-right">Fill Rate</TableHead>
+                <TableHead className="text-xs text-right">Lead Time</TableHead>
+                <TableHead className="text-xs text-center">Rating</TableHead>
+                <TableHead className="text-xs text-right">Outstanding</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {suppliers.map((s, i) => {
+                const tierColors = getTierColor(s.tier)
+                return (
+                  <TableRow key={s.id} className="border-border/20 animate-slide-in" style={{ animationDelay: `${i * 40}ms` }}>
+                    <TableCell className="text-xs font-bold tabular-nums py-2.5 text-muted-foreground">
+                      {i + 1}
+                    </TableCell>
+                    <TableCell className="py-2.5">
+                      <div className="flex flex-col">
+                        <span className="text-xs font-medium">{s.name}</span>
+                        <span className="text-[10px] text-muted-foreground">{s.supplierType}</span>
+                      </div>
+                    </TableCell>
+                    <TableCell className="py-2.5">
+                      <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${tierColors.text} ${tierColors.bg} ${tierColors.border}`}>
+                        {s.tier}
+                      </span>
+                    </TableCell>
+                    <TableCell className="py-2.5">
+                      <div className="flex items-center gap-1.5 justify-end">
+                        <span
+                          className="text-xs font-bold tabular-nums"
+                          style={{ color: getGradeColor(s.scoreGrade) }}
+                        >
+                          {s.compositeScore}
+                        </span>
+                        <span
+                          className="inline-flex h-5 w-5 items-center justify-center rounded text-[10px] font-bold text-white"
+                          style={{ backgroundColor: getGradeColor(s.scoreGrade) }}
+                        >
+                          {s.scoreGrade}
+                        </span>
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-xs text-right tabular-nums py-2.5">{s.poCount}</TableCell>
+                    <TableCell className="text-xs text-right font-medium tabular-nums py-2.5">{formatINR(s.totalPOValue)}</TableCell>
+                    <TableCell className="text-xs text-right tabular-nums py-2.5">
+                      <span className={s.onTimeRate >= 90 ? 'text-emerald-400' : s.onTimeRate >= 70 ? 'text-amber-400' : 'text-red-400'}>
+                        {s.onTimeRate}%
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-xs text-right tabular-nums py-2.5">
+                      <span className={s.fillRate >= 80 ? 'text-emerald-400' : s.fillRate >= 50 ? 'text-amber-400' : 'text-red-400'}>
+                        {s.fillRate}%
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-xs text-right tabular-nums py-2.5 text-muted-foreground">
+                      {s.avgLeadTimeDays > 0 ? `${s.avgLeadTimeDays}d` : '—'}
+                    </TableCell>
+                    <TableCell className="text-xs text-center py-2.5">
+                      <span className="inline-flex items-center gap-0.5">
+                        <Star className="h-3 w-3 fill-primary text-primary" />
+                        <span className="tabular-nums">{s.rating}</span>
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-xs text-right tabular-nums py-2.5">
+                      {s.outstandingPayables > 0 ? (
+                        <span className="text-amber-400">{formatINR(s.outstandingPayables)}</span>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                )
+              })}
+            </TableBody>
+          </Table>
+        </div>
+      </div>
+
+      {/* Insight banner */}
+      {summary.conditionalCount > 0 && (
+        <div className="mt-4 flex items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 animate-slide-in">
+          <Zap className="h-4 w-4 shrink-0 text-amber-400 mt-0.5" />
+          <div className="text-xs">
+            <p className="font-semibold text-amber-400">Performance Review Needed</p>
+            <p className="text-muted-foreground mt-0.5">
+              <span className="font-medium text-foreground">{summary.conditionalCount} supplier{summary.conditionalCount !== 1 ? 's' : ''}</span>{' '}
+              classified as Conditional (score &lt; 50). Review delivery performance, negotiate better terms,
+              or consider alternative suppliers to improve supply chain resilience.
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
