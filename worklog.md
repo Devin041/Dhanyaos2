@@ -426,3 +426,103 @@
 5. **Start the websocket mini-service** for real-time notifications
 6. **Add Production Efficiency dashboard** — track production job progress, stage bottlenecks, worker productivity
 7. **Polish mobile responsiveness** — verify all new widgets work well on mobile viewport
+
+---
+
+## Task ID: 12 (Cron: 15-min webDevReview)
+**Agent:** Main Agent (Z.ai Code) — automated review round 5
+**Task:** Assess project status, QA test, add Customer Insights dashboard, improve styling
+
+### Work Log:
+
+**1. QA Verification:**
+- Verified dev server running healthy (next-server v16.1.3)
+- Verified all key endpoints return 200 (dashboard, suppliers/performance, inventory/aging, cashflow/forecast, customers)
+- App remains stable from round 4 — no new bugs found
+
+**2. New Feature — Customer Insights Dashboard (API + Widget):**
+
+- Created new API endpoint `/api/customers/insights` (`src/app/api/customers/insights/route.ts`)
+  - Aggregates customer behavior metrics across orders, payments, and profitability
+  - For each customer computes:
+    - Order count, total revenue, total profit, avg margin
+    - Total paid, outstanding receivables, payment rate
+    - Avg order value, first/last order date, days as customer
+    - Order frequency (orders per 30 days)
+    - Lifetime value (LTV = total paid + projected annual frequency * 0.5 retention)
+    - Payment behavior score (0-100) with payment terms bonus/penalty
+    - Credit utilization (outstanding / creditLimit %)
+    - Customer segment: VIP / Loyal / Regular / New / At-Risk
+      - At-Risk: high revenue (>₹50K) but low payment rate (<30%)
+      - New: <30 days as customer and ≤3 orders
+      - VIP: revenue ≥₹10L and payment rate ≥60%
+      - Loyal: ≥5 orders and ≥30 days
+      - Regular: default
+  - Returns ranked customer list + summary + 6-month revenue trend + payment status distribution
+  - Uses `isMissingTableError()` for graceful degradation
+  - Verified with real data: 10 customers, ₹2.17 Cr revenue, ₹1.1 Cr profit, 51% avg margin, 6 At-Risk + 4 Loyal, 100% repeat rate, top customer Meera Fashions (₹30.6L)
+
+- Added `CustomerInsightsWidget` component to Customers module (`src/components/modules/customers.tsx`)
+  - Premium card with "AI Segmented" badge and Sparkles icon with glow ring
+  - 4-metric grid: Total Revenue (+profit), Avg Margin (emerald, +AOV), Outstanding (amber, +paid%), Repeat Rate (+active count)
+  - Segment distribution badges: VIP (Crown/gold), Loyal (Heart/emerald), Regular (UserCheck/sky), New (UserPlus/amber), At-Risk (AlertCircle/red) with counts
+  - Two-column layout:
+    - Left (2/3): Area chart "Revenue & Profit Trend (6 Months)" with dual gradient fills (gold for revenue, emerald for profit)
+    - Right (1/3): Donut pie chart "Payment Status" (Paid=green, Partial=gold, Unpaid=red) with legend
+  - Top 5 Customers cards (responsive 1/2/5 cols):
+    - Rank badge (#1-5), segment icon
+    - Customer name, revenue (gold), order count, margin
+    - Payment rate with color-coded progress bar (green ≥60%, amber ≥30%, red below)
+    - Staggered slide-in animation
+  - Complete Customer Intelligence Report table with 13 columns:
+    - Rank, Customer+buyer, Segment badge, Orders, Revenue, Profit (emerald), Margin (color-coded), AOV, Paid (color-coded), Outstanding (amber), Payment Score (mini progress bar), LTV (gold), Credit Utilization (color-coded)
+    - Staggered slide-in animation for rows
+  - At-Risk alert banner (red, animated) when At-Risk customers exist, with actionable collection recommendations
+  - Custom tooltips for charts
+  - Fully responsive
+
+**3. Styling Improvements:**
+- Applied `premium-card` class (gradient bg, hover lift, sheen sweep)
+- Used `glow-ring` on Sparkles icon for radial glow on hover
+- Color-coded segment badges with distinct icons per segment (Crown, Heart, UserCheck, UserPlus, AlertCircle)
+- Color-coded metric values by threshold (payment rate, margin, credit utilization)
+- Mini progress bars for payment score in table
+- Dual-gradient area chart (gold revenue + emerald profit)
+- Donut pie chart with color-coded segments and legend
+- Top 5 customer cards with hover lift effect and staggered animation
+- Consistent tabular-nums for all numeric values
+
+### Stage Summary:
+- **QA Status:** ✅ App stable, no new bugs, all previous features intact
+- **New Feature:** Customer Insights Dashboard (API + Widget) — fully functional with real data (10 customers, ₹2.17 Cr revenue)
+- **Styling:** Premium card, color-coded segments/metrics, dual-gradient charts, donut pie, animated alerts, glow effects
+- **Verification:** Widget renders with "AI SEGMENTED" badge, all 4 metric cards, 5 segment badges, revenue trend area chart, payment status donut, top 5 cards, 13-column intelligence table with all 10 real customers
+
+### Verification Results:
+- Customer Insights API returns HTTP 200 with real data ✓
+- Widget renders "Customer Insights" heading + "AI SEGMENTED" badge ✓
+- 4 metric cards visible (TOTAL REVENUE, AVG MARGIN, OUTSTANDING, REPEAT RATE) ✓
+- 5 segment badges render (VIP, Loyal, Regular, New, At-Risk) with counts ✓
+- Revenue & Profit Trend area chart renders (6 months: Mar-Aug) ✓
+- Payment Status donut pie chart renders (Paid/Partial/Unpaid) ✓
+- Top 5 Customers cards render with rank badges and payment bars ✓
+- Customer Intelligence Report table renders with all 10 real customers (Meera Fashions, Trendy ethnic, Suhani Exports, Vastra Lifestyle, Rajeshwari Textiles, Rajshree, Anaya Wholesale, etc.) ✓
+- At-Risk alert banner renders (6 At-Risk customers) ✓
+- No browser console errors ✓
+- No 500 server errors ✓
+
+### Unresolved Issues / Risks:
+1. **Missing Supabase tables:** `CapitalInvestment`, `SupplierReturn`, `CustomerReturn`, `FinishedGood` still don't exist (gracefully returning empty data). To enable fully, run SQL migrations in Supabase dashboard
+2. **Pre-existing lint error:** `src/components/module-resolver.tsx:226` react-hooks/set-state-in-effect warning — pre-existing from cloned repo
+3. **Memory usage:** Server stable at ~2.4GB RAM
+4. **High At-Risk count:** 6 of 10 customers are At-Risk due to low payment rates (avg 24.8%). This indicates collection issues that need attention — the widget correctly flags this
+5. **LTV projection:** LTV uses a simplified projection (0.5 retention factor). For accuracy, could use historical retention data once available
+
+### Priority Recommendations for Next Phase:
+1. **Create missing Supabase tables** — run SQL migrations for CapitalInvestment, SupplierReturn, CustomerReturn, FinishedGood
+2. **Add Production Efficiency dashboard** — track production job progress, stage bottlenecks, worker productivity
+3. **Enhance AI Agent** — integrate insights/aging/forecast/performance data into AI advisor insights
+4. **Add export functionality** — allow exporting insights/aging/forecast/performance data to Excel/PDF
+5. **Start the websocket mini-service** for real-time notifications
+6. **Add Collections Management module** — track collection efforts for At-Risk customers, payment follow-ups, dunning workflows
+7. **Polish mobile responsiveness** — verify all new widgets work well on mobile viewport

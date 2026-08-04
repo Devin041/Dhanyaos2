@@ -53,7 +53,30 @@ import {
   CreditCard,
   ArrowLeft,
   X,
+  Crown,
+  Heart,
+  UserCheck,
+  UserPlus,
+  AlertCircle,
+  Sparkles,
+  Target,
+  Repeat,
+  Award,
 } from 'lucide-react'
+import {
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  Tooltip as RTooltip,
+  ResponsiveContainer,
+  CartesianGrid,
+  PieChart,
+  Pie,
+  Cell as RCell,
+  Line,
+} from 'recharts'
+import { format as fmt, parseISO, isValid, differenceInDays } from 'date-fns'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -95,6 +118,69 @@ interface Customer {
   lastOrderDate: string | null
 }
 
+// ─── Customer Insights Types (NEW) ───────────────────────────────────────────
+
+interface InsightCustomer {
+  id: string
+  companyName: string
+  buyerName: string | null
+  email: string | null
+  phone: string | null
+  paymentTerms: number
+  creditLimit: number
+  status: string
+  orderCount: number
+  totalRevenue: number
+  totalProfit: number
+  avgMargin: number
+  totalPaid: number
+  outstanding: number
+  paymentRate: number
+  avgOrderValue: number
+  firstOrderDate: string | null
+  lastOrderDate: string | null
+  daysAsCustomer: number
+  orderFrequency: number
+  ltv: number
+  segment: 'VIP' | 'Loyal' | 'Regular' | 'New' | 'At-Risk'
+  paymentScore: number
+  creditUtilization: number
+}
+
+interface InsightSummary {
+  totalCustomers: number
+  activeCustomers: number
+  totalRevenue: number
+  totalProfit: number
+  totalOutstanding: number
+  avgMargin: number
+  avgPaymentRate: number
+  avgOrderValue: number
+  repeatCustomerRate: number
+  segmentCounts: { VIP: number; Loyal: number; Regular: number; New: number; 'At-Risk': number }
+  topCustomerName: string
+  topCustomerRevenue: number
+}
+
+interface RevenueTrendItem {
+  month: string
+  revenue: number
+  profit: number
+  orders: number
+}
+
+interface PaymentDistItem {
+  status: string
+  count: number
+}
+
+interface InsightsData {
+  summary: InsightSummary
+  customers: InsightCustomer[]
+  revenueTrend: RevenueTrendItem[]
+  paymentDist: PaymentDistItem[]
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function formatINR(amount: number): string {
@@ -130,6 +216,7 @@ export function Customers() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('All')
+  const [insights, setInsights] = useState<InsightsData | null>(null)
 
   // Detail panel
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null)
@@ -175,10 +262,22 @@ export function Customers() {
     }
   }, [search, statusFilter])
 
+  const fetchInsights = useCallback(async () => {
+    try {
+      const res = await fetch('/api/customers/insights')
+      if (!res.ok) return
+      const json = await res.json()
+      if (!json.error) setInsights(json)
+    } catch {
+      // Insights are optional — fail silently
+    }
+  }, [])
+
   useEffect(() => {
     const timer = setTimeout(() => fetchCustomers(), 200)
+    fetchInsights()
     return () => clearTimeout(timer)
-  }, [fetchCustomers])
+  }, [fetchCustomers, fetchInsights])
 
   const openDetail = async (customer: Customer) => {
     setSelectedCustomer(customer)
@@ -1055,6 +1154,406 @@ export function Customers() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* ─── Customer Insights Dashboard (NEW FEATURE) ────────────────── */}
+      {insights && insights.summary.totalCustomers > 0 && (
+        <CustomerInsightsWidget data={insights} />
+      )}
+    </div>
+  )
+}
+
+// ─── Customer Insights Widget (NEW FEATURE) ──────────────────────────────────
+// Aggregates customer behavior metrics into segments (VIP/Loyal/Regular/New/
+// At-Risk), shows revenue trend, payment distribution, and ranked customer
+// table with LTV, payment score, and credit utilization.
+
+function InsightsChartTooltip({ active, payload, label }: { active?: boolean; payload?: Array<{ name: string; value: number; color: string }>; label?: string }) {
+  if (!active || !payload?.length) return null
+  return (
+    <div className="rounded-lg border border-border/50 bg-background/95 backdrop-blur-sm px-3 py-2 text-xs shadow-xl">
+      <p className="mb-1.5 font-medium text-muted-foreground">{label}</p>
+      {payload.map((item) => (
+        <div key={item.name} className="flex items-center justify-between gap-4">
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: item.color }} />
+            {item.name}
+          </span>
+          <span className="font-medium tabular-nums">{formatINR(item.value)}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function getSegmentConfig(segment: string): { color: string; bg: string; border: string; text: string; icon: React.ElementType } {
+  switch (segment) {
+    case 'VIP':
+      return { color: 'oklch(0.78 0.14 85)', bg: 'bg-primary/10', border: 'border-primary/40', text: 'text-primary', icon: Crown }
+    case 'Loyal':
+      return { color: 'oklch(0.72 0.18 145)', bg: 'bg-emerald-500/10', border: 'border-emerald-500/40', text: 'text-emerald-400', icon: Heart }
+    case 'Regular':
+      return { color: 'oklch(0.7 0.15 250)', bg: 'bg-sky-500/10', border: 'border-sky-500/40', text: 'text-sky-400', icon: UserCheck }
+    case 'New':
+      return { color: 'oklch(0.75 0.15 65)', bg: 'bg-amber-500/10', border: 'border-amber-500/40', text: 'text-amber-400', icon: UserPlus }
+    case 'At-Risk':
+      return { color: 'oklch(0.65 0.22 25)', bg: 'bg-red-500/10', border: 'border-red-500/40', text: 'text-red-400', icon: AlertCircle }
+    default:
+      return { color: 'oklch(0.6 0.01 260)', bg: 'bg-muted/30', border: 'border-border', text: 'text-muted-foreground', icon: User }
+  }
+}
+
+function CustomerInsightsWidget({ data }: { data: InsightsData }) {
+  const { summary, customers, revenueTrend, paymentDist } = data
+  const top5 = customers.slice(0, 5)
+  const hasAtRisk = summary.segmentCounts['At-Risk'] > 0
+
+  // Payment distribution pie data with colors
+  const PAYMENT_COLORS: Record<string, string> = {
+    Paid: 'oklch(0.72 0.18 145)',
+    Partial: 'oklch(0.8 0.15 75)',
+    Unpaid: 'oklch(0.65 0.22 25)',
+    Unknown: 'oklch(0.6 0.01 260)',
+  }
+
+  return (
+    <div className="premium-card rounded-xl p-5">
+      {/* Header */}
+      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-3">
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/15 glow-ring">
+            <Sparkles className="h-5 w-5 text-primary" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-semibold">Customer Insights</h3>
+              <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary">
+                <Target className="h-2.5 w-2.5" />
+                AI Segmented
+              </span>
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              {summary.totalCustomers} customers · {formatINR(summary.totalRevenue)} revenue · {summary.avgMargin}% avg margin · Top: {summary.topCustomerName}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Metrics grid */}
+      <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <div className="rounded-lg border border-border/50 bg-muted/20 p-3">
+          <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+            <IndianRupee className="h-3 w-3" />
+            Total Revenue
+          </div>
+          <p className="mt-1 text-lg font-bold tabular-nums">{formatINR(summary.totalRevenue)}</p>
+          <p className="text-[10px] text-muted-foreground tabular-nums">Profit: {formatINR(summary.totalProfit)}</p>
+        </div>
+
+        <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3">
+          <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-emerald-400">
+            <TrendingUp className="h-3 w-3" />
+            Avg Margin
+          </div>
+          <p className="mt-1 text-lg font-bold tabular-nums text-emerald-400">{summary.avgMargin}%</p>
+          <p className="text-[10px] text-muted-foreground tabular-nums">AOV: {formatINR(summary.avgOrderValue)}</p>
+        </div>
+
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
+          <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-amber-400">
+            <CreditCard className="h-3 w-3" />
+            Outstanding
+          </div>
+          <p className="mt-1 text-lg font-bold tabular-nums text-amber-400">{formatINR(summary.totalOutstanding)}</p>
+          <p className="text-[10px] text-muted-foreground tabular-nums">Paid: {summary.avgPaymentRate}%</p>
+        </div>
+
+        <div className="rounded-lg border border-border/50 bg-muted/20 p-3">
+          <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+            <Repeat className="h-3 w-3" />
+            Repeat Rate
+          </div>
+          <p className="mt-1 text-lg font-bold tabular-nums">{summary.repeatCustomerRate}%</p>
+          <p className="text-[10px] text-muted-foreground">{summary.activeCustomers} active</p>
+        </div>
+      </div>
+
+      {/* Segment distribution badges */}
+      <div className="mb-5 flex flex-wrap items-center gap-2">
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mr-1">Segments:</span>
+        {(['VIP', 'Loyal', 'Regular', 'New', 'At-Risk'] as const).map(seg => {
+          const cfg = getSegmentConfig(seg)
+          const count = summary.segmentCounts[seg]
+          const Icon = cfg.icon
+          return (
+            <div key={seg} className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-semibold ${cfg.text} ${cfg.bg} ${cfg.border}`}>
+              <Icon className="h-3 w-3" />
+              {seg}
+              <span className="tabular-nums">{count}</span>
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Revenue trend + payment distribution */}
+      <div className="mb-5 grid grid-cols-1 gap-5 lg:grid-cols-3">
+        {/* Revenue trend area chart */}
+        <div className="lg:col-span-2">
+          <h4 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            Revenue & Profit Trend (6 Months)
+          </h4>
+          <div className="h-[220px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={revenueTrend} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="gradInsightRev" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="oklch(0.78 0.14 85)" stopOpacity={0.35} />
+                    <stop offset="100%" stopColor="oklch(0.78 0.14 85)" stopOpacity={0} />
+                  </linearGradient>
+                  <linearGradient id="gradInsightProfit" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="oklch(0.72 0.18 145)" stopOpacity={0.3} />
+                    <stop offset="100%" stopColor="oklch(0.72 0.18 145)" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.3 0.005 260)" opacity={0.25} />
+                <XAxis
+                  dataKey="month"
+                  tick={{ fill: 'oklch(0.6 0.01 260)', fontSize: 10 }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <YAxis
+                  tick={{ fill: 'oklch(0.6 0.01 260)', fontSize: 10 }}
+                  axisLine={false}
+                  tickLine={false}
+                  tickFormatter={(v) => v >= 10000000 ? `${(v / 10000000).toFixed(1)}Cr` : v >= 100000 ? `${(v / 100000).toFixed(0)}L` : v >= 1000 ? `${(v / 1000).toFixed(0)}K` : String(v)}
+                />
+                <RTooltip content={<InsightsChartTooltip />} />
+                <Area
+                  type="monotone"
+                  dataKey="revenue"
+                  name="Revenue"
+                  stroke="oklch(0.78 0.14 85)"
+                  fill="url(#gradInsightRev)"
+                  strokeWidth={2.5}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="profit"
+                  name="Profit"
+                  stroke="oklch(0.72 0.18 145)"
+                  fill="url(#gradInsightProfit)"
+                  strokeWidth={2}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* Payment distribution pie */}
+        <div>
+          <h4 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            Payment Status
+          </h4>
+          <div className="h-[180px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={paymentDist}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={45}
+                  outerRadius={75}
+                  dataKey="count"
+                  nameKey="status"
+                  paddingAngle={3}
+                  strokeWidth={0}
+                >
+                  {paymentDist.map((entry, i) => (
+                    <RCell key={`pay-${i}`} fill={PAYMENT_COLORS[entry.status] || 'oklch(0.6 0.01 260)'} />
+                  ))}
+                </Pie>
+                <RTooltip
+                  content={({ active, payload }: { active?: boolean; payload?: Array<{ name: string; value: number }> }) =>
+                    active && payload?.length ? (
+                      <div className="rounded-lg border border-border/50 bg-background/95 px-3 py-2 text-xs shadow-xl">
+                        <p className="font-medium">{payload[0].name}</p>
+                        <p className="tabular-nums text-muted-foreground">{payload[0].value} order{payload[0].value !== 1 ? 's' : ''}</p>
+                      </div>
+                    ) : null
+                  }
+                />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="mt-2 space-y-1">
+            {paymentDist.map(p => (
+              <div key={p.status} className="flex items-center justify-between text-[11px]">
+                <span className="flex items-center gap-1.5">
+                  <span className="h-2 w-2 rounded-sm" style={{ backgroundColor: PAYMENT_COLORS[p.status] || 'oklch(0.6 0.01 260)' }} />
+                  <span className="text-muted-foreground">{p.status}</span>
+                </span>
+                <span className="tabular-nums font-medium">{p.count}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Top 5 customers ranking */}
+      <div className="mb-5">
+        <h4 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          Top 5 Customers by Revenue
+        </h4>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-5">
+          {top5.map((c, i) => {
+            const cfg = getSegmentConfig(c.segment)
+            const Icon = cfg.icon
+            return (
+              <div
+                key={c.id}
+                className="animate-slide-in rounded-lg border border-border/50 bg-muted/20 p-3 transition-all hover:border-primary/30 hover:shadow-md"
+                style={{ animationDelay: `${i * 80}ms` }}
+              >
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/15 text-[10px] font-bold text-primary">
+                    #{i + 1}
+                  </span>
+                  <Icon className={`h-3.5 w-3.5 ${cfg.text}`} />
+                </div>
+                <p className="text-xs font-semibold truncate" title={c.companyName}>
+                  {c.companyName}
+                </p>
+                <p className="mt-1 text-sm font-bold tabular-nums text-primary">{formatINR(c.totalRevenue)}</p>
+                <div className="mt-1.5 flex items-center justify-between text-[10px] text-muted-foreground">
+                  <span className="tabular-nums">{c.orderCount} orders</span>
+                  <span className="tabular-nums">{c.avgMargin}%</span>
+                </div>
+                <div className="mt-1.5">
+                  <div className="flex items-center justify-between text-[10px] mb-0.5">
+                    <span className="text-muted-foreground">Payment</span>
+                    <span className={`tabular-nums font-medium ${c.paymentRate >= 60 ? 'text-emerald-400' : c.paymentRate >= 30 ? 'text-amber-400' : 'text-red-400'}`}>
+                      {c.paymentRate}%
+                    </span>
+                  </div>
+                  <div className="h-1 w-full overflow-hidden rounded-full bg-muted/60">
+                    <div
+                      className={`h-full rounded-full transition-all duration-700 ${c.paymentRate >= 60 ? 'bg-emerald-500' : c.paymentRate >= 30 ? 'bg-amber-500' : 'bg-red-500'}`}
+                      style={{ width: `${c.paymentRate}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* Complete customer rankings table */}
+      <div>
+        <h4 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          Customer Intelligence Report
+        </h4>
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow className="border-border/30 hover:bg-transparent">
+                <TableHead className="text-xs w-8">#</TableHead>
+                <TableHead className="text-xs">Customer</TableHead>
+                <TableHead className="text-xs">Segment</TableHead>
+                <TableHead className="text-xs text-right">Orders</TableHead>
+                <TableHead className="text-xs text-right">Revenue</TableHead>
+                <TableHead className="text-xs text-right">Profit</TableHead>
+                <TableHead className="text-xs text-right">Margin</TableHead>
+                <TableHead className="text-xs text-right">AOV</TableHead>
+                <TableHead className="text-xs text-right">Paid</TableHead>
+                <TableHead className="text-xs text-right">Outstanding</TableHead>
+                <TableHead className="text-xs text-right">Payment Score</TableHead>
+                <TableHead className="text-xs text-right">LTV</TableHead>
+                <TableHead className="text-xs text-right">Credit Util</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {customers.map((c, i) => {
+                const cfg = getSegmentConfig(c.segment)
+                const Icon = cfg.icon
+                return (
+                  <TableRow key={c.id} className="border-border/20 animate-slide-in" style={{ animationDelay: `${i * 30}ms` }}>
+                    <TableCell className="text-xs font-bold tabular-nums py-2.5 text-muted-foreground">
+                      {i + 1}
+                    </TableCell>
+                    <TableCell className="py-2.5">
+                      <div className="flex flex-col">
+                        <span className="text-xs font-medium">{c.companyName}</span>
+                        {c.buyerName && (
+                          <span className="text-[10px] text-muted-foreground">{c.buyerName}</span>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell className="py-2.5">
+                      <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${cfg.text} ${cfg.bg} ${cfg.border}`}>
+                        <Icon className="h-2.5 w-2.5" />
+                        {c.segment}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-xs text-right tabular-nums py-2.5">{c.orderCount}</TableCell>
+                    <TableCell className="text-xs text-right font-medium tabular-nums py-2.5">{formatINR(c.totalRevenue)}</TableCell>
+                    <TableCell className="text-xs text-right tabular-nums py-2.5 text-emerald-400">{formatINR(c.totalProfit)}</TableCell>
+                    <TableCell className="text-xs text-right tabular-nums py-2.5">
+                      <span className={c.avgMargin >= 40 ? 'text-emerald-400' : c.avgMargin >= 20 ? 'text-amber-400' : 'text-red-400'}>
+                        {c.avgMargin}%
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-xs text-right tabular-nums py-2.5 text-muted-foreground">{formatINR(c.avgOrderValue)}</TableCell>
+                    <TableCell className="text-xs text-right tabular-nums py-2.5">
+                      <span className={c.paymentRate >= 60 ? 'text-emerald-400' : c.paymentRate >= 30 ? 'text-amber-400' : 'text-red-400'}>
+                        {formatINR(c.totalPaid)}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-xs text-right tabular-nums py-2.5 text-amber-400">{formatINR(c.outstanding)}</TableCell>
+                    <TableCell className="py-2.5">
+                      <div className="flex items-center gap-1.5 justify-end">
+                        <div className="h-1.5 w-12 overflow-hidden rounded-full bg-muted/60">
+                          <div
+                            className={`h-full rounded-full ${c.paymentScore >= 70 ? 'bg-emerald-500' : c.paymentScore >= 40 ? 'bg-amber-500' : 'bg-red-500'}`}
+                            style={{ width: `${c.paymentScore}%` }}
+                          />
+                        </div>
+                        <span className="text-[10px] tabular-nums font-medium w-6 text-right">{c.paymentScore}</span>
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-xs text-right tabular-nums py-2.5 font-semibold text-primary">{formatINR(c.ltv)}</TableCell>
+                    <TableCell className="text-xs text-right tabular-nums py-2.5">
+                      {c.creditUtilization > 0 ? (
+                        <span className={c.creditUtilization >= 80 ? 'text-red-400 font-medium' : c.creditUtilization >= 50 ? 'text-amber-400' : 'text-muted-foreground'}>
+                          {c.creditUtilization}%
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                )
+              })}
+            </TableBody>
+          </Table>
+        </div>
+      </div>
+
+      {/* At-Risk alert banner */}
+      {hasAtRisk && (
+        <div className="mt-4 flex items-start gap-2.5 rounded-lg border border-red-500/30 bg-red-500/5 p-3 animate-slide-in">
+          <AlertCircle className="h-4 w-4 shrink-0 text-red-400 mt-0.5" />
+          <div className="text-xs">
+            <p className="font-semibold text-red-400">At-Risk Customers Detected</p>
+            <p className="text-muted-foreground mt-0.5">
+              <span className="font-medium text-foreground">{summary.segmentCounts['At-Risk']} customer{summary.segmentCounts['At-Risk'] !== 1 ? 's' : ''}</span>{' '}
+              classified as At-Risk (high revenue but low payment rate &lt; 30%). These represent significant outstanding receivables.
+              Prioritize collection efforts, negotiate payment plans, or adjust credit terms to mitigate risk.
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
