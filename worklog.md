@@ -240,3 +240,92 @@
 5. **Start the websocket mini-service** for real-time notifications
 6. **Add export functionality** — allow exporting forecast data to Excel/PDF
 7. **Polish mobile responsiveness** — verify all new widgets work well on mobile viewport
+
+---
+
+## Task ID: 10 (Cron: 15-min webDevReview)
+**Agent:** Main Agent (Z.ai Code) — automated review round 3
+**Task:** Assess project status, QA test, add Inventory Aging feature, improve styling
+
+### Work Log:
+
+**1. QA Verification:**
+- Verified dev server running healthy (next-server v16.1.3)
+- Verified all previously-fixed endpoints still return 200
+- App remains stable from round 2 — no new bugs found
+
+**2. New Feature — Inventory Aging Analysis (API + Widget):**
+
+- Created new API endpoint `/api/inventory/aging` (`src/app/api/inventory/aging/route.ts`)
+  - Analyzes how long inventory items have been in stock, grouped by age buckets:
+    - 0-30 days (fresh — green)
+    - 31-60 days (aging — gold)
+    - 61-90 days (old — orange)
+    - 90+ days (dead stock — red)
+  - Combines data from FabricStock (fabric rolls with createdAt) and FinishedGood (FG bins with receivedDate/createdAt)
+  - Uses `isMissingTableError()` for graceful degradation if tables missing
+  - Returns:
+    - Summary: totalItems, totalValue, avgAgeDays, deadStockItems/Value/Percentage, freshItems/Value, fabricItems/Value, fgItems/Value
+    - Buckets: 4 age buckets with itemCount, totalValue, percentage, topItems
+    - TopOldest: top 10 oldest items (dead stock candidates) with formatted dates
+  - Verified with real data: 10 fabric items, ₹6,53,510 total value, avg age 8 days, 0 dead stock, 100% fresh
+
+- Added `InventoryAgingWidget` component to Inventory module (`src/components/modules/inventory.tsx`)
+  - Premium card with "Smart Insights" badge and Hourglass icon with glow ring
+  - 4-metric grid: Total Items (with fabric/FG breakdown), Total Value, Fresh ≤30d (emerald), Dead Stock 90+d (red if present)
+  - Two-column layout:
+    - Left: BarChart showing value by age bucket (color-coded bars: green/gold/orange/red)
+    - Right: Age Distribution breakdown with progress bars, item counts, values, percentages
+  - Top 10 oldest items table with:
+    - Item name (with supplier/styleNo subtitle)
+    - Type badge (Fabric=sky, Finished=purple)
+    - Quantity with unit (m/pcs)
+    - Value (formatted INR)
+    - Age badge (color-coded: green ≤30d, amber 60-89d, red 90+d)
+    - Received date
+    - Row highlighting (red bg for dead stock, amber for aging)
+  - Dead stock alert banner (red, animated) appears when 90+ day items exist, with actionable recommendation
+  - Staggered slide-in animation for age distribution rows
+  - Custom tooltip for bar chart showing value + item count + percentage
+  - Fully responsive (2 cols mobile, 4 cols desktop for metrics; 1 col mobile, 2 cols desktop for chart+legend)
+
+**3. Styling Improvements:**
+- Applied `premium-card` class (gradient bg, hover lift, sheen sweep)
+- Used `glow-ring` on Hourglass icon for radial glow on hover
+- Used `animate-slide-in` for age distribution rows and dead stock alert
+- Color-coded metric cards: emerald for fresh, red for dead stock
+- Color-coded age badges in table (green/amber/red based on age)
+- Row background highlighting for dead stock (red tint) and aging items (amber tint)
+- Consistent tabular-nums for all numeric values
+- Custom bar chart with rounded top corners and color-coded cells
+
+### Stage Summary:
+- **QA Status:** ✅ App stable, no new bugs, all previous fixes intact
+- **New Feature:** Inventory Aging Analysis (API + Widget) — fully functional with real data (10 items, ₹6.5L value)
+- **Styling:** Premium card, color-coded metrics/badges/rows, animated alerts, glow effects
+- **Verification:** Widget renders with "SMART INSIGHTS" badge, all 4 metric cards, bar chart, age distribution, oldest items table showing real fabric names (Muslin, Cotton Silk, Georgette, etc.)
+
+### Verification Results:
+- Inventory Aging API returns HTTP 200 with real data ✓
+- Widget renders "Inventory Aging Analysis" heading + "SMART INSIGHTS" badge ✓
+- 4 metric cards visible (TOTAL ITEMS, TOTAL VALUE, FRESH ≤30D, DEAD STOCK 90+D) ✓
+- Bar chart "VALUE BY AGE BUCKET" renders ✓
+- Age distribution "AGE DISTRIBUTION" with progress bars renders ✓
+- Oldest items table shows real fabric names (Cotton Silk Plain, Cotton Linen, Georgette Solid, Rayon Printed, Muslin, Cotton Lawn) ✓
+- No browser console errors ✓
+- No 500 server errors ✓
+
+### Unresolved Issues / Risks:
+1. **Missing Supabase tables:** `CapitalInvestment`, `SupplierReturn`, `CustomerReturn` still don't exist (gracefully returning empty data). `FinishedGood` table appears empty too (0 FG items in aging). To enable fully, run SQL migrations in Supabase dashboard
+2. **Pre-existing lint error:** `src/components/module-resolver.tsx:226` react-hooks/set-state-in-effect warning — pre-existing from cloned repo
+3. **Memory usage:** Server stable at ~1.9GB RAM
+4. **All inventory is fresh:** Current data shows 100% fresh stock (0-30 days) since all fabric was added on 27 Jul 2026. Dead stock alert won't trigger until items age past 90 days
+
+### Priority Recommendations for Next Phase:
+1. **Create missing Supabase tables** — run SQL migrations for CapitalInvestment, SupplierReturn, CustomerReturn, FinishedGood to enable those modules fully
+2. **Add Supplier Performance scorecard** — aggregate supplier metrics (on-time delivery, quality rating, total PO value, average lead time)
+3. **Enhance AI Agent** — integrate aging + forecast data into AI advisor insights
+4. **Add export functionality** — allow exporting aging/forecast data to Excel/PDF
+5. **Start the websocket mini-service** for real-time notifications
+6. **Add Customer Insights dashboard** — top customers by revenue, payment behavior, order frequency
+7. **Polish mobile responsiveness** — verify all new widgets work well on mobile viewport

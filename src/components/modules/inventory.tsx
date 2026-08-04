@@ -25,8 +25,23 @@ import {
   BarChart3,
   CircleDot,
   Clock,
+  Hourglass,
+  TrendingDown,
+  Package,
+  Sparkles,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip as RTooltip,
+  ResponsiveContainer,
+  Cell as RCell,
+  CartesianGrid,
+} from 'recharts'
+import { format, parseISO, differenceInDays } from 'date-fns'
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 interface SupplierBrief {
@@ -80,6 +95,67 @@ interface InventoryData {
   stats: InventoryStats
 }
 
+// ─── Inventory Aging Types (NEW) ────────────────────────────────────────────
+
+interface AgingSummary {
+  totalItems: number
+  totalValue: number
+  avgAgeDays: number
+  deadStockItems: number
+  deadStockValue: number
+  deadStockPercentage: number
+  freshItems: number
+  freshValue: number
+  fabricItems: number
+  fabricValue: number
+  fgItems: number
+  fgValue: number
+}
+
+interface AgingBucket {
+  label: string
+  color: string
+  minDays: number
+  maxDays: number | null
+  itemCount: number
+  totalValue: number
+  percentage: number
+  topItems: Array<{
+    id: string
+    name: string
+    type: string
+    quantity: number
+    unit: string
+    value: number
+    ageDays: number
+    createdAt: string
+    createdAtFormatted: string
+    supplier?: string
+    styleNo?: string
+  }>
+}
+
+interface AgingTopItem {
+  id: string
+  name: string
+  type: string
+  quantity: number
+  unit: string
+  value: number
+  ageDays: number
+  createdAt: string
+  createdAtFormatted: string
+  valueFormatted: string
+  supplier?: string
+  styleNo?: string
+}
+
+interface AgingData {
+  summary: AgingSummary
+  buckets: AgingBucket[]
+  topOldest: AgingTopItem[]
+}
+
 // ─── Helpers ───────────────────────────────────────────────────────────────
 function formatINR(value: number): string {
   return new Intl.NumberFormat('en-IN', {
@@ -129,6 +205,7 @@ const PRODUCTION_STAGES = [
 // ─── Component ─────────────────────────────────────────────────────────────
 export function InventoryModule() {
   const [data, setData] = useState<InventoryData | null>(null)
+  const [aging, setAging] = useState<AgingData | null>(null)
   const [loading, setLoading] = useState(true)
   const [fabricSort, setFabricSort] = useState<'name' | 'value' | 'available'>('value')
   const [fabricSortDir, setFabricSortDir] = useState<'asc' | 'desc'>('desc')
@@ -149,9 +226,21 @@ export function InventoryModule() {
     }
   }, [])
 
+  const fetchAging = useCallback(async () => {
+    try {
+      const res = await fetch('/api/inventory/aging')
+      if (!res.ok) return
+      const json = await res.json()
+      if (!json.error) setAging(json)
+    } catch {
+      // Aging is optional — fail silently
+    }
+  }, [])
+
   useEffect(() => {
     fetchInventory()
-  }, [fetchInventory])
+    fetchAging()
+  }, [fetchInventory, fetchAging])
 
   // ─── Fabric Sort ─────────────────────────────────────────────────────
   const sortedFabric = (() => {
@@ -682,6 +771,281 @@ export function InventoryModule() {
         </TabsContent>
 
       </Tabs>
+
+      {/* ─── Inventory Aging Analysis (NEW FEATURE) ──────────────────── */}
+      {aging && aging.summary.totalItems > 0 && (
+        <InventoryAgingWidget data={aging} />
+      )}
+    </div>
+  )
+}
+
+// ─── Inventory Aging Widget (NEW FEATURE) ────────────────────────────────────
+// Visualizes how long inventory items have been in stock, grouped by age
+// buckets.  Helps identify dead stock (90+ days) that may need discounting
+// or liquidation, and fresh stock that's turning over quickly.
+
+function AgingChartTooltip({ active, payload, label }: { active?: boolean; payload?: Array<{ name: string; value: number; payload: { itemCount: number; percentage: number } }>; label?: string }) {
+  if (!active || !payload?.length) return null
+  const p = payload[0].payload
+  return (
+    <div className="rounded-lg border border-border/50 bg-background/95 backdrop-blur-sm px-3 py-2 text-xs shadow-xl">
+      <p className="mb-1 font-medium text-muted-foreground">{label}</p>
+      <p className="font-semibold tabular-nums">{formatINR(payload[0].value)}</p>
+      <p className="text-[10px] text-muted-foreground mt-0.5">
+        {p.itemCount} item{p.itemCount !== 1 ? 's' : ''} · {p.percentage}% of value
+      </p>
+    </div>
+  )
+}
+
+function InventoryAgingWidget({ data }: { data: AgingData }) {
+  const { summary, buckets, topOldest } = data
+  const hasDeadStock = summary.deadStockItems > 0
+  const freshPct = summary.totalValue > 0 ? Math.round((summary.freshValue / summary.totalValue) * 100) : 0
+
+  return (
+    <div className="premium-card rounded-xl p-5">
+      {/* Header */}
+      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-3">
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/15 glow-ring">
+            <Hourglass className="h-5 w-5 text-primary" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-semibold">Inventory Aging Analysis</h3>
+              <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary">
+                <Sparkles className="h-2.5 w-2.5" />
+                Smart Insights
+              </span>
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              {summary.totalItems} items · {formatINR(summary.totalValue)} total value · Avg age {summary.avgAgeDays} days
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Metrics grid */}
+      <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {/* Total Items */}
+        <div className="rounded-lg border border-border/50 bg-muted/20 p-3">
+          <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+            <Package className="h-3 w-3" />
+            Total Items
+          </div>
+          <p className="mt-1 text-lg font-bold tabular-nums">{summary.totalItems}</p>
+          <p className="text-[10px] text-muted-foreground tabular-nums">
+            {summary.fabricItems} fabric · {summary.fgItems} FG
+          </p>
+        </div>
+
+        {/* Total Value */}
+        <div className="rounded-lg border border-border/50 bg-muted/20 p-3">
+          <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+            <Warehouse className="h-3 w-3" />
+            Total Value
+          </div>
+          <p className="mt-1 text-lg font-bold tabular-nums">{formatINR(summary.totalValue)}</p>
+          <p className="text-[10px] text-muted-foreground tabular-nums">
+            Fabric {formatINR(summary.fabricValue)} · FG {formatINR(summary.fgValue)}
+          </p>
+        </div>
+
+        {/* Fresh Stock */}
+        <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3">
+          <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-emerald-400">
+            <Clock className="h-3 w-3" />
+            Fresh (≤30d)
+          </div>
+          <p className="mt-1 text-lg font-bold tabular-nums text-emerald-400">{summary.freshItems}</p>
+          <p className="text-[10px] text-muted-foreground tabular-nums">
+            {formatINR(summary.freshValue)} · {freshPct}% of value
+          </p>
+        </div>
+
+        {/* Dead Stock */}
+        <div className={`rounded-lg border p-3 ${hasDeadStock ? 'border-red-500/40 bg-red-500/10' : 'border-border/50 bg-muted/20'}`}>
+          <div className={`flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider ${hasDeadStock ? 'text-red-400' : 'text-muted-foreground'}`}>
+            <TrendingDown className="h-3 w-3" />
+            Dead Stock (90+d)
+          </div>
+          <p className={`mt-1 text-lg font-bold tabular-nums ${hasDeadStock ? 'text-red-400' : ''}`}>
+            {summary.deadStockItems}
+          </p>
+          <p className="text-[10px] text-muted-foreground tabular-nums">
+            {formatINR(summary.deadStockValue)} · {summary.deadStockPercentage}%
+          </p>
+        </div>
+      </div>
+
+      {/* Aging buckets chart + legend */}
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+        {/* Bar chart */}
+        <div>
+          <h4 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            Value by Age Bucket
+          </h4>
+          <div className="h-[220px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={buckets} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.3 0.005 260)" opacity={0.25} />
+                <XAxis
+                  dataKey="label"
+                  tick={{ fill: 'oklch(0.6 0.01 260)', fontSize: 10 }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <YAxis
+                  tick={{ fill: 'oklch(0.6 0.01 260)', fontSize: 10 }}
+                  axisLine={false}
+                  tickLine={false}
+                  tickFormatter={(v) => v >= 100000 ? `${(v / 100000).toFixed(0)}L` : v >= 1000 ? `${(v / 1000).toFixed(0)}K` : String(v)}
+                />
+                <RTooltip content={<AgingChartTooltip />} cursor={{ fill: 'oklch(0.5 0.01 260 / 10%)' }} />
+                <Bar dataKey="totalValue" name="Value" radius={[6, 6, 0, 0]}>
+                  {buckets.map((b, i) => (
+                    <RCell key={`cell-${i}`} fill={b.color} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* Bucket breakdown */}
+        <div>
+          <h4 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            Age Distribution
+          </h4>
+          <div className="space-y-2.5">
+            {buckets.map((bucket, i) => (
+              <div key={bucket.label} className="space-y-1 animate-slide-in" style={{ animationDelay: `${i * 80}ms` }}>
+                <div className="flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-2">
+                    <span className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: bucket.color }} />
+                    <span className="font-medium text-foreground/80">{bucket.label}</span>
+                  </div>
+                  <div className="flex items-center gap-3 tabular-nums">
+                    <span className="text-muted-foreground">{bucket.itemCount} item{bucket.itemCount !== 1 ? 's' : ''}</span>
+                    <span className="font-semibold">{formatINR(bucket.totalValue)}</span>
+                    <span className="w-10 text-right text-muted-foreground">{bucket.percentage}%</span>
+                  </div>
+                </div>
+                <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted/60">
+                  <div
+                    className="h-full rounded-full transition-all duration-700 ease-out"
+                    style={{ width: `${bucket.percentage}%`, backgroundColor: bucket.color }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Top oldest items table */}
+      {topOldest.length > 0 && (
+        <div className="mt-5">
+          <div className="mb-3 flex items-center justify-between">
+            <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              Oldest Items — Dead Stock Candidates
+            </h4>
+            <span className="text-[10px] text-muted-foreground">Top {topOldest.length} by age</span>
+          </div>
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow className="border-border/30 hover:bg-transparent">
+                  <TableHead className="text-xs">Item</TableHead>
+                  <TableHead className="text-xs">Type</TableHead>
+                  <TableHead className="text-xs text-right">Qty</TableHead>
+                  <TableHead className="text-xs text-right">Value</TableHead>
+                  <TableHead className="text-xs text-right">Age</TableHead>
+                  <TableHead className="text-xs text-right">Received</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {topOldest.map((item, i) => {
+                  const isDead = item.ageDays >= 90
+                  const isAging = item.ageDays >= 60 && item.ageDays < 90
+                  return (
+                    <TableRow
+                      key={`${item.id}-${i}`}
+                      className={`border-border/20 ${isDead ? 'bg-red-500/5' : isAging ? 'bg-amber-500/5' : ''}`}
+                    >
+                      <TableCell className="text-xs font-medium py-2.5">
+                        <div className="flex flex-col">
+                          <span>{item.name}</span>
+                          {item.supplier && (
+                            <span className="text-[10px] text-muted-foreground">{item.supplier}</span>
+                          )}
+                          {item.styleNo && (
+                            <span className="text-[10px] text-muted-foreground">{item.styleNo}</span>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell className="py-2.5">
+                        <Badge
+                          variant="outline"
+                          className={`text-[10px] px-1.5 py-0 ${
+                            item.type === 'fabric'
+                              ? 'border-sky-500/40 text-sky-400'
+                              : 'border-purple-500/40 text-purple-400'
+                          }`}
+                        >
+                          {item.type === 'fabric' ? 'Fabric' : 'Finished'}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-xs text-right tabular-nums py-2.5">
+                        {item.quantity} {item.unit === 'meters' ? 'm' : 'pcs'}
+                      </TableCell>
+                      <TableCell className="text-xs text-right font-semibold tabular-nums py-2.5">
+                        {formatINR(item.value)}
+                      </TableCell>
+                      <TableCell className="text-xs text-right py-2.5">
+                        <Badge
+                          variant="outline"
+                          className={`text-[10px] px-1.5 py-0 ${
+                            isDead
+                              ? 'border-red-500/40 text-red-400'
+                              : isAging
+                                ? 'border-amber-500/40 text-amber-400'
+                                : 'border-emerald-500/40 text-emerald-400'
+                          }`}
+                        >
+                          {item.ageDays}d
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-xs text-right text-muted-foreground py-2.5 tabular-nums">
+                        {item.createdAtFormatted}
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
+              </TableBody>
+            </Table>
+          </div>
+        </div>
+      )}
+
+      {/* Dead stock alert */}
+      {hasDeadStock && (
+        <div className="mt-4 flex items-start gap-2.5 rounded-lg border border-red-500/30 bg-red-500/5 p-3 animate-slide-in">
+          <AlertTriangle className="h-4 w-4 shrink-0 text-red-400 mt-0.5" />
+          <div className="text-xs">
+            <p className="font-semibold text-red-400">Dead Stock Detected</p>
+            <p className="text-muted-foreground mt-0.5">
+              <span className="font-medium text-foreground">{summary.deadStockItems} item{summary.deadStockItems !== 1 ? 's' : ''}</span>{' '}
+              have been in stock for 90+ days, representing{' '}
+              <span className="font-medium text-red-400">{formatINR(summary.deadStockValue)}</span>{' '}
+              ({summary.deadStockPercentage}% of inventory value). Consider discounting, liquidating,
+              or repurposing these items to free up working capital.
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
