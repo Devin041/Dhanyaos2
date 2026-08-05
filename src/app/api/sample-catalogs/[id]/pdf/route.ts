@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabase-db'
 import { NextRequest, NextResponse } from 'next/server'
+import { getCompanySettings } from '@/lib/company-settings'
 
 // ─── GET /api/sample-catalogs/[id]/pdf ────────────────────────────────────────
 // Auto-Fit Layout Engine — images appear exactly as they are
@@ -88,6 +89,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       .order('createdAt', { ascending: true })
 
     const { default: jsPDF } = await import('jspdf')
+
+    // Fetch company settings for dynamic branding
+    const company = await getCompanySettings()
+    const companyDisplayName = company.brandName || company.companyName
 
     // Parse image URL — supports both base64 data URIs and HTTP/HTTPS URLs (Cloudinary)
     async function resolveImageData(imageUrl: string): Promise<{ format: string; data: string; w: number; h: number } | null> {
@@ -184,7 +189,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     doc.setFont('helvetica', 'bold')
     doc.setFontSize(26)
     doc.setTextColor(255, 255, 255)
-    doc.text('Dhanya Lifestyle LLP', PAGE_W / 2, y, { align: 'center' })
+    doc.text(companyDisplayName, PAGE_W / 2, y, { align: 'center' })
 
     const dotY = y + 10
     doc.setFillColor(...GOLD)
@@ -293,13 +298,13 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     doc.setFont('helvetica', 'normal')
     doc.setFontSize(8)
     doc.setTextColor(255, 255, 255)
-    doc.text('Dhanya Lifestyle LLP', PAGE_W / 2, contactY, { align: 'center' })
-    doc.text('Surat, Gujarat, India', PAGE_W / 2, contactY + 5, { align: 'center' })
+    doc.text(companyDisplayName, PAGE_W / 2, contactY, { align: 'center' })
+    doc.text(company.location, PAGE_W / 2, contactY + 5, { align: 'center' })
 
     doc.setFont('helvetica', 'bold')
     doc.setFontSize(16)
     doc.setTextColor(...BRAND_DARK)
-    doc.text('Dhanya Lifestyle LLP', PAGE_W / 2, PAGE_H * 0.3, { align: 'center' })
+    doc.text(companyDisplayName, PAGE_W / 2, PAGE_H * 0.3, { align: 'center' })
 
     // "by Dhanya Lifestyle" removed — only "Dhanya Lifestyle LLP" branding as requested
 

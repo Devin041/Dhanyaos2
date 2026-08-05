@@ -39,6 +39,7 @@ import {
   Sparkles,
   FlaskConical,
   Camera,
+  Settings,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -146,6 +147,7 @@ const navGroups: NavGroup[] = [
       { label: 'AI Advisor', icon: Bot, view: 'ai-advisor' },
       { label: 'Analytics', icon: LineChart, view: 'analytics' },
       { label: 'Eval Harness', icon: FlaskConical, view: 'eval' },
+      { label: 'Company Settings', icon: Settings, view: 'company-settings' },
     ],
   },
 ]

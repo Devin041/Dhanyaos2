@@ -44,6 +44,7 @@ export const viewLabels: Record<DashboardView, string> = {
   reservations: 'Stock Reservations',
   'ai-agent': 'AI Agent',
   'fg-inventory': 'Finished Goods',
+  'company-settings': 'Company Settings',
 }
 
 // ─── Module loader registry (import functions only, NOT evaluated at compile time) ──
@@ -89,6 +90,7 @@ const moduleLoaders: Record<DashboardView, ModuleLoaderFn> = {
   reservations: () => import('@/components/modules/reservations').then(m => m.ReservationsModule),
   'ai-agent': () => import('@/components/dashboard/ai-agent').then(m => m.AIAgent),
   'fg-inventory': () => import('@/components/modules/fg-inventory').then(m => m.FGInventoryModule),
+  'company-settings': () => import('@/components/modules/company-settings').then(m => m.CompanySettingsModule),
 }
 
 // ─── In-memory cache for loaded modules ───────────────────────────────────

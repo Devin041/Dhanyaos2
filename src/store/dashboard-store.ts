@@ -38,6 +38,7 @@ export type DashboardView =
   | 'ai-agent'
   | 'eval'
   | 'fg-inventory'
+  | 'company-settings'
 
 // Data passed from Client Catalog → Costing Module (pre-fill)
 export interface PendingCostingData {

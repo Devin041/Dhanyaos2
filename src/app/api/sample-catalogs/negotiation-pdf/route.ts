@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { getCompanySettings } from '@/lib/company-settings'
 
 // ─── POST /api/sample-catalogs/negotiation-pdf ───────────────────────
 // Generates a client-facing negotiation PDF
@@ -143,6 +144,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'No items provided' }, { status: 400 })
     }
 
+    // Fetch company settings for dynamic branding
+    const company = await getCompanySettings()
+    const companyDisplayName = company.brandName || company.companyName
+
     // Fetch images for all items
     const itemImages: (ItemImageData | null)[] = []
     for (const item of items) {
@@ -170,12 +175,12 @@ export async function POST(req: NextRequest) {
     doc.setLineWidth(0.3)
     doc.line(0, headerH + 3, PAGE_W, headerH + 3)
 
-    // Brand name — ONLY "Dhanya Lifestyle LLP" as requested
+    // Brand name — dynamic from company settings
     let y = headerH * 0.35
     doc.setFont('helvetica', 'bold')
     doc.setFontSize(26)
     doc.setTextColor(255, 255, 255)
-    doc.text('Dhanya Lifestyle LLP', PAGE_W / 2, y, { align: 'center' })
+    doc.text(companyDisplayName, PAGE_W / 2, y, { align: 'center' })
 
     // Gold decorative dots
     const dotY = y + 10
@@ -428,13 +433,13 @@ export async function POST(req: NextRequest) {
     doc.setFont('helvetica', 'normal')
     doc.setFontSize(8)
     doc.setTextColor(255, 255, 255)
-    doc.text('Dhanya Lifestyle LLP', PAGE_W / 2, contactY, { align: 'center' })
-    doc.text('Surat, Gujarat, India', PAGE_W / 2, contactY + 5, { align: 'center' })
+    doc.text(companyDisplayName, PAGE_W / 2, contactY, { align: 'center' })
+    doc.text(company.location, PAGE_W / 2, contactY + 5, { align: 'center' })
 
     doc.setFont('helvetica', 'bold')
     doc.setFontSize(16)
     doc.setTextColor(...BRAND_DARK)
-    doc.text('Dhanya Lifestyle LLP', PAGE_W / 2, PAGE_H * 0.3, { align: 'center' })
+    doc.text(companyDisplayName, PAGE_W / 2, PAGE_H * 0.3, { align: 'center' })
 
     doc.setFont('helvetica', 'normal')
     doc.setFontSize(8)

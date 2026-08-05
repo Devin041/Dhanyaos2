@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase-db'
 import { istToday, istNow, istMonthStart, parseDateInput } from '@/lib/agent/date-utils'
+import { getCompanySettings } from '@/lib/company-settings'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -75,11 +76,14 @@ async function dailySummaryPdf(): Promise<string> {
   const totalIncome = transactions.filter(t => t.type === 'income').reduce((s, t) => s + (t.amount || 0), 0)
   const totalExpense = transactions.filter(t => t.type === 'expense').reduce((s, t) => s + (t.amount || 0), 0)
 
+  const company = await getCompanySettings()
+  const companyDisplayName = company.brandName || company.companyName
+
   const body = `
 <div class="header">
   <div>
     <h1>Daily Business Summary</h1>
-    <div class="subtitle">Dhanya Lifestyle LLP</div>
+    <div class="subtitle">${companyDisplayName}</div>
   </div>
   <div class="meta">
     <div>Date: ${new Date().toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</div>
@@ -134,7 +138,7 @@ async function revenueReportPdf(period: string, fromDate?: string, toDate?: stri
 <div class="header">
   <div>
     <h1>Revenue Report</h1>
-    <div class="subtitle">${period} — Dhanya Lifestyle LLP</div>
+    <div class="subtitle">${period} — ${companyDisplayName}</div>
   </div>
   <div class="meta">
     <div>Period: ${from.toLocaleDateString('en-IN')} — ${to.toLocaleDateString('en-IN')}</div>
@@ -172,7 +176,7 @@ async function inventoryReportPdf(): Promise<string> {
 <div class="header">
   <div>
     <h1>Inventory Report</h1>
-    <div class="subtitle">Fabric Stock Status — Dhanya Lifestyle LLP</div>
+    <div class="subtitle">Fabric Stock Status — ${companyDisplayName}</div>
   </div>
   <div class="meta">
     <div>Date: ${new Date().toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' })}</div>

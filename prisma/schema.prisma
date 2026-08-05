@@ -1116,3 +1116,20 @@ model EvalResult {
   evalRun         EvalRun  @relation(fields: [evalRunId], references: [id], onDelete: Cascade)
   createdAt       DateTime @default(now())
 }
+// ─── Company Settings (White-Label Configuration) ───────────────────────────
+// Allows any brand to customize company info shown in PDFs, UI, etc.
+model CompanySettings {
+  id            String   @id @default("default")
+  companyName   String   @default("Dhanya Lifestyle LLP")
+  brandName     String?
+  tagline       String?
+  location      String   @default("Surat, Gujarat, India")
+  phone         String?
+  email         String?
+  website       String?
+  gstNumber     String?
+  logoUrl       String?
+  primaryColor  String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
