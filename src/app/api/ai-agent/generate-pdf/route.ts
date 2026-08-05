@@ -79,7 +79,7 @@ async function dailySummaryPdf(): Promise<string> {
 <div class="header">
   <div>
     <h1>Daily Business Summary</h1>
-    <div class="subtitle">Dhanya Lifestyle LLP — Elysé by Dhanya</div>
+    <div class="subtitle">Dhanya Lifestyle LLP</div>
   </div>
   <div class="meta">
     <div>Date: ${new Date().toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</div>

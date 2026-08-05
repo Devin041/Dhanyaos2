@@ -5,7 +5,7 @@ export async function GET() {
   try {
     const { data: catalogs } = await supabase
       .from('SampleCatalog')
-      .select('*, customer:customerId(id, companyName), items:SampleCatalogItem(*, sample:SampleId(id, sampleNo, styleNo, styleName))')
+      .select('*, customer:customerId(id, companyName), items:SampleCatalogItem(*, sample:sampleId(id, sampleNo, styleNo, styleName))')
       .order('sentDate', { ascending: false })
 
     return NextResponse.json(catalogs || [])
@@ -42,7 +42,7 @@ export async function POST(req: NextRequest) {
         createdAt: now,
         updatedAt: now,
       })
-      .select('*, customer:customerId(*), items:SampleCatalogItem(*, sample:SampleId(*))')
+      .select('*')
       .single()
 
     if (error) throw error
@@ -61,11 +61,11 @@ export async function POST(req: NextRequest) {
     // Re-fetch with items
     const { data: finalCatalog } = await supabase
       .from('SampleCatalog')
-      .select('*, customer:customerId(*), items:SampleCatalogItem(*, sample:SampleId(*))')
+      .select('*, customer:customerId(*), items:SampleCatalogItem(*, sample:sampleId(*))')
       .eq('id', catalog.id)
       .single()
 
-    return NextResponse.json(finalCatalog, { status: 201 })
+    return NextResponse.json(finalCatalog || catalog, { status: 201 })
   } catch (error) {
     console.error('POST /api/sample-catalogs error:', error)
     return NextResponse.json({ error: 'Failed to create catalog' }, { status: 500 })

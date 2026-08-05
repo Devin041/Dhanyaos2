@@ -156,16 +156,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
     let y = PAGE_H * 0.18
     doc.setFont('helvetica', 'bold')
-    doc.setFontSize(28)
+    doc.setFontSize(26)
     doc.setTextColor(255, 255, 255)
-    doc.text('Elysé', PAGE_W / 2, y, { align: 'center' })
+    doc.text('Dhanya Lifestyle LLP', PAGE_W / 2, y, { align: 'center' })
 
-    doc.setFont('helvetica', 'normal')
-    doc.setFontSize(11)
-    doc.setTextColor(...GOLD_LIGHT)
-    doc.text('by Dhanya Lifestyle', PAGE_W / 2, y + 8, { align: 'center' })
-
-    const dotY = y + 16
+    const dotY = y + 10
     doc.setFillColor(...GOLD)
     doc.circle(PAGE_W / 2 - 12, dotY, 1.2, 'F')
     doc.circle(PAGE_W / 2, dotY, 1.2, 'F')
@@ -278,12 +273,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     doc.setFont('helvetica', 'bold')
     doc.setFontSize(16)
     doc.setTextColor(...BRAND_DARK)
-    doc.text('Elysé', PAGE_W / 2, PAGE_H * 0.3, { align: 'center' })
+    doc.text('Dhanya Lifestyle LLP', PAGE_W / 2, PAGE_H * 0.3, { align: 'center' })
 
-    doc.setFont('helvetica', 'normal')
-    doc.setFontSize(8)
-    doc.setTextColor(...GOLD)
-    doc.text('by Dhanya Lifestyle', PAGE_W / 2, PAGE_H * 0.3 + 7, { align: 'center' })
+    // "by Dhanya Lifestyle" removed — only "Dhanya Lifestyle LLP" branding as requested
 
     const pdfBuffer = Buffer.from(doc.output('arraybuffer'))
 
