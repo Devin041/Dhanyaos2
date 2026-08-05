@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase-db'
+import { randomUUID } from 'crypto'
 
 function mapCategoryToLegacy(category: string): 'fabricCost' | 'trimCost' | 'laborCost' | 'washCost' | 'packagingCost' | 'overheadCost' | 'otherCost' {
   const cat = (category || '').toLowerCase()
@@ -81,17 +82,20 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (error) throw error
     if (body.colorBreakdown && Array.isArray(body.colorBreakdown)) {
       const now = new Date().toISOString()
-      await supabase.from('CostSheetColor').insert(body.colorBreakdown.map((c: { color: string; quantity: number }) => ({ costSheetId: id, color: c.color || '', quantity: c.quantity || 0, createdAt: now, updatedAt: now })))
+      const { error: cErr } = await supabase.from('CostSheetColor').insert(body.colorBreakdown.map((c: { color: string; quantity: number }) => ({ id: randomUUID(), costSheetId: id, color: c.color || '', quantity: c.quantity || 0, createdAt: now, updatedAt: now })))
+      if (cErr) console.error('CostSheetColor insert error:', cErr)
     }
     if (body.items && Array.isArray(body.items)) {
       const now = new Date().toISOString()
-      await supabase.from('CostItem').insert(body.items.map((item: Record<string, unknown>) => ({
+      const { error: iErr } = await supabase.from('CostItem').insert(body.items.map((item: Record<string, unknown>) => ({
+        id: randomUUID(),
         costSheetId: id, category: item.category || 'Other', itemName: item.itemName || '',
         description: item.description || null, consumption: item.consumption ?? 0, unit: item.unit || 'pcs',
         unitRate: item.unitRate ?? 0, wastagePercent: item.wastagePercent ?? 5,
         itemCost: Number(item.consumption ?? 0) * Number(item.unitRate ?? 0) * (1 + Number(item.wastagePercent ?? 5) / 100),
         notes: item.notes || null, createdAt: now, updatedAt: now,
       })))
+      if (iErr) console.error('CostItem insert error:', iErr)
     }
     const { data: fullSheet } = await supabase.from('CostSheet').select('*, customer:customerId(id, companyName), CostItem(*), CostSheetColor(*)').eq('id', id).single()
     const result = { ...fullSheet } as any

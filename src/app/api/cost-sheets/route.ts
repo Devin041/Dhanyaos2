@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase-db'
+import { randomUUID } from 'crypto'
 
 async function getNextSheetNo(): Promise<string> {
   const now = new Date()
@@ -189,9 +190,13 @@ export async function POST(req: NextRequest) {
 
     const now = new Date().toISOString()
 
+    // Generate a unique id — Supabase CostSheet table doesn't have a default id generator
+    const id = randomUUID()
+
     const { data: costSheet, error } = await supabase
       .from('CostSheet')
       .insert({
+        id,
         sheetNo, styleNo, styleName,
         customerId: customerId || null,
         description: description || null,
@@ -219,16 +224,9 @@ export async function POST(req: NextRequest) {
 
     if (error) throw error
 
-    if (colorBreakdown && colorBreakdown.length > 0) {
-      const colorRows = colorBreakdown.map((c: { color: string; quantity: number }) => ({
-        costSheetId: costSheet!.id, color: c.color || '', quantity: c.quantity || 0,
-        createdAt: now, updatedAt: now,
-      }))
-      await supabase.from('CostSheetColor').insert(colorRows)
-    }
-
     if (items && items.length > 0) {
       const itemRows = items.map((item: Record<string, unknown>) => ({
+        id: randomUUID(),
         costSheetId: costSheet!.id,
         category: item.category || 'Other',
         itemName: item.itemName || '',
@@ -241,7 +239,18 @@ export async function POST(req: NextRequest) {
         notes: item.notes || null,
         createdAt: now, updatedAt: now,
       }))
-      await supabase.from('CostItem').insert(itemRows)
+      const { error: itemsErr } = await supabase.from('CostItem').insert(itemRows)
+      if (itemsErr) console.error('CostItem insert error:', itemsErr)
+    }
+
+    if (colorBreakdown && colorBreakdown.length > 0) {
+      const colorRows = colorBreakdown.map((c: { color: string; quantity: number }) => ({
+        id: randomUUID(),
+        costSheetId: costSheet!.id, color: c.color || '', quantity: c.quantity || 0,
+        createdAt: now, updatedAt: now,
+      }))
+      const { error: colorsErr } = await supabase.from('CostSheetColor').insert(colorRows)
+      if (colorsErr) console.error('CostSheetColor insert error:', colorsErr)
     }
 
     const { data: fullSheet } = await supabase
