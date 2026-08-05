@@ -193,6 +193,28 @@ export async function POST(req: NextRequest) {
     // Generate a unique id — Supabase CostSheet table doesn't have a default id generator
     const id = randomUUID()
 
+    // ── Auto-resolve image from SamplePhoto if not provided ──
+    // When a cost sheet is created, automatically fetch the sample's first photo
+    // so the image shows up in Costing module, Sample Catalog, and FG Stock.
+    let resolvedImage = image || null
+    if (!resolvedImage && styleNo) {
+      try {
+        const { data: sample } = await supabase
+          .from('Sample')
+          .select('id, photos:SamplePhoto(imageUrl, sortOrder)')
+          .eq('styleNo', styleNo)
+          .limit(1)
+          .single()
+
+        if (sample?.photos && sample.photos.length > 0) {
+          const sorted = [...sample.photos].sort((a: any, b: any) => a.sortOrder - b.sortOrder)
+          resolvedImage = sorted[0].imageUrl || null
+        }
+      } catch {
+        // No sample found — continue without image
+      }
+    }
+
     const { data: costSheet, error } = await supabase
       .from('CostSheet')
       .insert({
@@ -214,7 +236,7 @@ export async function POST(req: NextRequest) {
         sellingPrice,
         brokerCommissionPercent: bcp,
         brokerCommissionAmount,
-        image: image || null,
+        image: resolvedImage || null,
         notes: notes || null,
         status: 'Draft',
         createdAt: now, updatedAt: now,

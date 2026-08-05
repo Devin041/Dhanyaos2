@@ -76,7 +76,25 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (body.targetQty !== undefined) updateData.targetQty = body.targetQty
     if (body.status !== undefined) updateData.status = body.status
     if (body.notes !== undefined) updateData.notes = body.notes || null
-    if (body.image !== undefined) updateData.image = body.image || null
+    if (body.image !== undefined) {
+      updateData.image = body.image || null
+    } else if (!ex.image && body.styleNo) {
+      // Auto-resolve image from SamplePhoto if cost sheet has no image
+      try {
+        const { data: sample } = await supabase
+          .from('Sample')
+          .select('id, photos:SamplePhoto(imageUrl, sortOrder)')
+          .eq('styleNo', body.styleNo || ex.styleNo)
+          .limit(1)
+          .single()
+        if (sample?.photos && sample.photos.length > 0) {
+          const sorted = [...sample.photos].sort((a: any, b: any) => a.sortOrder - b.sortOrder)
+          updateData.image = sorted[0].imageUrl || null
+        }
+      } catch {
+        // No sample found
+      }
+    }
     if (body.colorBreakdown && Array.isArray(body.colorBreakdown)) await supabase.from('CostSheetColor').delete().eq('costSheetId', id)
     const { error } = await supabase.from('CostSheet').update(updateData).eq('id', id)
     if (error) throw error
