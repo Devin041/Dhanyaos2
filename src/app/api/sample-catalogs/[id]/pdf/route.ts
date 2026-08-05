@@ -89,9 +89,38 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
     const { default: jsPDF } = await import('jspdf')
 
-    const parseDataUri = (dataUri: string): { format: string; data: string } | null => {
-      const match = dataUri.match(/^data:image\/(\w+);base64,(.+)$/s)
-      if (match) return { format: match[1].toUpperCase(), data: match[2] }
+    // Parse image URL — supports both base64 data URIs and HTTP/HTTPS URLs (Cloudinary)
+    async function resolveImageData(imageUrl: string): Promise<{ format: string; data: string; w: number; h: number } | null> {
+      if (!imageUrl) return null
+
+      // Case 1: base64 data URI
+      const base64Match = imageUrl.match(/^data:image\/(\w+);base64,(.+)$/s)
+      if (base64Match) {
+        const format = base64Match[1].toUpperCase()
+        const data = base64Match[2]
+        const size = getImageSize(data)
+        if (!size) return null
+        return { format: format === 'PNG' ? 'PNG' : 'JPEG', data, ...size }
+      }
+
+      // Case 2: HTTP/HTTPS URL (Cloudinary, etc.)
+      if (imageUrl.startsWith('http')) {
+        try {
+          const res = await fetch(imageUrl)
+          if (!res.ok) return null
+          const arrayBuf = await res.arrayBuffer()
+          const imgBuf = Buffer.from(arrayBuf)
+          const data = imgBuf.toString('base64')
+          const ct = res.headers.get('content-type') || ''
+          const format = ct.includes('png') ? 'PNG' : 'JPEG'
+          const size = getImageSize(data)
+          if (!size) return null
+          return { format, data, ...size }
+        } catch {
+          return null
+        }
+      }
+
       return null
     }
 
@@ -117,18 +146,15 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       if (!photos || photos.length === 0) continue
 
       for (const photo of photos) {
-        const parsed = parseDataUri(photo.imageUrl)
-        if (!parsed) continue
-
-        const size = getImageSize(parsed.data)
-        if (!size) continue
+        const resolved = await resolveImageData(photo.imageUrl)
+        if (!resolved) continue
 
         images.push({
-          base64Data: parsed.data,
-          format: parsed.format === 'PNG' ? 'PNG' : 'JPEG',
-          w: size.w,
-          h: size.h,
-          ratio: size.w / size.h,
+          base64Data: resolved.data,
+          format: resolved.format,
+          w: resolved.w,
+          h: resolved.h,
+          ratio: resolved.w / resolved.h,
           styleNo: sample.styleNo,
           styleName: sample.styleName,
           caption: photo.caption,
