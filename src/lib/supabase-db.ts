@@ -1,4 +1,5 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js'
+import { randomUUID } from 'crypto'
 
 // ============================================================================
 // Real Supabase Client — connected to live PostgreSQL database
@@ -32,6 +33,69 @@ function getSupabaseClient(): SupabaseClient {
     })
   }
   return _supabase
+}
+
+// ============================================================================
+// Insert Auto-ID Wrapper
+// ============================================================================
+// The Supabase tables were originally created by Prisma which auto-generates
+// `id` values via @default(cuid()).  When the app calls supabase.from('X')
+// .insert({...}) directly (bypassing Prisma), the `id` column has no default
+// in PostgreSQL, causing "null value in column id violates not-null
+// constraint" errors.
+//
+// This wrapper intercepts every .insert() call and automatically injects
+// `id: randomUUID()` and `updatedAt: now` if not already present in the
+// payload.  This fixes ALL 57+ API routes at once without modifying each one.
+
+function wrapQueryBuilder(qb: any): any {
+  return new Proxy(qb, {
+    get(target: any, prop: string, receiver: any) {
+      const value = Reflect.get(target, prop, receiver)
+      if (typeof value !== 'function') return value
+
+      // Intercept .insert() to inject id + updatedAt
+      if (prop === 'insert') {
+        return (payload: any) => {
+          const now = new Date().toISOString()
+          const inject = (row: any) => {
+            if (row && typeof row === 'object' && !Array.isArray(row)) {
+              if (!row.id) row.id = randomUUID()
+              if (!row.createdAt && !row.created_at) row.createdAt = now
+              if (!row.updatedAt && !row.updated_at) row.updatedAt = now
+            }
+            return row
+          }
+          if (Array.isArray(payload)) {
+            payload = payload.map(inject)
+          } else {
+            payload = inject(payload)
+          }
+          return wrapQueryBuilder(value.call(target, payload))
+        }
+      }
+
+      // For all other methods (select, eq, order, etc.), wrap the returned
+      // query builder so chained .insert() calls also get intercepted
+      return (...args: any[]) => wrapQueryBuilder(value.apply(target, args))
+    },
+  })
+}
+
+function wrapClient(client: SupabaseClient): SupabaseClient {
+  return new Proxy(client as any, {
+    get(target: any, prop: string, receiver: any) {
+      const value = Reflect.get(target, prop, receiver)
+      if (typeof value !== 'function') return value
+
+      // Intercept .from('table') to wrap the returned query builder
+      if (prop === 'from') {
+        return (table: string) => wrapQueryBuilder(value.call(target, table))
+      }
+
+      return value.bind(target)
+    },
+  }) as SupabaseClient
 }
 
 // ============================================================================
@@ -105,10 +169,10 @@ function createMockSupabaseClient(): any {
   })
 }
 
-// Export a proxy that returns the real client or the mock client
+// Export a proxy that returns the real client (with auto-id wrapper) or the mock client
 export const supabase = new Proxy({} as SupabaseClient, {
   get(_target, prop, receiver) {
-    const client = isSupabaseConfigured ? getSupabaseClient() : createMockSupabaseClient() as SupabaseClient
+    const client = isSupabaseConfigured ? wrapClient(getSupabaseClient()) : createMockSupabaseClient() as SupabaseClient
     const value = Reflect.get(client, prop, receiver)
     if (typeof value === 'function') {
       return value.bind(client)

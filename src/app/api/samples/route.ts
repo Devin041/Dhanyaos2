@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabase-db'
 import { NextRequest, NextResponse } from 'next/server'
+import { randomUUID } from 'crypto'
 
 // ═══════════════════════════════════════════════════════════════════
 // ID GENERATORS — collision-safe (never throws Unique constraint)
@@ -107,10 +108,12 @@ export async function POST(req: NextRequest) {
     }
 
     const sampleNo = await generateSampleNo()
+    const now = new Date().toISOString()
 
     const { data: sample, error } = await supabase
       .from('Sample')
       .insert({
+        id: randomUUID(),
         sampleNo,
         styleNo,
         styleName,
@@ -118,6 +121,8 @@ export async function POST(req: NextRequest) {
         notes: notes || '',
         stage: stage || 'Design',
         status: 'In Progress',
+        createdAt: now,
+        updatedAt: now,
       })
       .select()
       .single()
