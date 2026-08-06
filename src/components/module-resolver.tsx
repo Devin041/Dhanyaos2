@@ -47,6 +47,7 @@ export const viewLabels: Record<DashboardView, string> = {
   'company-settings': 'Company Settings',
   'invoices': 'Invoices & Payments',
   'product-tracker': 'Product Lifecycle Tracker',
+  'pnl': 'Profit & Loss Statement',
 }
 
 // ─── Module loader registry (import functions only, NOT evaluated at compile time) ──
@@ -95,6 +96,7 @@ const moduleLoaders: Record<DashboardView, ModuleLoaderFn> = {
   'company-settings': () => import('@/components/modules/company-settings').then(m => m.CompanySettingsModule),
   'invoices': () => import('@/components/modules/invoices').then(m => m.InvoiceModule),
   'product-tracker': () => import('@/components/modules/product-tracker').then(m => m.ProductTrackerModule),
+  'pnl': () => import('@/components/modules/pnl-dashboard').then(m => m.PnLModule),
 }
 
 // ─── In-memory cache for loaded modules ───────────────────────────────────
