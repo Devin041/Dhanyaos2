@@ -112,6 +112,9 @@ export async function GET(request: NextRequest) {
         poNumber: o.poNumber,
         supplierId: o.supplierId,
         supplier: o.supplierId ? supplierMap[o.supplierId] || null : null,
+        styleNo: o.styleNo || null,
+        styleName: o.styleName || null,
+        costSheetId: o.costSheetId || null,
         fabricName: o.fabricName,
         quantity: o.quantity,
         unit: o.unit,
@@ -144,12 +147,29 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { supplierId, fabricName, quantity, unit, ratePerUnit, expectedDelivery, notes } =
-      body
+    const {
+      supplierId,
+      fabricName,
+      quantity,
+      unit,
+      ratePerUnit,
+      expectedDelivery,
+      notes,
+      // NEW: Product linkage fields
+      styleNo,
+      styleName,
+      costSheetId,
+      // NEW: Multi-fabric line items
+      items,
+    } = body
 
-    if (!supplierId || !fabricName || !quantity || !ratePerUnit) {
+    // Support both legacy single-fabric and new multi-fabric mode
+    const hasItems = items && Array.isArray(items) && items.length > 0
+    const hasLegacy = fabricName && quantity && ratePerUnit
+
+    if (!supplierId || (!hasItems && !hasLegacy)) {
       return NextResponse.json(
-        { error: 'supplierId, fabricName, quantity, and ratePerUnit are required' },
+        { error: 'supplierId and (items[] OR fabricName+quantity+ratePerUnit) are required' },
         { status: 400 }
       )
     }
@@ -170,18 +190,36 @@ export async function POST(request: NextRequest) {
     }
     const poNumber = `${todayPrefix}${String(seq).padStart(3, '0')}`
 
-    const totalAmount = quantity * ratePerUnit
+    // Calculate total from items or legacy fields
+    let totalAmount = 0
+    let primaryFabric = fabricName || ''
+    let primaryQty = Number(quantity) || 0
+    let primaryRate = Number(ratePerUnit) || 0
+    let primaryUnit = unit || 'meters'
+
+    if (hasItems) {
+      totalAmount = items.reduce((s: number, it: any) => s + (Number(it.quantity) || 0) * (Number(it.ratePerUnit) || 0), 0)
+      // Use first item as primary (for legacy compat)
+      primaryFabric = items[0].fabricName || fabricName || ''
+      primaryQty = Number(items[0].quantity) || 0
+      primaryRate = Number(items[0].ratePerUnit) || 0
+      primaryUnit = items[0].unit || unit || 'meters'
+    } else {
+      totalAmount = Number(quantity) * Number(ratePerUnit)
+    }
+
     const now = new Date().toISOString()
 
+    // Insert PO (without new columns — Supabase may not have them yet)
     const { data: po, error } = await supabase
       .from('PurchaseOrder')
       .insert({
         poNumber,
         supplierId,
-        fabricName,
-        quantity,
-        unit: unit || 'meters',
-        ratePerUnit,
+        fabricName: primaryFabric,
+        quantity: primaryQty,
+        unit: primaryUnit,
+        ratePerUnit: primaryRate,
         taxableAmount: 0,
         totalAmount,
         expectedDelivery: expectedDelivery ? new Date(expectedDelivery).toISOString() : null,
@@ -197,6 +235,26 @@ export async function POST(request: NextRequest) {
 
     if (error) throw error
 
+    // Insert multi-fabric line items if provided
+    if (hasItems) {
+      const itemRows = items.map((it: any) => ({
+        purchaseOrderId: po.id,
+        styleNo: styleNo || null,
+        fabricName: it.fabricName || '',
+        color: it.color || null,
+        quantity: Number(it.quantity) || 0,
+        unit: it.unit || 'meters',
+        ratePerUnit: Number(it.ratePerUnit) || 0,
+        totalAmount: (Number(it.quantity) || 0) * (Number(it.ratePerUnit) || 0),
+        receivedQty: 0,
+        status: 'Pending',
+        createdAt: now,
+        updatedAt: now,
+      }))
+      const { error: itemsErr } = await supabase.from('POItem').insert(itemRows)
+      if (itemsErr) console.error('POItem insert error:', itemsErr)
+    }
+
     // Fetch supplier for response
     const { data: supplier } = await supabase
       .from('Supplier')
@@ -210,6 +268,9 @@ export async function POST(request: NextRequest) {
         poNumber: po.poNumber,
         supplierId: po.supplierId,
         supplier: supplier || null,
+        styleNo: styleNo || null,
+        styleName: styleName || null,
+        costSheetId: costSheetId || null,
         fabricName: po.fabricName,
         quantity: po.quantity,
         unit: po.unit,
@@ -222,6 +283,7 @@ export async function POST(request: NextRequest) {
         paymentStatus: po.paymentStatus,
         paidAmount: po.paidAmount,
         receivedQty: po.receivedQty,
+        items: hasItems ? items : undefined,
         createdAt: po.createdAt,
         updatedAt: po.updatedAt,
       },

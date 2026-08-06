@@ -164,6 +164,11 @@ model PurchaseOrder {
   poNumber          String    @unique
   supplierId        String
   supplier          Supplier  @relation(fields: [supplierId], references: [id])
+  // Product linkage (Sprint 1 — product lifecycle)
+  styleNo           String?
+  styleName         String?
+  costSheetId       String?
+  // Legacy single-fabric fields (kept for backward compat)
   fabricName        String
   quantity          Float
   unit              String    @default("meters")
@@ -182,9 +187,29 @@ model PurchaseOrder {
   paymentStatus     String    @default("Unpaid")
   paidAmount        Float     @default(0)
   receivedQty       Float     @default(0)
+  // Multi-fabric line items (Sprint 1)
+  items             POItem[]
   grnNotes          GrnNote[]
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
+}
+
+// ─── PO Line Items (multi-fabric, multi-color per PO) ──────────────────────
+model POItem {
+  id                String   @id @default(cuid())
+  purchaseOrderId   String
+  purchaseOrder     PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  styleNo           String?
+  fabricName        String
+  color             String?
+  quantity          Float
+  unit              String   @default("meters")
+  ratePerUnit       Float
+  totalAmount       Float
+  receivedQty       Float    @default(0)
+  status            String   @default("Pending")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 }
 
 // ============ INVENTORY ============
@@ -534,6 +559,12 @@ model ProductionJob {
   actualFabricConsumed  Float    @default(0)
   fabricStockId         String?
   fabricStock           FabricStock? @relation(fields: [fabricStockId], references: [id])
+  // Cost tracking (Sprint 1 — actual vs estimated)
+  costSheetId           String?
+  actualFabricCost      Float    @default(0)
+  actualLaborCost       Float    @default(0)
+  actualOverheadCost    Float    @default(0)
+  totalActualCost       Float    @default(0)
   qualityChecks   QualityCheck[]
   stageTrackings  StageTracking[]
   fabricConsumptions FabricConsumption[]
