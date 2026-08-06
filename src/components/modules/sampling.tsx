@@ -42,6 +42,7 @@ import {
   RotateCcw,
   FlaskConical,
   PackageOpen,
+  Shirt,
 } from 'lucide-react'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -185,6 +186,11 @@ export function SamplingModule() {
     notes: '',
   })
 
+  // Product selector state (Sprint 2 — link to Sample Catalog)
+  const [catalogSamples, setCatalogSamples] = useState<Array<{ id: string; styleNo: string; styleName: string; photoCount: number }>>([])
+  const [selectedCatalogId, setSelectedCatalogId] = useState('')
+  const [selectedProductImage, setSelectedProductImage] = useState<string | null>(null)
+
   const totalPages = data ? Math.ceil(data.total / data.limit) : 1
 
   const fetchData = useCallback(async () => {
@@ -227,7 +233,40 @@ export function SamplingModule() {
 
   useEffect(() => {
     fetchCustomers()
-  }, [fetchCustomers])
+  }, [])
+
+  // Load catalog samples for product selector (Sprint 2)
+  useEffect(() => {
+    async function loadCatalogSamples() {
+      try {
+        const res = await fetch('/api/samples')
+        const data = await res.json()
+        if (res.ok && Array.isArray(data)) {
+          setCatalogSamples(data.map((s: any) => ({
+            id: s.id,
+            styleNo: s.styleNo,
+            styleName: s.styleName,
+            photoCount: s.photoCount || 0,
+          })))
+        }
+      } catch { /* ignore */ }
+    }
+    loadCatalogSamples()
+  }, [])
+
+  // Handle product selection from catalog (Sprint 2)
+  const handleProductSelect = async (sampleId: string) => {
+    setSelectedCatalogId(sampleId)
+    const sample = catalogSamples.find(s => s.id === sampleId)
+    if (sample) {
+      setNewSample(prev => ({ ...prev, styleNo: sample.styleNo, styleName: sample.styleName }))
+      try {
+        const res = await fetch(`/api/style-image?styleNo=${sample.styleNo}`)
+        const data = await res.json()
+        setSelectedProductImage(data.imageUrl || null)
+      } catch { setSelectedProductImage(null) }
+    }
+  }
 
   // Reset page when filters change
   useEffect(() => {
@@ -256,6 +295,8 @@ export function SamplingModule() {
         toast.success('Sample created successfully')
         setNewSampleOpen(false)
         setNewSample({ styleNo: '', styleName: '', customerId: '', assignedTo: '', cost: '', notes: '' })
+        setSelectedCatalogId('')
+        setSelectedProductImage(null)
         fetchData()
       }
     } catch (err) {
@@ -356,6 +397,37 @@ export function SamplingModule() {
               <DialogTitle className="text-foreground">Create New Sample</DialogTitle>
             </DialogHeader>
             <div className="space-y-4 pt-2">
+              {/* Product Selector from Sample Catalog (Sprint 2) */}
+              <div className="space-y-2">
+                <Label className="text-xs text-muted-foreground flex items-center gap-1.5">
+                  <Shirt className="h-3 w-3" />
+                  Select from Catalog (optional)
+                </Label>
+                <Select value={selectedCatalogId} onValueChange={handleProductSelect}>
+                  <SelectTrigger className="bg-muted/50 border-border">
+                    <SelectValue placeholder="Select existing product to auto-fill" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {catalogSamples.map((s) => (
+                      <SelectItem key={s.id} value={s.id}>
+                        <span className="flex items-center gap-2">
+                          <span className="font-medium">{s.styleNo}</span>
+                          <span className="text-muted-foreground text-[10px]">{s.styleName}</span>
+                          {s.photoCount > 0 && <span className="text-primary text-[10px]">📷</span>}
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {/* Product image preview */}
+                {selectedCatalogId && selectedProductImage && (
+                  <div className="flex items-center gap-3 rounded-lg border border-primary/20 bg-primary/5 p-2">
+                    <img src={selectedProductImage} alt="" className="h-10 w-10 rounded object-cover" />
+                    <p className="text-[10px] text-muted-foreground">Product image from catalog</p>
+                  </div>
+                )}
+              </div>
+
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label className="text-xs text-muted-foreground">Style No *</Label>

@@ -57,6 +57,9 @@ import {
   Star,
   CalendarDays,
   CreditCard,
+  Trash2,
+  Shirt,
+  X,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -197,6 +200,16 @@ export function PurchaseOrders() {
   })
   const [creating, setCreating] = useState(false)
 
+  // Product linkage state (Sprint 1)
+  const [samples, setSamples] = useState<Array<{ id: string; styleNo: string; styleName: string; photoCount: number }>>([])
+  const [selectedStyleNo, setSelectedStyleNo] = useState('')
+  const [selectedStyleName, setSelectedStyleName] = useState('')
+  const [selectedProductImage, setSelectedProductImage] = useState<string | null>(null)
+  const [useMultiFabric, setUseMultiFabric] = useState(false)
+  const [fabricItems, setFabricItems] = useState<Array<{ fabricName: string; color: string; quantity: string; unit: string; ratePerUnit: string }>>([
+    { fabricName: '', color: '', quantity: '', unit: 'meters', ratePerUnit: '' },
+  ])
+
   // Action state
   const [actionLoading, setActionLoading] = useState(false)
   const [receiptQty, setReceiptQty] = useState('')
@@ -270,34 +283,127 @@ export function PurchaseOrders() {
     loadSuppliers()
   }, [])
 
+  // Load samples for product selector (Sprint 1)
+  useEffect(() => {
+    async function loadSamples() {
+      try {
+        const res = await fetch('/api/samples')
+        const data = await res.json()
+        if (res.ok && Array.isArray(data)) {
+          setSamples(data.map((s: any) => ({
+            id: s.id,
+            styleNo: s.styleNo,
+            styleName: s.styleName,
+            photoCount: s.photoCount || 0,
+          })))
+        }
+      } catch {
+        // ignore
+      }
+    }
+    loadSamples()
+  }, [])
+
+  // Handle product selection (Sprint 1)
+  const handleProductSelect = async (styleNo: string) => {
+    setSelectedStyleNo(styleNo)
+    const sample = samples.find(s => s.styleNo === styleNo)
+    if (sample) {
+      setSelectedStyleName(sample.styleName)
+      // Fetch product image
+      try {
+        const res = await fetch(`/api/style-image?styleNo=${styleNo}`)
+        const data = await res.json()
+        if (data.imageUrl) setSelectedProductImage(data.imageUrl)
+        else setSelectedProductImage(null)
+      } catch {
+        setSelectedProductImage(null)
+      }
+    }
+  }
+
+  // Add/remove fabric item rows (Sprint 1)
+  const addFabricRow = () => {
+    setFabricItems([...fabricItems, { fabricName: '', color: '', quantity: '', unit: 'meters', ratePerUnit: '' }])
+  }
+  const removeFabricRow = (idx: number) => {
+    setFabricItems(fabricItems.filter((_, i) => i !== idx))
+  }
+  const updateFabricRow = (idx: number, field: string, value: string) => {
+    setFabricItems(fabricItems.map((item, i) => i === idx ? { ...item, [field]: value } : item))
+  }
+  const multiFabricTotal = fabricItems.reduce((sum, item) => sum + (parseFloat(item.quantity) || 0) * (parseFloat(item.ratePerUnit) || 0), 0)
+
   // ─── Create PO ──────────────────────────────────────────────────────────
 
   const handleCreate = async () => {
-    if (!form.supplierId || !form.fabricName || !form.quantity || !form.ratePerUnit) {
-      toast.error('Please fill in all required fields')
+    // Validate based on mode
+    if (!form.supplierId) {
+      toast.error('Please select a supplier')
       return
+    }
+
+    if (useMultiFabric) {
+      // Multi-fabric mode: validate fabric items
+      const validItems = fabricItems.filter(it => it.fabricName && it.quantity && it.ratePerUnit)
+      if (validItems.length === 0) {
+        toast.error('Please add at least one fabric item with name, quantity, and rate')
+        return
+      }
+    } else {
+      // Legacy single-fabric mode
+      if (!form.fabricName || !form.quantity || !form.ratePerUnit) {
+        toast.error('Please fill in all required fields')
+        return
+      }
     }
 
     setCreating(true)
     try {
+      const payload: any = {
+        supplierId: form.supplierId,
+        expectedDelivery: form.expectedDelivery || undefined,
+        notes: form.notes || undefined,
+        // Product linkage
+        styleNo: selectedStyleNo || undefined,
+        styleName: selectedStyleName || undefined,
+      }
+
+      if (useMultiFabric) {
+        // Send multi-fabric items
+        payload.items = fabricItems
+          .filter(it => it.fabricName && it.quantity && it.ratePerUnit)
+          .map(it => ({
+            fabricName: it.fabricName,
+            color: it.color || undefined,
+            quantity: parseFloat(it.quantity),
+            unit: it.unit,
+            ratePerUnit: parseFloat(it.ratePerUnit),
+          }))
+      } else {
+        // Legacy single-fabric mode
+        payload.fabricName = form.fabricName
+        payload.quantity = parseFloat(form.quantity)
+        payload.unit = form.unit
+        payload.ratePerUnit = parseFloat(form.ratePerUnit)
+      }
+
       const res = await fetch('/api/purchase-orders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          supplierId: form.supplierId,
-          fabricName: form.fabricName,
-          quantity: parseFloat(form.quantity),
-          unit: form.unit,
-          ratePerUnit: parseFloat(form.ratePerUnit),
-          expectedDelivery: form.expectedDelivery || undefined,
-          notes: form.notes || undefined,
-        }),
+        body: JSON.stringify(payload),
       })
       const data = await res.json()
       if (res.ok) {
         toast.success(`Purchase Order ${data.poNumber} created successfully`)
         setCreateOpen(false)
+        // Reset form
         setForm({ supplierId: '', fabricName: '', quantity: '', unit: 'meters', ratePerUnit: '', expectedDelivery: '', notes: '' })
+        setSelectedStyleNo('')
+        setSelectedStyleName('')
+        setSelectedProductImage(null)
+        setUseMultiFabric(false)
+        setFabricItems([{ fabricName: '', color: '', quantity: '', unit: 'meters', ratePerUnit: '' }])
         fetchOrders()
       } else {
         toast.error(data.error || 'Failed to create purchase order')
@@ -699,6 +805,54 @@ export function PurchaseOrders() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
+            {/* Product Selector (Sprint 1 — link PO to product) */}
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium text-foreground/80 flex items-center gap-1.5">
+                <Shirt className="h-3 w-3" />
+                Product / Style (for tracking)
+              </Label>
+              <Select value={selectedStyleNo} onValueChange={handleProductSelect}>
+                <SelectTrigger className="bg-muted/50 border-border h-9">
+                  <SelectValue placeholder="Select product (optional but recommended)" />
+                </SelectTrigger>
+                <SelectContent>
+                  {samples.map((s) => (
+                    <SelectItem key={s.id} value={s.styleNo}>
+                      <span className="flex items-center gap-2">
+                        <span className="font-medium">{s.styleNo}</span>
+                        <span className="text-muted-foreground text-[10px]">{s.styleName}</span>
+                        {s.photoCount > 0 && <span className="text-primary text-[10px]">📷</span>}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {/* Product image preview */}
+              {selectedStyleNo && (
+                <div className="flex items-center gap-3 rounded-lg border border-primary/20 bg-primary/5 p-2.5">
+                  {selectedProductImage ? (
+                    <img src={selectedProductImage} alt={selectedStyleName} className="h-12 w-12 rounded object-cover" />
+                  ) : (
+                    <div className="flex h-12 w-12 items-center justify-center rounded bg-muted">
+                      <Shirt className="h-5 w-5 text-muted-foreground" />
+                    </div>
+                  )}
+                  <div>
+                    <p className="text-xs font-medium">{selectedStyleNo}</p>
+                    <p className="text-[10px] text-muted-foreground">{selectedStyleName}</p>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6 ml-auto"
+                    onClick={() => { setSelectedStyleNo(''); setSelectedStyleName(''); setSelectedProductImage(null) }}
+                  >
+                    <X className="h-3 w-3" />
+                  </Button>
+                </div>
+              )}
+            </div>
+
             {/* Supplier */}
             <div className="space-y-1.5">
               <Label className="text-xs font-medium text-foreground/80">Supplier *</Label>
@@ -719,6 +873,25 @@ export function PurchaseOrders() {
               </Select>
             </div>
 
+            {/* Mode Toggle: Single Fabric vs Multi-Fabric */}
+            <div className="flex items-center gap-2 rounded-lg border border-border/50 bg-muted/30 p-1">
+              <button
+                className={`flex-1 rounded-md px-3 py-1.5 text-xs font-semibold transition-all ${!useMultiFabric ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                onClick={() => setUseMultiFabric(false)}
+              >
+                Single Fabric
+              </button>
+              <button
+                className={`flex-1 rounded-md px-3 py-1.5 text-xs font-semibold transition-all ${useMultiFabric ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                onClick={() => setUseMultiFabric(true)}
+              >
+                Multi-Fabric / Colors
+              </button>
+            </div>
+
+            {/* ─── Single Fabric Mode (legacy) ─── */}
+            {!useMultiFabric && (
+              <>
             {/* Fabric Name */}
             <div className="space-y-1.5">
               <Label className="text-xs font-medium text-foreground/80">Fabric Name *</Label>
@@ -783,6 +956,85 @@ export function PurchaseOrders() {
                 <p className="text-[10px] text-muted-foreground mt-0.5">
                   {form.quantity} × {formatINR(parseFloat(form.ratePerUnit) || 0)} per {form.unit}
                 </p>
+              </div>
+            )}
+            </>
+            )}
+
+            {/* ─── Multi-Fabric / Colors Mode ─── */}
+            {useMultiFabric && (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs font-medium text-foreground/80">Fabric Items (per color)</Label>
+                  <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={addFabricRow}>
+                    <Plus className="h-3 w-3" />
+                    Add Fabric
+                  </Button>
+                </div>
+                {fabricItems.map((item, idx) => (
+                  <div key={idx} className="rounded-lg border border-border/50 bg-muted/20 p-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-semibold text-muted-foreground">Item {idx + 1}</span>
+                      {fabricItems.length > 1 && (
+                        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => removeFabricRow(idx)}>
+                          <Trash2 className="h-3 w-3 text-destructive" />
+                        </Button>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <Input
+                        placeholder="Fabric name *"
+                        className="h-8 bg-muted/50 border-border text-xs"
+                        value={item.fabricName}
+                        onChange={(e) => updateFabricRow(idx, 'fabricName', e.target.value)}
+                      />
+                      <Input
+                        placeholder="Color (e.g. Red)"
+                        className="h-8 bg-muted/50 border-border text-xs"
+                        value={item.color}
+                        onChange={(e) => updateFabricRow(idx, 'color', e.target.value)}
+                      />
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      <Input
+                        type="number"
+                        placeholder="Qty *"
+                        className="h-8 bg-muted/50 border-border text-xs"
+                        value={item.quantity}
+                        onChange={(e) => updateFabricRow(idx, 'quantity', e.target.value)}
+                      />
+                      <Select value={item.unit} onValueChange={(v) => updateFabricRow(idx, 'unit', v)}>
+                        <SelectTrigger className="h-8 bg-muted/50 border-border text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {UNITS.map((u) => (
+                            <SelectItem key={u} value={u}>{u}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Input
+                        type="number"
+                        placeholder="Rate *"
+                        className="h-8 bg-muted/50 border-border text-xs"
+                        value={item.ratePerUnit}
+                        onChange={(e) => updateFabricRow(idx, 'ratePerUnit', e.target.value)}
+                      />
+                    </div>
+                    {item.quantity && item.ratePerUnit && (
+                      <p className="text-[10px] text-muted-foreground text-right">
+                        Subtotal: {formatINR(parseFloat(item.quantity) * parseFloat(item.ratePerUnit))}
+                      </p>
+                    )}
+                  </div>
+                ))}
+                {/* Multi-fabric total */}
+                {multiFabricTotal > 0 && (
+                  <div className="rounded-lg border border-primary/20 bg-primary/5 px-4 py-3">
+                    <p className="text-xs text-muted-foreground">Total Amount ({fabricItems.filter(it => it.fabricName && it.quantity).length} items)</p>
+                    <p className="text-lg font-bold text-primary">{formatINR(multiFabricTotal)}</p>
+                  </div>
+                )}
               </div>
             )}
 

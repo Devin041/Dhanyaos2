@@ -137,10 +137,12 @@ interface Customer {
 
 interface NewLineItem {
   styleId: string
+  styleNo: string
   styleName: string
   quantity: number
   unitPrice: number
   unitCost: number
+  image: string | null
 }
 
 // ─── Sales Performance Types (NEW) ───────────────────────────────────────────
@@ -258,8 +260,9 @@ export function SalesOrders() {
   const [createLoading, setCreateLoading] = useState(false)
   const [newCustomerId, setNewCustomerId] = useState('')
   const [newItems, setNewItems] = useState<NewLineItem[]>([
-    { styleId: '', styleName: '', quantity: 1, unitPrice: 0, unitCost: 0 },
+    { styleId: '', styleNo: '', styleName: '', quantity: 1, unitPrice: 0, unitCost: 0, image: null },
   ])
+  const [catalogProducts, setCatalogProducts] = useState<Array<{ id: string; styleNo: string; styleName: string; photoCount: number }>>([])
   const [newDeliveryDate, setNewDeliveryDate] = useState('')
   const [newDiscount, setNewDiscount] = useState('0')
   const [newNotes, setNewNotes] = useState('')
@@ -313,6 +316,63 @@ export function SalesOrders() {
     fetchOrders()
     fetchPerf()
   }, [fetchOrders, fetchPerf])
+
+  // Load catalog products for item selector (Sprint 2)
+  useEffect(() => {
+    async function loadCatalog() {
+      try {
+        const res = await fetch('/api/samples')
+        const data = await res.json()
+        if (res.ok && Array.isArray(data)) {
+          setCatalogProducts(data.map((s: any) => ({
+            id: s.id,
+            styleNo: s.styleNo,
+            styleName: s.styleName,
+            photoCount: s.photoCount || 0,
+          })))
+        }
+      } catch { /* ignore */ }
+    }
+    loadCatalog()
+  }, [])
+
+  // Handle product selection for a line item (Sprint 2)
+  const handleProductSelect = async (idx: number, sampleId: string) => {
+    const product = catalogProducts.find(p => p.id === sampleId)
+    if (!product) return
+
+    // Fetch product image
+    let imageUrl: string | null = null
+    try {
+      const res = await fetch(`/api/style-image?styleNo=${product.styleNo}`)
+      const data = await res.json()
+      imageUrl = data.imageUrl || null
+    } catch { /* ignore */ }
+
+    // Fetch costing for auto-fill price
+    let unitPrice = 0
+    let unitCost = 0
+    try {
+      const res = await fetch(`/api/cost-sheets?search=${product.styleNo}`)
+      const data = await res.json()
+      const sheets = data.costSheets || []
+      if (sheets.length > 0) {
+        const latest = sheets[0]
+        unitPrice = Math.round(latest.sellingPrice || 0)
+        unitCost = Math.round(latest.totalCost || 0)
+      }
+    } catch { /* ignore */ }
+
+    setNewItems(newItems.map((item, i) => i === idx ? {
+      ...item,
+      styleId: sampleId,
+      styleNo: product.styleNo,
+      styleName: product.styleName,
+      unitPrice,
+      unitCost,
+      image: imageUrl,
+    } : item))
+  }
 
   // ─── Fetch Customers for Create Dialog ────────────────────────────────────
 
@@ -382,10 +442,12 @@ export function SalesOrders() {
           customerId: newCustomerId,
           items: newItems.map((i) => ({
             styleId: i.styleId || undefined,
+            styleNo: i.styleNo || undefined,
             styleName: i.styleName,
             quantity: i.quantity,
             unitPrice: i.unitPrice,
             unitCost: i.unitCost,
+            image: i.image || undefined,
           })),
           deliveryDate: newDeliveryDate || undefined,
           discountPercent: parseFloat(newDiscount) || 0,
@@ -410,14 +472,14 @@ export function SalesOrders() {
 
   const resetCreateForm = () => {
     setNewCustomerId('')
-    setNewItems([{ styleId: '', styleName: '', quantity: 1, unitPrice: 0, unitCost: 0 }])
+    setNewItems([{ styleId: '', styleNo: '', styleName: '', quantity: 1, unitPrice: 0, unitCost: 0, image: null }])
     setNewDeliveryDate('')
     setNewDiscount('0')
     setNewNotes('')
   }
 
   const addItemRow = () => {
-    setNewItems([...newItems, { styleId: '', styleName: '', quantity: 1, unitPrice: 0, unitCost: 0 }])
+    setNewItems([...newItems, { styleId: '', styleNo: '', styleName: '', quantity: 1, unitPrice: 0, unitCost: 0, image: null }])
   }
 
   const removeItemRow = (idx: number) => {
@@ -815,6 +877,29 @@ export function SalesOrders() {
                         <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive" onClick={() => removeItemRow(idx)}>
                           <X className="h-3 w-3" />
                         </Button>
+                      )}
+                    </div>
+                    {/* Product selector from Sample Catalog (Sprint 2) */}
+                    <div className="flex items-center gap-2">
+                      <Select value={item.styleId} onValueChange={(v) => handleProductSelect(idx, v)}>
+                        <SelectTrigger className="h-8 text-xs bg-muted/50 flex-1">
+                          <SelectValue placeholder="Select from Catalog (auto-fills name, price, image)" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {catalogProducts.map((p) => (
+                            <SelectItem key={p.id} value={p.id}>
+                              <span className="flex items-center gap-2">
+                                <span className="font-medium">{p.styleNo}</span>
+                                <span className="text-muted-foreground text-[10px]">{p.styleName}</span>
+                                {p.photoCount > 0 && <span className="text-primary text-[10px]">📷</span>}
+                              </span>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {/* Product image thumbnail */}
+                      {item.image && (
+                        <img src={item.image} alt={item.styleName} className="h-8 w-8 rounded object-cover shrink-0" />
                       )}
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2">
