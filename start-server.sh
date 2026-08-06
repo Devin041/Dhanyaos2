@@ -2,6 +2,11 @@
 # Robust server startup script
 cd /home/z/my-project
 
+# ── ENSURE SUPABASE CREDENTIALS ──
+# This prevents the recurring issue where .env gets overwritten
+# and loses Supabase connection. Run before starting server.
+bash ensure-env.sh
+
 # Kill any existing servers
 pkill -f "next-server" 2>/dev/null
 pkill -f "next dev" 2>/dev/null
