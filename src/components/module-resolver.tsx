@@ -46,6 +46,7 @@ export const viewLabels: Record<DashboardView, string> = {
   'fg-inventory': 'Finished Goods',
   'company-settings': 'Company Settings',
   'invoices': 'Invoices & Payments',
+  'product-tracker': 'Product Lifecycle Tracker',
 }
 
 // ─── Module loader registry (import functions only, NOT evaluated at compile time) ──
@@ -93,6 +94,7 @@ const moduleLoaders: Record<DashboardView, ModuleLoaderFn> = {
   'fg-inventory': () => import('@/components/modules/fg-inventory').then(m => m.FGInventoryModule),
   'company-settings': () => import('@/components/modules/company-settings').then(m => m.CompanySettingsModule),
   'invoices': () => import('@/components/modules/invoices').then(m => m.InvoiceModule),
+  'product-tracker': () => import('@/components/modules/product-tracker').then(m => m.ProductTrackerModule),
 }
 
 // ─── In-memory cache for loaded modules ───────────────────────────────────

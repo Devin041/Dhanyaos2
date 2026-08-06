@@ -40,6 +40,7 @@ export type DashboardView =
   | 'fg-inventory'
   | 'company-settings'
   | 'invoices'
+  | 'product-tracker'
 
 // Data passed from Client Catalog → Costing Module (pre-fill)
 export interface PendingCostingData {
