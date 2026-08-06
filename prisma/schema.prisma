@@ -30,6 +30,7 @@ model Customer {
   dispatches      Dispatch[]      @relation("CustomerDispatches")
   catalogs        ClientCatalog[] @relation("CustomerCatalogs")
   sampleCatalogs SampleCatalog[] @relation("CustomerSampleCatalogs")
+  invoices        Invoice[]       @relation("CustomerInvoices")
 }
 
 model Supplier {
@@ -712,6 +713,7 @@ model Dispatch {
   dispatchNo      String         @unique
   salesOrderId    String
   salesOrder      SalesOrder     @relation(fields: [salesOrderId], references: [id])
+  productionJobId String?        // Sprint 3: link to production job
   customerId      String
   customer        Customer       @relation(fields: [customerId], references: [id], name: "CustomerDispatches")
   dispatchDate    DateTime       @default(now())
@@ -723,6 +725,7 @@ model Dispatch {
   totalDispatchedQty Int         @default(0)
   notes           String?
   dispatchItems   DispatchItem[]
+  invoices        Invoice[]      // Sprint 3: invoices generated from this dispatch
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
 
@@ -1163,4 +1166,45 @@ model CompanySettings {
   primaryColor  String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+}
+
+// ─── INVOICE & PAYMENT (Sprint 3 — full pipeline) ──────────────────────────
+
+model Invoice {
+  id              String    @id @default(cuid())
+  invoiceNo       String    @unique
+  salesOrderId    String?
+  dispatchId      String?
+  dispatch        Dispatch? @relation(fields: [dispatchId], references: [id])
+  customerId      String?
+  customer        Customer? @relation(fields: [customerId], references: [id], name: "CustomerInvoices")
+  totalAmount     Float     @default(0)
+  paidAmount      Float     @default(0)
+  paymentStatus   String    @default("Unpaid") // Unpaid, Partial, Paid
+  paymentTerms    Int       @default(0) // credit days (0 = immediate)
+  dueDate         DateTime?
+  invoiceDate     DateTime  @default(now())
+  notes           String?
+  payments        Payment[]
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([salesOrderId])
+  @@index([customerId])
+  @@index([paymentStatus])
+}
+
+model Payment {
+  id              String    @id @default(cuid())
+  paymentNo       String    @unique
+  invoiceId       String
+  invoice         Invoice   @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  amount          Float     @default(0)
+  paymentDate     DateTime  @default(now())
+  paymentMode     String    @default("Cash") // Cash, UPI, Bank Transfer, Cheque, Other
+  referenceNo     String?   // UPI ref, cheque no, etc.
+  notes           String?
+  createdAt       DateTime  @default(now())
+
+  @@index([invoiceId])
 }

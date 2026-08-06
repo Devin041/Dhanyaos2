@@ -147,6 +147,7 @@ const navGroups: NavGroup[] = [
       { label: 'AI Advisor', icon: Bot, view: 'ai-advisor' },
       { label: 'Analytics', icon: LineChart, view: 'analytics' },
       { label: 'Eval Harness', icon: FlaskConical, view: 'eval' },
+      { label: 'Invoices', icon: FileText, view: 'invoices' },
       { label: 'Company Settings', icon: Settings, view: 'company-settings' },
     ],
   },
