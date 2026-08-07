@@ -82,7 +82,7 @@ export async function POST(req: NextRequest) {
 
     const now = new Date().toISOString()
 
-    // Insert payment record
+    // Insert payment record (Payment table doesn't have updatedAt column)
     const { data: payment, error: payErr } = await supabase
       .from('Payment')
       .insert({
@@ -93,20 +93,18 @@ export async function POST(req: NextRequest) {
         paymentMode: paymentMode || 'Cash',
         referenceNo: referenceNo || null,
         notes: notes || null,
-        createdAt: now,
       })
       .select()
       .single()
 
     if (payErr) throw payErr
 
-    // Update invoice paid amount and status
+    // Update invoice paid amount and status (without updatedAt — Payment table doesn't have it)
     await supabase
       .from('Invoice')
       .update({
         paidAmount: newPaidAmount,
         paymentStatus: newStatus,
-        updatedAt: now,
       })
       .eq('id', invoiceId)
 

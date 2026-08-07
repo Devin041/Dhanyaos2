@@ -11,7 +11,7 @@ export async function GET(req: NextRequest) {
 
     let query = supabase
       .from('Invoice')
-      .select('*, customer:customerId(id, companyName), dispatch:dispatchId(id, dispatchNo), payments:Payment(id, amount, paymentDate, paymentMode)')
+      .select('*')
       .order('invoiceDate', { ascending: false })
 
     if (status && status !== 'All') query = query.eq('paymentStatus', status)

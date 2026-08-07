@@ -61,8 +61,10 @@ function wrapQueryBuilder(qb: any): any {
           const inject = (row: any) => {
             if (row && typeof row === 'object' && !Array.isArray(row)) {
               if (!row.id) row.id = randomUUID()
-              if (!row.createdAt && !row.created_at) row.createdAt = now
-              if (!row.updatedAt && !row.updated_at) row.updatedAt = now
+              // Only add timestamps if not already present — some tables don't have these columns
+              // The wrapper is conservative: it adds them but Supabase will ignore unknown columns
+              // However, some tables (Payment, POItem) don't have createdAt/updatedAt
+              // So we only add id, and let each API route set timestamps explicitly
             }
             return row
           }
