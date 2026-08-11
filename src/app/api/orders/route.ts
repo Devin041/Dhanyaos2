@@ -197,16 +197,67 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Customer not found' }, { status: 404 })
     }
 
+    // ── Resolve styleId for each item ────────────────────────────────────────
+    // The sales-order create dialog lets users pick a product from the *Sample
+    // Catalog* (`/api/samples`). A Sample row's `id` is NOT a `Style.id`, so
+    // inserting it into `OrderItem.styleId` (which has an FK → Style.id) throws
+    // a 23503 foreign-key violation. We therefore:
+    //   1. Collect every incoming styleId + styleNo.
+    //   2. Query the Style table once for matching IDs AND styleNos.
+    //   3. For each item: keep the styleId if it really is a Style row;
+    //      otherwise fall back to a Style matched by styleNo; otherwise set
+    //      styleId = null (the column is nullable) so the order still creates.
+    const incomingStyleIds: string[] = []
+    const incomingStyleNos: string[] = []
+    for (const it of items as any[]) {
+      if (it?.styleId) incomingStyleIds.push(String(it.styleId))
+      if (it?.styleNo) incomingStyleNos.push(String(it.styleNo))
+    }
+
+    const validStyleIds = new Set<string>()
+    const styleNoToId = new Map<string, string>()
+
+    if (incomingStyleIds.length > 0) {
+      const { data: matchedById } = await supabase
+        .from('Style')
+        .select('id, styleNo')
+        .in('id', incomingStyleIds)
+      for (const s of matchedById ?? []) {
+        validStyleIds.add(s.id)
+        if (s.styleNo) styleNoToId.set(s.styleNo, s.id)
+      }
+    }
+    if (incomingStyleNos.length > 0) {
+      const { data: matchedByNo } = await supabase
+        .from('Style')
+        .select('id, styleNo')
+        .in('styleNo', incomingStyleNos)
+      for (const s of matchedByNo ?? []) {
+        validStyleIds.add(s.id)
+        if (s.styleNo) styleNoToId.set(s.styleNo, s.id)
+      }
+    }
+
     // Calculate totals for each item
-    const calculatedItems = items.map((item: { styleId?: string; styleName: string; quantity: number; unitPrice: number; unitCost: number }) => {
+    const calculatedItems = items.map((item: { styleId?: string; styleNo?: string; styleName: string; quantity: number; unitPrice: number; unitCost: number }) => {
       const quantity = Number(item.quantity) || 0
       const unitPrice = Number(item.unitPrice) || 0
       const unitCost = Number(item.unitCost) || 0
       const totalAmount = quantity * unitPrice
       const totalCost = quantity * unitCost
       const profit = totalAmount - totalCost
+
+      // Resolve a valid Style FK: prefer the incoming styleId if it is a real
+      // Style row, else fall back to styleNo lookup, else null.
+      let resolvedStyleId: string | null = null
+      if (item.styleId && validStyleIds.has(item.styleId)) {
+        resolvedStyleId = item.styleId
+      } else if (item.styleNo && styleNoToId.has(item.styleNo)) {
+        resolvedStyleId = styleNoToId.get(item.styleNo)!
+      }
+
       return {
-        styleId: item.styleId || null,
+        styleId: resolvedStyleId,
         styleName: item.styleName,
         quantity,
         unitPrice,
@@ -245,11 +296,16 @@ export async function POST(request: NextRequest) {
     const orderNo = `SO-${dateStr}-${String(seq).padStart(3, '0')}`
 
     // Create order first
+    // NOTE: Supabase does NOT have a DB-level trigger for @updatedAt (that is a
+    // Prisma-only feature). The `updatedAt` column is NOT NULL, so we MUST set
+    // it explicitly on every INSERT, otherwise we hit a 23502 constraint violation.
+    const nowIso = new Date().toISOString()
     const { data: order, error: orderErr } = await supabase
       .from('SalesOrder')
       .insert({
         orderNo,
         customerId,
+        orderDate: nowIso,
         deliveryDate: deliveryDate ? new Date(deliveryDate).toISOString() : null,
         status: 'Pending',
         totalAmount: Math.round(discountedAmount * 100) / 100,
@@ -260,15 +316,21 @@ export async function POST(request: NextRequest) {
         paidAmount: 0,
         discountPercent: discount,
         notes: notes || null,
+        createdAt: nowIso,
+        updatedAt: nowIso,
       })
       .select('*, customer:customerId(id,companyName,buyerName)')
       .single()
     if (orderErr) throw orderErr
 
     // Create items sequentially
+    // NOTE: OrderItem also has a NOT NULL `updatedAt` column (Prisma @updatedAt),
+    // so we must set createdAt + updatedAt explicitly for each row.
     const itemsWithOrderId = calculatedItems.map(item => ({
       ...item,
       salesOrderId: order.id,
+      createdAt: nowIso,
+      updatedAt: nowIso,
     }))
     const { data: createdItems, error: itemsErr } = await supabase
       .from('OrderItem')
@@ -281,8 +343,11 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json({ order: { ...order, items: createdItems } }, { status: 201 })
-  } catch (error) {
+  } catch (error: any) {
     console.error('Orders API POST error:', error)
-    return NextResponse.json({ error: 'Failed to create order' }, { status: 500 })
+    // Surface the real DB error so the frontend can show a meaningful message
+    // instead of a generic "Failed to create order".
+    const detail = error?.message || 'Failed to create order'
+    return NextResponse.json({ error: detail }, { status: 500 })
   }
 }

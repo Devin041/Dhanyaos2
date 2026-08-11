@@ -1078,3 +1078,24 @@
 7. **Quality Control Dashboard** (Round 8) — `/api/quality/dashboard` — Pass/fail rates, defect analysis, inspection trends, rework tracking
 8. **Cost Analysis Dashboard** (Round 9) — `/api/cost-sheets/analysis` — Cost components, margin analysis, trend, outliers, efficiency score
 9. **Sales Performance Dashboard** (Round 10) — `/api/orders/sales-performance` — Pipeline, conversion rates, win/loss, trends, top customers, quotation funnel
+
+---
+Task ID: BUGFIX-SALES-ORDER-CREATE
+Agent: Main Agent (Z.ai Code)
+Task: Fix "Failed to create order" error when creating a Sales Order from the Sales Orders module UI.
+
+Work Log:
+- Read /home/z/my-project/dev.log and found the root-cause error:
+  `null value in column "updatedAt" of relation "SalesOrder" violates not-null constraint` (PostgreSQL code 23502), returning HTTP 500.
+- Root cause #1: The Supabase `SalesOrder` table has `updatedAt DateTime @updatedAt` (NOT NULL) in the Prisma schema, but Supabase has NO database-level trigger to auto-populate it on INSERT (unlike `createdAt` which has `DEFAULT NOW()`). The POST /api/orders handler never sent `updatedAt` in the insert payload → null → constraint violation.
+- Root cause #2 (surfaced after fixing #1): The Sales Order create dialog loads the product dropdown from `/api/samples` (the Sample Catalog table), then sets `styleId = sample.id`. But `OrderItem.styleId` has an FK constraint to `Style.id` (`OrderItem_styleId_fkey`). Since a Sample ID is not a Style ID, the OrderItem insert failed with PostgreSQL code 23503 (foreign key violation).
+- Fix #1: In src/app/api/orders/route.ts POST handler, explicitly set `createdAt` and `updatedAt` to `new Date().toISOString()` on both the `SalesOrder` insert and every `OrderItem` insert.
+- Fix #2: Added styleId resolution logic in the POST handler — batch-query the Style table by incoming styleIds AND styleNos; for each item keep the styleId only if it is a real Style row, else fall back to a Style matched by styleNo, else set styleId = null (column is nullable) so the order still creates. Also improved error responses to surface the real DB message instead of a generic "Failed to create order".
+- Verified via curl: POST /api/orders now returns 201 with a fully populated order object (orderNo, totals, items, timestamps).
+- Verified via agent-browser (full UI flow): opened Sales Orders → New Order → selected customer "Raghini Textile" → picked product "EL-026 Aline" from catalog (auto-filled price 983 / cost 728) → set Qty 10 → clicked Create Order → order SO-20260811-002 appeared at the top of the orders table. Dev log confirmed `POST /api/orders 201`. Cleaned up the test order afterwards.
+
+Stage Summary:
+- "Failed to create order" is fully resolved. Sales orders now create successfully from both the UI and direct API calls.
+- Two distinct bugs were fixed in a single file (src/app/api/orders/route.ts): (1) missing updatedAt/createdAt on insert, (2) invalid styleId FK from Sample catalog selection.
+- No schema migration was needed — the fix is purely in the API layer and is backward compatible.
+- Recommendation for future: audit other create endpoints (PurchaseOrder, Quotation, ProductionJob, Dispatch, Invoice, Payment, etc.) for the same `updatedAt` NOT NULL issue, since they all use Prisma `@updatedAt` against Supabase which lacks the auto-trigger. The same pattern (explicitly set createdAt + updatedAt on every insert) should be applied wherever Supabase `.insert()` is used on a table with `@updatedAt`.

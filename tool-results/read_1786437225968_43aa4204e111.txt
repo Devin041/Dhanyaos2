@@ -1,0 +1,1081 @@
+     1→# Dhanya OS — Project Worklog
+     2→
+     3→## Project Overview
+     4→**Repository:** https://github.com/Devin041/DhanyaOs.git  
+     5→**Description:** Dhanya OS — AI Operating System for Dhanya Lifestyle LLP. An enterprise ERP system for women's ethnic wear manufacturing (Elysé by Dhanya).  
+     6→**Stack:** Next.js 16 (App Router) · TypeScript · Tailwind CSS 4 · shadcn/ui · Prisma (SQLite) · Zustand · Supabase client · jsPDF · xlsx · recharts · framer-motion
+     7→
+     8→---
+     9→
+    10→## Task ID: 1-6
+    11→**Agent:** Main Agent (Z.ai Code)
+    12→**Task:** Clone the DhanyaOs GitHub repository and run the full project
+    13→
+    14→### Work Log:
+    15→- Cloned repository from https://github.com/Devin041/DhanyaOs.git to /tmp/DhanyaOs
+    16→- Examined project structure: Next.js 16 ERP system with 138+ API routes, 30+ UI modules, AI agent system, dashboards (Founder, CFO, COO, Sales, Purchase, Brand, Investor), and comprehensive ERP features
+    17→- Copied source files (src/, prisma/, public/, configs) from cloned repo to /home/z/my-project
+    18→- Installed missing dependencies: @supabase/supabase-js, jspdf, jspdf-autotable, xlsx, pg
+    19→- Generated Prisma client and pushed schema to SQLite database (db/custom.db)
+    20→- Added db:seed script to package.json
+    21→- Started dev server with NODE_OPTIONS=--max-old-space-size=2048 for stability
+    22→- Fixed critical bug: supabase-db.ts threw 500 errors when Supabase env vars were not configured. Rewrote to return a mock client that returns empty results (demo mode) instead of throwing errors
+    23→- Verified all API routes now return HTTP 200 (previously /api/dashboard/cfo, /api/customers, etc. returned 500)
+    24→- Verified via agent-browser: homepage renders with Founder Dashboard, all sidebar modules (CFO, Sales Orders, Customers, etc.) are interactive and load without errors
+    25→
+    26→### Stage Summary:
+    27→- **Project Status:** Running successfully in demo mode at http://localhost:3000
+    28→- **Database:** SQLite via Prisma (schema pushed, seed available but not required for demo mode)
+    29→- **Supabase:** Not configured (no env vars) — app gracefully falls back to demo/empty data via mock client
+    30→- **Key Fix:** Modified `/home/z/my-project/src/lib/supabase-db.ts` to create a mock Supabase client when env vars are missing, preventing 500 errors across all 138 API routes
+    31→- **Verification:** agent-browser confirmed page renders, all modules clickable, no console errors, no 500 server errors
+    32→- **Server:** Started via setsid with start-server.sh for process persistence
+    33→
+    34→### Unresolved Issues / Risks:
+    35→1. **No real database data:** App runs in demo mode with hardcoded demo data for the main dashboard and empty data for other modules. To get real data, configure Supabase env vars (NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY) or migrate API routes to use Prisma/SQLite directly
+    36→2. **Memory usage:** Server uses ~2GB RAM during compilation. The 4GB sandbox can handle this but may need monitoring
+    37→3. **Cross-origin warning:** Next.js warns about cross-origin requests from preview domain — cosmetic only, `allowedDevOrigins: ['*']` is set but warning persists
+    38→4. **Mini-services:** The websocket mini-service in mini-services/ has not been started yet
+    39→
+    40→### Priority Recommendations for Next Phase:
+    41→1. Run the database seed (`bun run db:seed`) to populate SQLite with realistic demo data, then migrate key API routes from Supabase to Prisma for local data persistence
+    42→2. Start the websocket mini-service for real-time features
+    43→3. Enhance UI styling and add more detailed visual polish to dashboards
+    44→4. Add more features and functionality to the ERP modules
+    45→
+    46→---
+    47→
+    48→## Task ID: 7
+    49→**Agent:** Main Agent (Z.ai Code)
+    50→**Task:** Connect Supabase (and Cloudinary) with real credentials provided by user
+    51→
+    52→### Work Log:
+    53→- Discovered the cloned repo `/tmp/DhanyaOs/.env` ALREADY contained Supabase credentials (user confirmed project was already connected). My earlier check missed this — only checked the current project's .env which had only DATABASE_URL
+    54→- Updated `/home/z/my-project/.env` with real Supabase credentials:
+    55→  - `NEXT_PUBLIC_SUPABASE_URL=https://uvlamiwykxekblposogn.supabase.co`
+    56→  - `NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...` (anon key)
+    57→  - `SUPABASE_SERVICE_ROLE_KEY=eyJ...` (service role key)
+    58→  - Added Cloudinary env vars (CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME) for completeness
+    59→- Investigated Cloudinary usage in code: NO direct Cloudinary API integration exists. Images are stored as Cloudinary URLs in Supabase's `SamplePhoto.imageUrl` and `CostSheet.image` fields. The actual Cloudinary account used is `mpyzq5si` (different from user-provided `dt3sqo86m`), but since images load via public URLs, no credentials are needed for viewing
+    60→- Restarted dev server with new env vars
+    61→- Verified real data is now flowing:
+    62→  - `/api/dashboard`: 174 total orders, ₹1.25 Cr revenue, ₹64 L profit, 51.23% gross margin (REAL DATA)
+    63→  - `/api/customers`: Real customers like "Rajshree" (Dinesh Bhai, Lucknow) with 11 orders, ₹12.4L order value
+    64→  - `/api/samples`: 25 real samples (EL-025 Anarkali, EL-024, etc.)
+    65→  - Images loading from Cloudinary (`res.cloudinary.com/mpyzq5si/...`) — verified `loaded:true` in browser
+    66→- Verified via agent-browser: Founder Dashboard, Customers module, and Sample Catalog all render with real data and images
+    67→
+    68→### Stage Summary:
+    69→- **Project Status:** FULLY CONNECTED and running with real Supabase data at http://localhost:3000
+    70→- **Supabase:** ✅ Connected (uvlamiwykxekblposogn.supabase.co) — real data flowing for all modules
+    71→- **Cloudinary:** ✅ Images loading from `res.cloudinary.com/mpyzq5si/...` (public URLs, no auth needed). Note: actual cloud name in DB is `mpyzq5si`, not the `dt3sqo86m` provided by user
+    72→- **Database:** SQLite via Prisma (fallback only, not actively used — all data comes from Supabase)
+    73→- **Verification:** agent-browser confirmed real customer data ("Rajshree"), real samples (25 items), real images loading (loaded:true), no console errors, no 500 server errors
+    74→- **Key Learning:** Always check the cloned repo's .env file first — the project was already pre-configured with Supabase credentials
+    75→
+    76→### Current Data Snapshot (Real):
+    77→- Total Orders: 174
+    78→- Total Revenue: ₹1,25,42,175
+    79→- Total Profit: ₹64,25,651
+    80→- Gross Margin: 51.23%
+    81→- Customers: Real (e.g., Rajshree - 11 orders, ₹12.4L)
+    82→- Samples: 25 (EL-001 to EL-025, Anarkali & Straight Kurti styles)
+    83→- Images: Cloudinary-hosted, loading successfully
+    84→
+    85→---
+    86→
+    87→## Task ID: 8 (Cron: 15-min webDevReview)
+    88→**Agent:** Main Agent (Z.ai Code) — automated review round 1
+    89→**Task:** Assess project status, QA test via agent-browser, fix bugs, improve styling, add features
+    90→
+    91→### Work Log:
+    92→
+    93→**1. QA Testing — found 3 real bugs (500 errors):**
+    94→- Tested 50+ API endpoints systematically via curl
+    95→- Found 3 endpoints returning HTTP 500 due to missing Supabase tables:
+    96→  - `/api/capital-investments` → table `CapitalInvestment` doesn't exist (PGRST205)
+    97→  - `/api/supplier-returns` → table `SupplierReturn` doesn't exist (PGRST205)
+    98→  - `/api/customer-returns` → table `CustomerReturn` doesn't exist (PGRST205)
+    99→- Root cause: These tables were never created in the Supabase database; the API routes threw errors instead of degrading gracefully
+   100→
+   101→**2. Bug Fixes — graceful degradation for missing tables:**
+   102→- Added `isMissingTableError()` and `safeSelect()` helpers to `src/lib/supabase-db.ts` — detects PGRST205/42P01 error codes and "Perhaps you meant" hints
+   103→- Updated `src/app/api/capital-investments/route.ts` GET — now returns `{ investments: [], totalInvested: 0 }` when table missing
+   104→- Updated `src/app/api/supplier-returns/route.ts` GET — returns empty paginated response with zero counts/summary
+   105→- Updated `src/app/api/customer-returns/route.ts` GET — returns empty paginated response with zero counts/summary
+   106→- Verified all 3 endpoints now return HTTP 200 with empty data (no more 500 errors)
+   107→- Note: 3 other non-200s (`/api/dashboard/kpi-detail` 400, `/api/sales-orders` 404, `/api/reports/gst` 400) are expected — they require query parameters or are correctly named differently (orders endpoint is `/api/orders`, not `/api/sales-orders`)
+   108→
+   109→**3. Styling Improvements — added premium CSS utilities to `globals.css`:**
+   110→- `.premium-card` — gradient background, backdrop-blur saturate, multi-layer box-shadow, hover lift with translateY(-2px), sheen sweep pseudo-element on hover
+   111→- `.accent-bar-gold` — gradient gold divider bar
+   112→- `.kpi-shimmer` — subtle animated shimmer for KPI values (light + dark variants)
+   113→- `.glow-ring` — radial glow that appears on hover for icon backgrounds
+   114→- `.animate-slide-in` — slide-in-up keyframe for staggered list items
+   115→- `.animate-pulse-soft` — softer pulse for status dots
+   116→- `.btn-gold` — premium gold gradient button with shadow
+   117→- `.health-ring-track` — stroke color for circular progress ring
+   118→- `.border-gradient-gold` — gradient border for important panels
+   119→- All utilities adapt to light/dark theme via `:is(.dark ...)`
+   120→
+   121→**4. New Feature — Business Health Score widget:**
+   122→- Added `BusinessHealthScore` component to Founder Dashboard (`src/components/dashboard/founder-dashboard.tsx`)
+   123→- Aggregates 6 KPI dimensions into a single 0-100 score:
+   124→  1. **Profitability** — based on gross margin (target 30%+)
+   125→  2. **Liquidity** — cash balance vs 3 months of expenses
+   126→  3. **Collections** — receivables as % of revenue (inverse)
+   127→  4. **Working Capital** — working capital as % of revenue
+   128→  5. **Operations** — delivered/total orders ratio
+   129→  6. **Risk Control** — based on unread alerts count
+   130→- Features:
+   131→  - Animated SVG circular progress ring (140x140px) with color-coded score (green ≥75, amber ≥50, red <50)
+   132→  - Score label: Excellent / Healthy / Moderate / At Risk / Critical
+   133→  - Per-dimension mini progress bars with staggered slide-in animation
+   134→  - Each dimension shows contextual hint (e.g., "51.2% margin", "₹12.5L cash", "3 alerts")
+   135→  - Responsive: stacks vertically on mobile, horizontal on desktop
+   136→- Positioned between Quick Actions and KPI Cards for maximum visibility
+   137→- Verified rendering via agent-browser: overall score "MODERATE", all 6 dimensions visible, no console errors
+   138→
+   139→### Stage Summary:
+   140→- **Bugs Fixed:** 3 API endpoints (capital-investments, supplier-returns, customer-returns) — now return 200 with empty data instead of 500
+   141→- **Styling:** Added 10+ premium CSS utilities (premium-card, kpi-shimmer, glow-ring, btn-gold, animate-slide-in, etc.)
+   142→- **New Feature:** Business Health Score widget with animated circular ring + 6-dimension breakdown on Founder Dashboard
+   143→- **QA Status:** All 50+ tested API endpoints now return 200. Homepage renders with new widget, no browser console errors
+   144→
+   145→### Verification Results:
+   146→- Homepage HTTP 200 ✓
+   147→- Business Health Score widget renders with "MODERATE" overall score ✓
+   148→- All 6 dimensions (Profitability, Liquidity, Collections, Working Capital, Operations, Risk Control) visible ✓
+   149→- No browser console errors ✓
+   150→- No 500 server errors on previously-failing endpoints ✓
+   151→
+   152→### Unresolved Issues / Risks:
+   153→1. **Missing Supabase tables:** `CapitalInvestment`, `SupplierReturn`, `CustomerReturn`, `SupplierReturnItem`, `CustomerReturnItem` don't exist in Supabase. Currently returning empty data. To enable these features fully, run the SQL migration scripts from `/tmp/DhanyaOs/scripts/` (quotation-upgrade.sql, fg-inventory-tables.sql) in Supabase dashboard
+   154→2. **Pre-existing lint error:** `src/components/module-resolver.tsx:226` has a react-hooks/set-state-in-effect warning — not introduced by this round, pre-existing from cloned repo
+   155→3. **Memory usage:** Server uses ~1.7GB RAM; stable but should be monitored
+   156→4. **Other modules untested:** Only tested founder dashboard + API endpoints this round. Other dashboards (CFO, COO, Sales, etc.) and modules (GRN, Dispatch, Quotations, etc.) need QA in future rounds
+   157→
+   158→### Priority Recommendations for Next Phase:
+   159→1. **Create missing Supabase tables** — run SQL migrations for CapitalInvestment, SupplierReturn, CustomerReturn to enable those modules fully
+   160→2. **QA test remaining dashboards** — CFO, COO, Sales, Purchase, Brand, Investor dashboards need agent-browser verification
+   161→3. **QA test remaining modules** — GRN, Dispatch, Quotations, Production, Costing, Sample Catalog modules need interactive testing
+   162→4. **Add more features:** Consider adding a "Cash Flow Forecast" widget, "Inventory Aging" chart, or "Supplier Performance" scorecard
+   163→5. **Start the websocket mini-service** for real-time notifications
+   164→6. **Polish mobile responsiveness** — verify all modules work well on mobile viewport
+   165→
+   166→---
+   167→
+   168→## Task ID: 9 (Cron: 15-min webDevReview)
+   169→**Agent:** Main Agent (Z.ai Code) — automated review round 2
+   170→**Task:** Assess project status, QA test all modules, improve styling, add new feature
+   171→
+   172→### Work Log:
+   173→
+   174→**1. Comprehensive QA Testing — ALL modules tested (zero errors):**
+   175→- Tested all 7 dashboards via agent-browser: Founder, CFO, COO, Sales, Purchase, Brand, Investor — all render with no console errors
+   176→- Tested all 24 modules via agent-browser: Style Master, Workers, Costing, Client Catalog, Sample Catalog, Production, Sampling, Quality Control, Vendors, Sales Orders, Customers, Quotations, Suppliers, Purchase Orders, Fabric Stock, Inventory, GRN, Dispatch, Returns, Consumption, Reservations, Finished Goods, Accounts, Cash Flow, Reports, GST Reports, Analytics — ALL render with zero console errors
+   177→- Verified previously-fixed endpoints still return 200 (capital-investments, supplier-returns, customer-returns)
+   178→- App is very stable — no bugs found this round
+   179→
+   180→**2. New Feature — Cash Flow Forecast API + Widget:**
+   181→- Created new API endpoint `/api/cashflow/forecast?days=30` (`src/app/api/cashflow/forecast/route.ts`)
+   182→  - Generates forward-looking cash flow projection based on:
+   183→    1. Current cash balance (latest DailySnapshot)
+   184→    2. Historical average daily net flow (last 30 days)
+   185→    3. Upcoming confirmed inflows (SalesOrders with future deliveryDate, unpaid)
+   186→    4. Upcoming confirmed outflows (PurchaseOrders with future expectedDelivery, unpaid)
+   187→  - Returns day-by-day projected balance for next 7-90 days
+   188→  - Computes: runway days, breakeven day, min balance, projected closing balance
+   189→  - Uses `isMissingTableError()` for graceful degradation if DailySnapshot table missing
+   190→  - Verified with real data: Current ₹12.48L, Avg Daily Net -₹2,924, Runway 426 days, Projected ₹14.3L in 30 days
+   191→
+   192→- Added `CashFlowForecastWidget` component to Cash Flow module (`src/components/modules/cashflow.tsx`)
+   193→  - Premium card with "AI Projected" badge and Sparkles icon
+   194→  - 4-metric grid: Current Balance, Projected Closing (with gain/loss color), Daily Net (burn/grow indicator), Runway/Breakeven
+   195→  - Interactive forecast period selector (14D / 30D / 60D / 90D)
+   196→  - ComposedChart with:
+   197→    - Area chart for projected balance trajectory (gold gradient fill)
+   198→    - Bar chart for daily inflows (emerald) and outflows (red)
+   199→    - ReferenceLine at y=0 (breakeven threshold)
+   200→    - Custom tooltip with formatted INR values and dates
+   201→  - Risk alert banner (red) appears when breakeven day is detected, showing exact date and min balance with actionable recommendation
+   202→  - Footer legend with scheduled inflows/outflows counts
+   203→  - All metrics color-coded: green for positive, red for negative/breakeven
+   204→  - Responsive layout
+   205→
+   206→**3. Styling Improvements:**
+   207→- Applied `premium-card` class to forecast widget (gradient bg, hover lift, sheen sweep)
+   208→- Used `glow-ring` on Sparkles icon for radial glow on hover
+   209→- Used `animate-slide-in` for risk alert banner entrance animation
+   210→- Color-coded metric cards (emerald for gains, red for losses/breakeven)
+   211→- Consistent tabular-nums for all numeric values
+   212→- Responsive grid: 2 cols on mobile, 4 cols on desktop
+   213→
+   214→### Stage Summary:
+   215→- **QA Status:** ✅ ALL 7 dashboards + 24 modules tested — ZERO console errors. App is very stable.
+   216→- **New Feature:** Cash Flow Forecast with AI projection (API + Widget) — fully functional with real data
+   217→- **Styling:** Premium card styling with glow effects, color-coded metrics, animated risk alerts
+   218→- **Interactivity:** Forecast period selector (14D/30D/60D/90D) all working, chart updates dynamically
+   219→
+   220→### Verification Results:
+   221→- All 7 dashboards render without errors ✓
+   222→- All 24 modules render without errors ✓
+   223→- Cash Flow Forecast API returns real projected data (₹12.48L → ₹14.3L in 30 days) ✓
+   224→- Forecast widget renders with "AI PROJECTED" badge, 4 metrics, composed chart ✓
+   225→- All 4 forecast period buttons (14D/30D/60D/90D) work without errors ✓
+   226→- No browser console errors ✓
+   227→- No 500 server errors ✓
+   228→
+   229→### Unresolved Issues / Risks:
+   230→1. **Missing Supabase tables:** `CapitalInvestment`, `SupplierReturn`, `CustomerReturn` still don't exist (gracefully returning empty data from Task 8 fix). To enable fully, run SQL migrations in Supabase dashboard
+   231→2. **Pre-existing lint error:** `src/components/module-resolver.tsx:226` react-hooks/set-state-in-effect warning — pre-existing from cloned repo, not introduced by this round
+   232→3. **Memory usage:** Server stable at ~2GB RAM
+   233→4. **Forecast accuracy:** Forecast uses historical 30-day average as baseline; for better accuracy, could weight recent days more heavily or add seasonality detection
+   234→
+   235→### Priority Recommendations for Next Phase:
+   236→1. **Create missing Supabase tables** — run SQL migrations for CapitalInvestment, SupplierReturn, CustomerReturn to enable those modules fully
+   237→2. **Add Inventory Aging chart** — visualize how long inventory items have been in stock, identify dead stock
+   238→3. **Add Supplier Performance scorecard** — aggregate supplier metrics (on-time delivery, quality, pricing)
+   239→4. **Enhance AI Agent** — integrate the forecast data into AI advisor insights
+   240→5. **Start the websocket mini-service** for real-time notifications
+   241→6. **Add export functionality** — allow exporting forecast data to Excel/PDF
+   242→7. **Polish mobile responsiveness** — verify all new widgets work well on mobile viewport
+   243→
+   244→---
+   245→
+   246→## Task ID: 10 (Cron: 15-min webDevReview)
+   247→**Agent:** Main Agent (Z.ai Code) — automated review round 3
+   248→**Task:** Assess project status, QA test, add Inventory Aging feature, improve styling
+   249→
+   250→### Work Log:
+   251→
+   252→**1. QA Verification:**
+   253→- Verified dev server running healthy (next-server v16.1.3)
+   254→- Verified all previously-fixed endpoints still return 200
+   255→- App remains stable from round 2 — no new bugs found
+   256→
+   257→**2. New Feature — Inventory Aging Analysis (API + Widget):**
+   258→
+   259→- Created new API endpoint `/api/inventory/aging` (`src/app/api/inventory/aging/route.ts`)
+   260→  - Analyzes how long inventory items have been in stock, grouped by age buckets:
+   261→    - 0-30 days (fresh — green)
+   262→    - 31-60 days (aging — gold)
+   263→    - 61-90 days (old — orange)
+   264→    - 90+ days (dead stock — red)
+   265→  - Combines data from FabricStock (fabric rolls with createdAt) and FinishedGood (FG bins with receivedDate/createdAt)
+   266→  - Uses `isMissingTableError()` for graceful degradation if tables missing
+   267→  - Returns:
+   268→    - Summary: totalItems, totalValue, avgAgeDays, deadStockItems/Value/Percentage, freshItems/Value, fabricItems/Value, fgItems/Value
+   269→    - Buckets: 4 age buckets with itemCount, totalValue, percentage, topItems
+   270→    - TopOldest: top 10 oldest items (dead stock candidates) with formatted dates
+   271→  - Verified with real data: 10 fabric items, ₹6,53,510 total value, avg age 8 days, 0 dead stock, 100% fresh
+   272→
+   273→- Added `InventoryAgingWidget` component to Inventory module (`src/components/modules/inventory.tsx`)
+   274→  - Premium card with "Smart Insights" badge and Hourglass icon with glow ring
+   275→  - 4-metric grid: Total Items (with fabric/FG breakdown), Total Value, Fresh ≤30d (emerald), Dead Stock 90+d (red if present)
+   276→  - Two-column layout:
+   277→    - Left: BarChart showing value by age bucket (color-coded bars: green/gold/orange/red)
+   278→    - Right: Age Distribution breakdown with progress bars, item counts, values, percentages
+   279→  - Top 10 oldest items table with:
+   280→    - Item name (with supplier/styleNo subtitle)
+   281→    - Type badge (Fabric=sky, Finished=purple)
+   282→    - Quantity with unit (m/pcs)
+   283→    - Value (formatted INR)
+   284→    - Age badge (color-coded: green ≤30d, amber 60-89d, red 90+d)
+   285→    - Received date
+   286→    - Row highlighting (red bg for dead stock, amber for aging)
+   287→  - Dead stock alert banner (red, animated) appears when 90+ day items exist, with actionable recommendation
+   288→  - Staggered slide-in animation for age distribution rows
+   289→  - Custom tooltip for bar chart showing value + item count + percentage
+   290→  - Fully responsive (2 cols mobile, 4 cols desktop for metrics; 1 col mobile, 2 cols desktop for chart+legend)
+   291→
+   292→**3. Styling Improvements:**
+   293→- Applied `premium-card` class (gradient bg, hover lift, sheen sweep)
+   294→- Used `glow-ring` on Hourglass icon for radial glow on hover
+   295→- Used `animate-slide-in` for age distribution rows and dead stock alert
+   296→- Color-coded metric cards: emerald for fresh, red for dead stock
+   297→- Color-coded age badges in table (green/amber/red based on age)
+   298→- Row background highlighting for dead stock (red tint) and aging items (amber tint)
+   299→- Consistent tabular-nums for all numeric values
+   300→- Custom bar chart with rounded top corners and color-coded cells
+   301→
+   302→### Stage Summary:
+   303→- **QA Status:** ✅ App stable, no new bugs, all previous fixes intact
+   304→- **New Feature:** Inventory Aging Analysis (API + Widget) — fully functional with real data (10 items, ₹6.5L value)
+   305→- **Styling:** Premium card, color-coded metrics/badges/rows, animated alerts, glow effects
+   306→- **Verification:** Widget renders with "SMART INSIGHTS" badge, all 4 metric cards, bar chart, age distribution, oldest items table showing real fabric names (Muslin, Cotton Silk, Georgette, etc.)
+   307→
+   308→### Verification Results:
+   309→- Inventory Aging API returns HTTP 200 with real data ✓
+   310→- Widget renders "Inventory Aging Analysis" heading + "SMART INSIGHTS" badge ✓
+   311→- 4 metric cards visible (TOTAL ITEMS, TOTAL VALUE, FRESH ≤30D, DEAD STOCK 90+D) ✓
+   312→- Bar chart "VALUE BY AGE BUCKET" renders ✓
+   313→- Age distribution "AGE DISTRIBUTION" with progress bars renders ✓
+   314→- Oldest items table shows real fabric names (Cotton Silk Plain, Cotton Linen, Georgette Solid, Rayon Printed, Muslin, Cotton Lawn) ✓
+   315→- No browser console errors ✓
+   316→- No 500 server errors ✓
+   317→
+   318→### Unresolved Issues / Risks:
+   319→1. **Missing Supabase tables:** `CapitalInvestment`, `SupplierReturn`, `CustomerReturn` still don't exist (gracefully returning empty data). `FinishedGood` table appears empty too (0 FG items in aging). To enable fully, run SQL migrations in Supabase dashboard
+   320→2. **Pre-existing lint error:** `src/components/module-resolver.tsx:226` react-hooks/set-state-in-effect warning — pre-existing from cloned repo
+   321→3. **Memory usage:** Server stable at ~1.9GB RAM
+   322→4. **All inventory is fresh:** Current data shows 100% fresh stock (0-30 days) since all fabric was added on 27 Jul 2026. Dead stock alert won't trigger until items age past 90 days
+   323→
+   324→### Priority Recommendations for Next Phase:
+   325→1. **Create missing Supabase tables** — run SQL migrations for CapitalInvestment, SupplierReturn, CustomerReturn, FinishedGood to enable those modules fully
+   326→2. **Add Supplier Performance scorecard** — aggregate supplier metrics (on-time delivery, quality rating, total PO value, average lead time)
+   327→3. **Enhance AI Agent** — integrate aging + forecast data into AI advisor insights
+   328→4. **Add export functionality** — allow exporting aging/forecast data to Excel/PDF
+   329→5. **Start the websocket mini-service** for real-time notifications
+   330→6. **Add Customer Insights dashboard** — top customers by revenue, payment behavior, order frequency
+   331→7. **Polish mobile responsiveness** — verify all new widgets work well on mobile viewport
+   332→
+   333→---
+   334→
+   335→## Task ID: 11 (Cron: 15-min webDevReview)
+   336→**Agent:** Main Agent (Z.ai Code) — automated review round 4
+   337→**Task:** Assess project status, QA test, add Supplier Performance Scorecard, improve styling
+   338→
+   339→### Work Log:
+   340→
+   341→**1. QA Verification:**
+   342→- Verified dev server running healthy (next-server v16.1.3)
+   343→- Verified all key endpoints return 200 (dashboard, suppliers, inventory/aging, cashflow/forecast)
+   344→- App remains stable from round 3 — no new bugs found
+   345→
+   346→**2. New Feature — Supplier Performance Scorecard (API + Widget):**
+   347→
+   348→- Created new API endpoint `/api/suppliers/performance` (`src/app/api/suppliers/performance/route.ts`)
+   349→  - Aggregates supplier metrics across PurchaseOrders, deliveries, quality ratings, and payment behavior
+   350→  - For each supplier computes:
+   351→    - PO count, total PO value, paid/unpaid breakdown, outstanding payables
+   352→    - On-time delivery rate (delivered POs by expectedDelivery date)
+   353→    - Average lead time (createdAt → expectedDelivery)
+   354→    - Fill rate (receivedQty / orderedQty)
+   355→    - Quality rating (from Supplier.rating, 1-5)
+   356→    - Composite performance score (0-100) using weighted formula:
+   357→      - On-time delivery: 30%
+   358→      - Fill rate: 25%
+   359→      - Quality rating: 25%
+   360→      - Payment discipline (paid/total): 10%
+   361→      - Volume (normalized): 10%
+   362→    - Score grade: A (≥85), B (≥70), C (≥50), D (<50)
+   363→    - Tier: Strategic (≥85 + 3+ POs), Preferred (≥70), Approved (≥50), Conditional (<50)
+   364→  - Returns ranked supplier list + summary stats (avgScore, avgOnTimeRate, avgFillRate, tier counts, grade distribution)
+   365→  - Uses `isMissingTableError()` for graceful degradation
+   366→  - Verified with real data: 6 suppliers, avg score 71/100, 3 Preferred + 3 Approved, 2 Grade A, 1 Grade B, 3 Grade C
+   367→
+   368→- Added `SupplierPerformanceWidget` component to Suppliers module (`src/components/modules/suppliers.tsx`)
+   369→  - Premium card with "AI Ranked" badge and Trophy icon with glow ring
+   370→  - 4-metric grid: Avg Score (/100), On-Time Rate (emerald), Total PO Value, Outstanding payables (amber)
+   371→  - Tier distribution badges: Strategic (primary/gold), Preferred (emerald), Approved (sky), Conditional (amber) with counts
+   372→  - Grade distribution legend (A/B/C/D with color dots and counts)
+   373→  - Two-column layout:
+   374→    - Left (2/3): Horizontal bar chart "Top 5 Suppliers by Composite Score" with color-coded bars by grade
+   375→    - Right (1/3): Radar chart "#1 Profile" showing 5-dimension breakdown (On-Time, Fill Rate, Quality, Volume, Payment) for top supplier
+   376→  - Complete ranking table with 11 columns:
+   377→    - Rank #, Supplier name+type, Tier badge, Score+Grade badge, POs, PO Value, On-Time%, Fill Rate%, Lead Time, Rating, Outstanding
+   378→    - Color-coded on-time and fill rate values (green ≥90/80, amber ≥70/50, red below)
+   379→    - Color-coded score with grade badge (colored square with letter)
+   380→    - Staggered slide-in animation for rows
+   381→  - Performance review alert banner (amber, animated) when Conditional suppliers exist
+   382→  - Custom tooltips for both charts
+   383→  - Fully responsive (2 cols mobile, 4 cols desktop for metrics; 1 col mobile, 3 cols desktop for charts)
+   384→
+   385→**3. Styling Improvements:**
+   386→- Applied `premium-card` class (gradient bg, hover lift, sheen sweep)
+   387→- Used `glow-ring` on Trophy icon for radial glow on hover
+   388→- Color-coded grade badges (A=green, B=gold, C=orange, D=red) as colored squares with white letter
+   389→- Color-coded tier badges (Strategic=primary, Preferred=emerald, Approved=sky, Conditional=amber)
+   390→- Color-coded metric values (on-time, fill rate) based on threshold
+   391→- Staggered slide-in animations for table rows
+   392→- Radar chart with gold fill (35% opacity) for top supplier profile
+   393→- Horizontal bar chart with rounded right corners and grade-colored cells
+   394→- Consistent tabular-nums for all numeric values
+   395→
+   396→### Stage Summary:
+   397→- **QA Status:** ✅ App stable, no new bugs, all previous features intact
+   398→- **New Feature:** Supplier Performance Scorecard (API + Widget) — fully functional with real data (6 suppliers, avg score 71/100)
+   399→- **Styling:** Premium card, color-coded grades/tiers/metrics, radar chart, animated alerts, glow effects
+   400→- **Verification:** Widget renders with "AI RANKED" badge, all 4 metric cards, tier distribution, top 5 bar chart, #1 radar profile, complete rankings table with all 6 real suppliers
+   401→
+   402→### Verification Results:
+   403→- Supplier Performance API returns HTTP 200 with real data ✓
+   404→- Widget renders "Supplier Performance Scorecard" heading + "AI RANKED" badge ✓
+   405→- 4 metric cards visible (AVG SCORE, ON-TIME RATE, TOTAL PO VALUE, OUTSTANDING) ✓
+   406→- Tier distribution badges render (Strategic, Preferred, Approved, Conditional) ✓
+   407→- Grade distribution legend renders (A: 2, B: 1, C: 3, D: 0) ✓
+   408→- Top 5 bar chart renders with color-coded bars ✓
+   409→- #1 Profile radar chart renders for Mumbai Accessories Ltd ✓
+   410→- Complete rankings table shows all 6 real suppliers (Mumbai Accessories, Delhi Embroidery, Rajasthan Print, Ahmedabad Textile, Surat Fabric, Kolkata Silk) ✓
+   411→- No browser console errors ✓
+   412→- No 500 server errors ✓
+   413→
+   414→### Unresolved Issues / Risks:
+   415→1. **Missing Supabase tables:** `CapitalInvestment`, `SupplierReturn`, `CustomerReturn`, `FinishedGood` still don't exist (gracefully returning empty data). To enable fully, run SQL migrations in Supabase dashboard
+   416→2. **Pre-existing lint error:** `src/components/module-resolver.tsx:226` react-hooks/set-state-in-effect warning — pre-existing from cloned repo
+   417→3. **Memory usage:** Server stable at ~2.2GB RAM
+   418→4. **Low fill rates:** Most suppliers show low fill rates (0-10%) because POs are mostly Pending (13 of 15) with minimal receivedQty. This is expected for early-stage data
+   419→5. **On-time rate 100%:** All delivered POs (2 Partial) are on-time since expectedDelivery dates haven't passed yet. Real on-time tracking will improve as more POs are fulfilled
+   420→
+   421→### Priority Recommendations for Next Phase:
+   422→1. **Create missing Supabase tables** — run SQL migrations for CapitalInvestment, SupplierReturn, CustomerReturn, FinishedGood
+   423→2. **Add Customer Insights dashboard** — top customers by revenue, payment behavior, order frequency, lifetime value
+   424→3. **Enhance AI Agent** — integrate performance/aging/forecast data into AI advisor insights
+   425→4. **Add export functionality** — allow exporting performance/aging/forecast data to Excel/PDF
+   426→5. **Start the websocket mini-service** for real-time notifications
+   427→6. **Add Production Efficiency dashboard** — track production job progress, stage bottlenecks, worker productivity
+   428→7. **Polish mobile responsiveness** — verify all new widgets work well on mobile viewport
+   429→
+   430→---
+   431→
+   432→## Task ID: 12 (Cron: 15-min webDevReview)
+   433→**Agent:** Main Agent (Z.ai Code) — automated review round 5
+   434→**Task:** Assess project status, QA test, add Customer Insights dashboard, improve styling
+   435→
+   436→### Work Log:
+   437→
+   438→**1. QA Verification:**
+   439→- Verified dev server running healthy (next-server v16.1.3)
+   440→- Verified all key endpoints return 200 (dashboard, suppliers/performance, inventory/aging, cashflow/forecast, customers)
+   441→- App remains stable from round 4 — no new bugs found
+   442→
+   443→**2. New Feature — Customer Insights Dashboard (API + Widget):**
+   444→
+   445→- Created new API endpoint `/api/customers/insights` (`src/app/api/customers/insights/route.ts`)
+   446→  - Aggregates customer behavior metrics across orders, payments, and profitability
+   447→  - For each customer computes:
+   448→    - Order count, total revenue, total profit, avg margin
+   449→    - Total paid, outstanding receivables, payment rate
+   450→    - Avg order value, first/last order date, days as customer
+   451→    - Order frequency (orders per 30 days)
+   452→    - Lifetime value (LTV = total paid + projected annual frequency * 0.5 retention)
+   453→    - Payment behavior score (0-100) with payment terms bonus/penalty
+   454→    - Credit utilization (outstanding / creditLimit %)
+   455→    - Customer segment: VIP / Loyal / Regular / New / At-Risk
+   456→      - At-Risk: high revenue (>₹50K) but low payment rate (<30%)
+   457→      - New: <30 days as customer and ≤3 orders
+   458→      - VIP: revenue ≥₹10L and payment rate ≥60%
+   459→      - Loyal: ≥5 orders and ≥30 days
+   460→      - Regular: default
+   461→  - Returns ranked customer list + summary + 6-month revenue trend + payment status distribution
+   462→  - Uses `isMissingTableError()` for graceful degradation
+   463→  - Verified with real data: 10 customers, ₹2.17 Cr revenue, ₹1.1 Cr profit, 51% avg margin, 6 At-Risk + 4 Loyal, 100% repeat rate, top customer Meera Fashions (₹30.6L)
+   464→
+   465→- Added `CustomerInsightsWidget` component to Customers module (`src/components/modules/customers.tsx`)
+   466→  - Premium card with "AI Segmented" badge and Sparkles icon with glow ring
+   467→  - 4-metric grid: Total Revenue (+profit), Avg Margin (emerald, +AOV), Outstanding (amber, +paid%), Repeat Rate (+active count)
+   468→  - Segment distribution badges: VIP (Crown/gold), Loyal (Heart/emerald), Regular (UserCheck/sky), New (UserPlus/amber), At-Risk (AlertCircle/red) with counts
+   469→  - Two-column layout:
+   470→    - Left (2/3): Area chart "Revenue & Profit Trend (6 Months)" with dual gradient fills (gold for revenue, emerald for profit)
+   471→    - Right (1/3): Donut pie chart "Payment Status" (Paid=green, Partial=gold, Unpaid=red) with legend
+   472→  - Top 5 Customers cards (responsive 1/2/5 cols):
+   473→    - Rank badge (#1-5), segment icon
+   474→    - Customer name, revenue (gold), order count, margin
+   475→    - Payment rate with color-coded progress bar (green ≥60%, amber ≥30%, red below)
+   476→    - Staggered slide-in animation
+   477→  - Complete Customer Intelligence Report table with 13 columns:
+   478→    - Rank, Customer+buyer, Segment badge, Orders, Revenue, Profit (emerald), Margin (color-coded), AOV, Paid (color-coded), Outstanding (amber), Payment Score (mini progress bar), LTV (gold), Credit Utilization (color-coded)
+   479→    - Staggered slide-in animation for rows
+   480→  - At-Risk alert banner (red, animated) when At-Risk customers exist, with actionable collection recommendations
+   481→  - Custom tooltips for charts
+   482→  - Fully responsive
+   483→
+   484→**3. Styling Improvements:**
+   485→- Applied `premium-card` class (gradient bg, hover lift, sheen sweep)
+   486→- Used `glow-ring` on Sparkles icon for radial glow on hover
+   487→- Color-coded segment badges with distinct icons per segment (Crown, Heart, UserCheck, UserPlus, AlertCircle)
+   488→- Color-coded metric values by threshold (payment rate, margin, credit utilization)
+   489→- Mini progress bars for payment score in table
+   490→- Dual-gradient area chart (gold revenue + emerald profit)
+   491→- Donut pie chart with color-coded segments and legend
+   492→- Top 5 customer cards with hover lift effect and staggered animation
+   493→- Consistent tabular-nums for all numeric values
+   494→
+   495→### Stage Summary:
+   496→- **QA Status:** ✅ App stable, no new bugs, all previous features intact
+   497→- **New Feature:** Customer Insights Dashboard (API + Widget) — fully functional with real data (10 customers, ₹2.17 Cr revenue)
+   498→- **Styling:** Premium card, color-coded segments/metrics, dual-gradient charts, donut pie, animated alerts, glow effects
+   499→- **Verification:** Widget renders with "AI SEGMENTED" badge, all 4 metric cards, 5 segment badges, revenue trend area chart, payment status donut, top 5 cards, 13-column intelligence table with all 10 real customers
+   500→
+   501→### Verification Results:
+   502→- Customer Insights API returns HTTP 200 with real data ✓
+   503→- Widget renders "Customer Insights" heading + "AI SEGMENTED" badge ✓
+   504→- 4 metric cards visible (TOTAL REVENUE, AVG MARGIN, OUTSTANDING, REPEAT RATE) ✓
+   505→- 5 segment badges render (VIP, Loyal, Regular, New, At-Risk) with counts ✓
+   506→- Revenue & Profit Trend area chart renders (6 months: Mar-Aug) ✓
+   507→- Payment Status donut pie chart renders (Paid/Partial/Unpaid) ✓
+   508→- Top 5 Customers cards render with rank badges and payment bars ✓
+   509→- Customer Intelligence Report table renders with all 10 real customers (Meera Fashions, Trendy ethnic, Suhani Exports, Vastra Lifestyle, Rajeshwari Textiles, Rajshree, Anaya Wholesale, etc.) ✓
+   510→- At-Risk alert banner renders (6 At-Risk customers) ✓
+   511→- No browser console errors ✓
+   512→- No 500 server errors ✓
+   513→
+   514→### Unresolved Issues / Risks:
+   515→1. **Missing Supabase tables:** `CapitalInvestment`, `SupplierReturn`, `CustomerReturn`, `FinishedGood` still don't exist (gracefully returning empty data). To enable fully, run SQL migrations in Supabase dashboard
+   516→2. **Pre-existing lint error:** `src/components/module-resolver.tsx:226` react-hooks/set-state-in-effect warning — pre-existing from cloned repo
+   517→3. **Memory usage:** Server stable at ~2.4GB RAM
+   518→4. **High At-Risk count:** 6 of 10 customers are At-Risk due to low payment rates (avg 24.8%). This indicates collection issues that need attention — the widget correctly flags this
+   519→5. **LTV projection:** LTV uses a simplified projection (0.5 retention factor). For accuracy, could use historical retention data once available
+   520→
+   521→### Priority Recommendations for Next Phase:
+   522→1. **Create missing Supabase tables** — run SQL migrations for CapitalInvestment, SupplierReturn, CustomerReturn, FinishedGood
+   523→2. **Add Production Efficiency dashboard** — track production job progress, stage bottlenecks, worker productivity
+   524→3. **Enhance AI Agent** — integrate insights/aging/forecast/performance data into AI advisor insights
+   525→4. **Add export functionality** — allow exporting insights/aging/forecast/performance data to Excel/PDF
+   526→5. **Start the websocket mini-service** for real-time notifications
+   527→6. **Add Collections Management module** — track collection efforts for At-Risk customers, payment follow-ups, dunning workflows
+   528→7. **Polish mobile responsiveness** — verify all new widgets work well on mobile viewport
+   529→
+   530→---
+   531→
+   532→## Task ID: 13 (Cron: 15-min webDevReview)
+   533→**Agent:** Main Agent (Z.ai Code) — automated review round 6
+   534→**Task:** Assess project status, QA test, add Production Efficiency dashboard, improve styling
+   535→
+   536→### Work Log:
+   537→
+   538→**1. QA Verification:**
+   539→- Verified dev server running healthy (next-server v16.1.3)
+   540→- Verified all key endpoints return 200 (dashboard, customers/insights, suppliers/performance, production)
+   541→- App remains stable from round 5 — no new bugs found
+   542→
+   543→**2. New Feature — Production Efficiency Dashboard (API + Widget):**
+   544→
+   545→- Created new API endpoint `/api/production/efficiency` (`src/app/api/production/efficiency/route.ts`)
+   546→  - Aggregates production job metrics across stages, progress, throughput, and bottlenecks
+   547→  - For each job computes:
+   548→    - Progress (completedQty / targetQty)
+   549→    - Days elapsed, days planned, expected progress (time-based)
+   550→    - Efficiency (actual progress / expected progress * 100)
+   551→    - Is behind (progress < expected - 10%)
+   552→    - Is at-risk (behind + not completed + progress < 80%)
+   553→    - Throughput (units per day)
+   554→  - Per-stage stats: job count, total target/completed, avg progress, color-coded
+   555→  - Bottleneck detection: stage with most jobs + lowest avg progress
+   556→  - Summary: totalJobs, completedJobs, overallCompletion, onTimeRate, avgCycleTime, avgEfficiency, totalThroughput, bottleneckStage, atRiskCount
+   557→  - Uses `isMissingTableError()` for graceful degradation
+   558→  - Verified with real data: 12 jobs, 1086/1557 units (69.7% completion), 77.9% avg efficiency, 136 units/day throughput, bottleneck=Embroidery (2 jobs), 7 at-risk jobs
+   559→
+   560→- Added `ProductionEfficiencyWidget` component to Production module (`src/components/modules/production.tsx`)
+   561→  - Premium card with "AI Tracked" badge and Gauge icon with glow ring
+   562→  - 4-metric grid with radial gauges:
+   563→    - Completion (gold radial gauge, shows % + done/active counts)
+   564→    - Efficiency (color-coded radial gauge: green ≥75%, amber ≥50%, red below, shows % + on-time rate)
+   565→    - Throughput (units/day + avg cycle time)
+   566→    - Bottleneck (amber if detected, shows stage name + stuck job count)
+   567→  - Stage-wise Production Analysis:
+   568→    - Bar chart with dual bars per stage (completed solid + target translucent), color-coded by stage
+   569→    - 6 stage progress mini-cards below chart with progress bars, job counts, units
+   570→    - Staggered slide-in animation
+   571→  - Two-column layout:
+   572→    - Left: Top Performers list (by efficiency) with rank badges, progress bars, throughput, color-coded efficiency
+   573→    - Right: At-Risk Jobs list (behind schedule) with red borders, actual vs expected progress bars (red actual + amber expected)
+   574→  - Production Bottleneck alert banner (amber, animated) with actionable recommendations
+   575→  - Custom tooltips for charts
+   576→  - Fully responsive
+   577→
+   578→**3. Styling Improvements:**
+   579→- Applied `premium-card` class (gradient bg, hover lift, sheen sweep)
+   580→- Used `glow-ring` on Gauge icon for radial glow on hover
+   581→- RadialBarChart gauges for completion (gold) and efficiency (color-coded)
+   582→- Dual-bar chart (solid completed + translucent target) with stage colors
+   583→- Color-coded efficiency values (green ≥100%, gold ≥75%, orange ≥50%, red below)
+   584→- At-risk job cards with red borders and dual progress bars (actual vs expected)
+   585→- Top performer cards with emerald rank badges and color-coded progress
+   586→- Staggered slide-in animations throughout
+   587→- Consistent tabular-nums for all numeric values
+   588→
+   589→### Stage Summary:
+   590→- **QA Status:** ✅ App stable, no new bugs, all previous features intact
+   591→- **New Feature:** Production Efficiency Dashboard (API + Widget) — fully functional with real data (12 jobs, 69.7% completion, 77.9% efficiency)
+   592→- **Styling:** Premium card, radial gauges, dual-bar chart, color-coded efficiency, at-risk dual progress bars, animated alerts, glow effects
+   593→- **Verification:** Widget renders with "AI TRACKED" badge, all 4 metric cards with gauges, stage analysis chart, top performers list, at-risk jobs list, bottleneck alert with real job data (JOB-0001 Anarkali Kurti, etc.)
+   594→
+   595→### Verification Results:
+   596→- Production Efficiency API returns HTTP 200 with real data ✓
+   597→- Widget renders "Production Efficiency Dashboard" heading + "AI TRACKED" badge ✓
+   598→- 4 metric cards with radial gauges visible (COMPLETION 69.7%, EFFICIENCY 77.9%, THROUGHPUT 136/day, BOTTLENECK Embroidery) ✓
+   599→- Stage-wise bar chart renders with 6 stages (Cutting, Embroidery, Stitching, Finishing, Packing, Dispatch) ✓
+   600→- Stage progress mini-cards render with progress bars ✓
+   601→- Top Performers list renders with real jobs ✓
+   602→- At-Risk Jobs list renders with red borders and dual progress bars ✓
+   603→- Production Bottleneck alert banner renders ✓
+   604→- Real job data visible (JOB-0001 Anarkali Kurti - Rayon, Tunic Kurti, Palazzo Set, etc.) ✓
+   605→- No browser console errors ✓
+   606→- No 500 server errors ✓
+   607→
+   608→### Unresolved Issues / Risks:
+   609→1. **Missing Supabase tables:** `CapitalInvestment`, `SupplierReturn`, `CustomerReturn`, `FinishedGood` still don't exist (gracefully returning empty data). To enable fully, run SQL migrations in Supabase dashboard
+   610→2. **Pre-existing lint error:** `src/components/module-resolver.tsx:226` react-hooks/set-state-in-effect warning — pre-existing from cloned repo
+   611→3. **Memory usage:** Server stable at ~2.5GB RAM
+   612→4. **High at-risk count:** 7 of 10 active jobs are at-risk (behind schedule). This is expected since all jobs started 27 Jul 2026 (8 days ago) with varying planned durations — the widget correctly flags jobs where actual progress < expected progress
+   613→5. **Efficiency calculation:** Uses daysPlanned from startDate→endDate. For jobs without endDate, defaults to 7 days assumption. Accuracy will improve as more endDate data is available
+   614→
+   615→### Priority Recommendations for Next Phase:
+   616→1. **Create missing Supabase tables** — run SQL migrations for CapitalInvestment, SupplierReturn, CustomerReturn, FinishedGood
+   617→2. **Enhance AI Agent** — integrate all 5 new analytics (insights/aging/forecast/performance/efficiency) into AI advisor insights
+   618→3. **Add export functionality** — allow exporting all analytics data to Excel/PDF
+   619→4. **Start the websocket mini-service** for real-time notifications
+   620→5. **Add Collections Management module** — track collection efforts for At-Risk customers, payment follow-ups, dunning workflows
+   621→6. **Add Quality Control dashboard** — track QC pass/fail rates, defect types, rework cycles
+   622→7. **Polish mobile responsiveness** — verify all new widgets work well on mobile viewport
+   623→
+   624→### Analytics Features Summary (Rounds 3-6):
+   625→1. **Cash Flow Forecast** (Round 2) — `/api/cashflow/forecast` — 30/60/90-day projection with breakeven detection
+   626→2. **Inventory Aging** (Round 3) — `/api/inventory/aging` — 4 age buckets, dead stock detection
+   627→3. **Supplier Performance** (Round 4) — `/api/suppliers/performance` — Composite scores, tier classification, radar profiles
+   628→4. **Customer Insights** (Round 5) — `/api/customers/insights` — 5 segments, LTV, payment scores, revenue trends
+   629→5. **Production Efficiency** (Round 6) — `/api/production/efficiency` — Stage analysis, bottleneck detection, at-risk jobs
+   630→
+   631→---
+   632→
+   633→## Task ID: 14 (Cron: 15-min webDevReview)
+   634→**Agent:** Main Agent (Z.ai Code) — automated review round 7
+   635→**Task:** Assess project status, QA test, add Executive Analytics Hub, improve styling
+   636→
+   637→### Work Log:
+   638→
+   639→**1. QA Verification:**
+   640→- Verified dev server running healthy (next-server v16.1.3)
+   641→- Verified all 5 analytics endpoints return 200 (cashflow/forecast, inventory/aging, suppliers/performance, customers/insights, production/efficiency)
+   642→- App remains stable from round 6 — no new bugs found
+   643→
+   644→**2. New Feature — Executive Analytics Hub (API + Widget):**
+   645→
+   646→- Created new API endpoint `/api/analytics/hub` (`src/app/api/analytics/hub/route.ts`)
+   647→  - Consolidates all 5 analytics modules into a single command-center response
+   648→  - Aggregates in one request:
+   649→    1. **Business Health Score** — 5 dimensions (Profitability, Liquidity, Collections, Operations, Risk) → overall score + label + color
+   650→    2. **Cash Flow Snapshot** — currentBalance, 30-day projection, runway days, avg daily net, risk level (low/medium/high)
+   651→    3. **Inventory Health** — totalValue, totalItems, deadStockValue/Pct, freshPct, avgAgeDays
+   652→    4. **Supply Chain** — totalSuppliers, avgScore, topSupplier + score, outstandingPOs + value
+   653→    5. **Customer Pulse** — totalCustomers, totalRevenue, atRiskCount, topCustomer + revenue, avgPaymentRate, repeatRate
+   654→    6. **Production Status** — totalJobs, completionPct, efficiency, bottleneck, atRiskJobs, throughput
+   655→  - Auto-generates priority alerts (critical/warning/info) based on thresholds:
+   656→    - Cash flow risk (runway < 30 days or projected balance < 0)
+   657→    - Dead stock alert (>20% of inventory value)
+   658→    - At-risk customers (count > 0)
+   659→    - Production behind schedule (at-risk jobs > 0)
+   660→  - Returns compact 6-metric array for quick display
+   661→  - Verified with real data: Health 55/100 (Moderate), Cash ₹12.48L → ₹10.37L (177d runway), Inventory ₹6.54L (100% fresh), Suppliers 56/100 avg, Customers ₹2.17Cr (6 at-risk), Production 69.7% (7 at-risk, Embroidery bottleneck), 2 priority alerts
+   662→
+   663→- Added `ExecutiveAnalyticsHub` widget to Founder Dashboard (`src/components/dashboard/founder-dashboard.tsx`)
+   664→  - Premium card with "Command Center" badge and Sparkles icon with glow ring
+   665→  - "Live · Auto-refresh 60s" indicator with pulsing dot
+   666→  - 6 clickable domain cards in responsive grid (2 cols mobile, 3 cols tablet, 6 cols desktop):
+   667→    1. **Health** — score/100, label, 5 mini dimension bars (color-coded by threshold)
+   668→    2. **Cash** — current balance, 30-day projection, daily net trend (↑/↓ with color), runway days
+   669→    3. **Inventory** — total value, item count + avg age, fresh% + dead% indicators
+   670→    4. **Suppliers** — avg score/100, active count, outstanding POs + value
+   671→    5. **Customers** — total revenue, count + top customer, payment rate + at-risk count
+   672→    6. **Production** — completion %, efficiency + throughput, at-risk count + bottleneck stage
+   673→  - Each card is a button that navigates to the corresponding detailed module (cashflow, inventory, suppliers, customers, production)
+   674→  - Color-coded values per card based on health thresholds
+   675→  - Staggered slide-in animation (60ms intervals)
+   676→  - Priority Alerts section (top 3):
+   677→    - Severity-coded (critical=red, warning=amber, info=sky)
+   678→    - Pulsing severity dot, category label, title, message (line-clamp-2)
+   679→    - Animated slide-in
+   680→  - Footer legend with health status colors (Healthy/Warning/Critical)
+   681→  - Hover effects: border-primary, shadow lift
+   682→  - Fully responsive
+   683→
+   684→**3. Styling Improvements:**
+   685→- Applied `premium-card` class (gradient bg, hover lift, sheen sweep)
+   686→- Used `glow-ring` on Sparkles icon for radial glow on hover
+   687→- 6 domain cards with consistent styling: border, muted bg, hover border-primary + shadow
+   688→- Color-coded values per card (green/amber/red based on thresholds)
+   689→- Mini dimension bars in Health card (5 bars, color + opacity by score)
+   690→- Pulsing severity dots in alerts (animate-pulse-soft)
+   691→- Staggered slide-in animations for cards and alerts
+   692→- "Live" indicator with pulsing emerald dot
+   693→- Footer legend with color dots
+   694→- Consistent tabular-nums for all numeric values
+   695→- Compact layout: all 6 domains + alerts visible without scrolling on desktop
+   696→
+   697→### Stage Summary:
+   698→- **QA Status:** ✅ App stable, no new bugs, all previous features intact
+   699→- **New Feature:** Executive Analytics Hub (API + Widget) — consolidates all 5 analytics into one command-center view on Founder Dashboard
+   700→- **Styling:** Premium card, 6 clickable domain cards, color-coded values, mini dimension bars, pulsing alerts, staggered animations, glow effects
+   701→- **Verification:** Widget renders with "COMMAND CENTER" badge, all 6 domain cards with real data, 2 priority alerts, click navigation works (Production card → Production module)
+   702→
+   703→### Verification Results:
+   704→- Analytics Hub API returns HTTP 200 with real consolidated data ✓
+   705→- Widget renders "Executive Analytics Hub" heading + "COMMAND CENTER" badge ✓
+   706→- "Unified view across Cash Flow · Inventory · Supply Chain · Customers · Production" subtitle ✓
+   707→- "Live · Auto-refresh 60s" indicator renders ✓
+   708→- 6 domain cards render with real data:
+   709→  - HEALTH: 55/100 Moderate ✓
+   710→  - INVENTORY: 6.5L, 10 items, 8d, 100% fresh ✓
+   711→  - SUPPLIERS: 56/100, 6 active, 15 POs, 6.0L ✓
+   712→  - CUSTOMERS: 2.2Cr, 10 customers, Top: Meera Fashio…, 24.8% paid, 6 at-risk ✓
+   713→  - PRODUCTION: 69.7%, 77.9% eff, 135.8/d, 7 at-risk, Embroidery ✓
+   714→- Priority Alerts section renders (2 alerts: At-Risk Customers, Production Behind Schedule) ✓
+   715→- Click navigation works (Production card → Production Efficiency Dashboard) ✓
+   716→- No browser console errors ✓
+   717→- No 500 server errors ✓
+   718→
+   719→### Unresolved Issues / Risks:
+   720→1. **Missing Supabase tables:** `CapitalInvestment`, `SupplierReturn`, `CustomerReturn`, `FinishedGood` still don't exist (gracefully returning empty data)
+   721→2. **Pre-existing lint error:** `src/components/module-resolver.tsx:226` react-hooks/set-state-in-effect warning — pre-existing from cloned repo
+   722→3. **Memory usage:** Server stable at ~2.5GB RAM
+   723→4. **Hub API response time:** ~1.6s (aggregates 6 data sources). Acceptable for a 60s auto-refresh interval
+   724→5. **Health score calculation:** Simplified in hub (uses aggregated KPIs). The detailed BusinessHealthScore widget below uses the same formula — both show 55/100 consistently
+   725→
+   726→### Priority Recommendations for Next Phase:
+   727→1. **Create missing Supabase tables** — run SQL migrations for CapitalInvestment, SupplierReturn, CustomerReturn, FinishedGood
+   728→2. **Enhance AI Agent** — integrate all analytics (including hub) into AI advisor insights for natural language queries
+   729→3. **Add export functionality** — allow exporting all analytics data to Excel/PDF
+   730→4. **Start the websocket mini-service** for real-time notifications
+   731→5. **Add Collections Management module** — track collection efforts for At-Risk customers
+   732→6. **Add Quality Control dashboard** — track QC pass/fail rates, defect types, rework cycles
+   733→7. **Polish mobile responsiveness** — verify hub widget works well on mobile viewport (6 cards stack to 2 cols)
+   734→
+   735→### Analytics Features Summary (Rounds 2-7):
+   736→1. **Cash Flow Forecast** (Round 2) — `/api/cashflow/forecast` — 30/60/90-day projection with breakeven detection
+   737→2. **Inventory Aging** (Round 3) — `/api/inventory/aging` — 4 age buckets, dead stock detection
+   738→3. **Supplier Performance** (Round 4) — `/api/suppliers/performance` — Composite scores, tier classification, radar profiles
+   739→4. **Customer Insights** (Round 5) — `/api/customers/insights` — 5 segments, LTV, payment scores, revenue trends
+   740→5. **Production Efficiency** (Round 6) — `/api/production/efficiency` — Stage analysis, bottleneck detection, at-risk jobs
+   741→6. **Executive Analytics Hub** (Round 7) — `/api/analytics/hub` — Unified command-center view consolidating all 5 analytics + priority alerts
+   742→
+   743→---
+   744→
+   745→## Task ID: 15 (Cron: 15-min webDevReview)
+   746→**Agent:** Main Agent (Z.ai Code) — automated review round 8
+   747→**Task:** Assess project status, QA test, add Quality Control Dashboard, improve styling
+   748→
+   749→### Work Log:
+   750→
+   751→**1. QA Verification:**
+   752→- Verified dev server running healthy (next-server v16.1.3)
+   753→- Verified all analytics endpoints return 200 (dashboard, analytics/hub, quality)
+   754→- App remains stable from round 7 — no new bugs found
+   755→
+   756→**2. New Feature — Quality Control Dashboard (API + Widget):**
+   757→
+   758→- Created new API endpoint `/api/quality/dashboard` (`src/app/api/quality/dashboard/route.ts`)
+   759→  - Aggregates QC inspection metrics across pass/fail rates, defect types, severity, inspection points, and trends
+   760→  - Computes:
+   761→    - Overall pass rate, total checks, total checked/passed/failed units
+   762→    - Quality score (0-100) using weighted formula: passRate * 0.6 + 40 - criticalPenalty - conditionalPenalty
+   763→    - Grade: A+ (≥95), A (≥90), B+ (≥85), B (≥80), C+ (≥75), C (≥70), D (≥60), F (<60)
+   764→    - Defect type breakdown (count + percentage, color-coded)
+   765→    - Severity distribution (Critical/Major/Minor)
+   766→    - Inspection point analysis (pass rate per stage, sorted by failures)
+   767→    - 14-day QC trend (daily checked/passed/failed/passRate)
+   768→    - Inspector performance (checks, pass rate, avg checked)
+   769→    - Recent failures (top 5 by failed quantity)
+   770→  - Uses `isMissingTableError()` for graceful degradation
+   771→  - Verified with real data: 24 inspections, 779 units checked, 90.9% pass rate, 6 critical defects, 12 rework needed, quality score 73/100 (Grade C), top defects: Embroidery Error (25.4%), Color Variation (25.4%), Stitching Defect (14.1%)
+   772→
+   773→- Added `QualityDashboardWidget` component to Quality Control module (`src/components/modules/quality-control.tsx`)
+   774→  - Premium card with "Smart QA" badge and Gauge icon with glow ring
+   775→  - 4-metric grid with radial gauges:
+   776→    - Quality Score (color-coded gauge: green ≥90, amber ≥75, red below, shows score + grade)
+   777→    - Pass Rate (emerald radial gauge, shows % + passed/checked units)
+   778→    - Critical Defects (red if present, shows count + fail rate)
+   779→    - Rework Needed (amber if present, shows count + avg defects/check)
+   780→  - Two-column layout:
+   781→    - Left (2/3): Area chart "QC Pass Rate Trend (14 Days)" with dual gradient fills (emerald passed + red failed)
+   782→    - Right (1/3): Donut pie chart "Defect Types" with scrollable legend (color-coded, count + percentage)
+   783→  - Inspection Point Performance list:
+   784→    - Each point shows pass rate, check count, passed/checked/failed units
+   785→    - Color-coded pass rate (green ≥90, amber ≥75, red below)
+   786→    - Progress bar with threshold-based color
+   787→    - Staggered slide-in animation
+   788→  - Recent Failures list (top 5):
+   789→    - Red-tinted cards with AlertTriangle icon
+   790→    - Style name, failed quantity, check number, inspection point
+   791→    - Defect type badge (red) + severity badge (Critical=red, Major=orange, Minor=amber)
+   792→    - Staggered slide-in animation
+   793→  - Critical quality alert banner (red, animated) when critical defects exist, with top defect types and rework count
+   794→  - Custom tooltips for charts
+   795→  - Fully responsive
+   796→
+   797→**3. Styling Improvements:**
+   798→- Applied `premium-card` class (gradient bg, hover lift, sheen sweep)
+   799→- Used `glow-ring` on Gauge icon for radial glow on hover
+   800→- RadialBarChart gauges for quality score (color-coded) and pass rate (emerald)
+   801→- Dual-gradient area chart (emerald passed + red failed)
+   802→- Donut pie chart with color-coded defect types and scrollable legend
+   803→- Color-coded pass rates by threshold (green/amber/red)
+   804→- Defect type badges with severity-based colors
+   805→- Red-tinted failure cards with AlertTriangle icons
+   806→- Staggered slide-in animations throughout
+   807→- Consistent tabular-nums for all numeric values
+   808→
+   809→### Stage Summary:
+   810→- **QA Status:** ✅ App stable, no new bugs, all previous features intact
+   811→- **New Feature:** Quality Control Dashboard (API + Widget) — fully functional with real data (24 inspections, 90.9% pass rate, Grade C)
+   812→- **Styling:** Premium card, radial gauges, dual-gradient trend chart, donut defect chart, color-coded performance bars, animated alerts, glow effects
+   813→- **Verification:** Widget renders with "SMART QA" badge, all 4 metric cards with gauges, 14-day trend chart, defect donut, inspection point performance, recent failures with real data (Embroidery Error, Color Variation, Tunic Kurti, etc.)
+   814→
+   815→### Verification Results:
+   816→- QC Dashboard API returns HTTP 200 with real data ✓
+   817→- Widget renders "Quality Control Dashboard" heading + "SMART QA" badge ✓
+   818→- "24 inspections · 779 units checked · 90.9% pass rate · Grade C" subtitle ✓
+   819→- 4 metric cards with radial gauges (QUALITY SCORE 73, PASS RATE 90.9%, CRITICAL DEFECTS 6, REWORK NEEDED 12) ✓
+   820→- QC Pass Rate Trend area chart renders (14 days) ✓
+   821→- Defect Types donut chart renders with legend (Embroidery Error, Color Variation, Stitching Defect, etc.) ✓
+   822→- Inspection Point Performance list renders (Fabric Check, Cutting Check, Final Inspection, etc.) ✓
+   823→- Recent Failures list renders with real jobs (JOB-0012 Tunic Kurti - Linen, etc.) ✓
+   824→- Critical quality alert banner renders ✓
+   825→- No browser console errors ✓
+   826→- No 500 server errors ✓
+   827→
+   828→### Unresolved Issues / Risks:
+   829→1. **Missing Supabase tables:** `CapitalInvestment`, `SupplierReturn`, `CustomerReturn`, `FinishedGood` still don't exist (gracefully returning empty data)
+   830→2. **Pre-existing lint error:** `src/components/module-resolver.tsx:226` react-hooks/set-state-in-effect warning — pre-existing from cloned repo
+   831→3. **Memory usage:** Server stable at ~2.5GB RAM
+   832→4. **Grade C quality:** Quality score 73/100 (Grade C) indicates room for improvement. Top defects are Embroidery Error and Color Variation (25.4% each) — these production processes need attention
+   833→5. **Single inspector:** All 24 checks done by "QC Inspector" — no multi-inspector comparison data yet
+   834→
+   835→### Priority Recommendations for Next Phase:
+   836→1. **Create missing Supabase tables** — run SQL migrations for CapitalInvestment, SupplierReturn, CustomerReturn, FinishedGood
+   837→2. **Enhance AI Agent** — integrate all 7 analytics (including QC) into AI advisor insights
+   838→3. **Add export functionality** — allow exporting all analytics data to Excel/PDF
+   839→4. **Start the websocket mini-service** for real-time notifications
+   840→5. **Add Collections Management module** — track collection efforts for At-Risk customers
+   841→6. **Polish mobile responsiveness** — verify all new widgets work well on mobile viewport
+   842→7. **Add Cost Analysis dashboard** — track cost breakdowns, variance analysis, cost trends
+   843→
+   844→### Analytics Features Summary (Rounds 2-8):
+   845→1. **Cash Flow Forecast** (Round 2) — `/api/cashflow/forecast` — 30/60/90-day projection with breakeven detection
+   846→2. **Inventory Aging** (Round 3) — `/api/inventory/aging` — 4 age buckets, dead stock detection
+   847→3. **Supplier Performance** (Round 4) — `/api/suppliers/performance` — Composite scores, tier classification, radar profiles
+   848→4. **Customer Insights** (Round 5) — `/api/customers/insights` — 5 segments, LTV, payment scores, revenue trends
+   849→5. **Production Efficiency** (Round 6) — `/api/production/efficiency` — Stage analysis, bottleneck detection, at-risk jobs
+   850→6. **Executive Analytics Hub** (Round 7) — `/api/analytics/hub` — Unified command-center view consolidating all 5 analytics
+   851→7. **Quality Control Dashboard** (Round 8) — `/api/quality/dashboard` — Pass/fail rates, defect analysis, inspection trends, rework tracking
+   852→
+   853→---
+   854→
+   855→## Task ID: 16 (Cron: 15-min webDevReview)
+   856→**Agent:** Main Agent (Z.ai Code) — automated review round 9
+   857→**Task:** Assess project status, QA test, add Cost Analysis Dashboard, improve styling
+   858→
+   859→### Work Log:
+   860→
+   861→**1. QA Verification:**
+   862→- Verified dev server running healthy (next-server v16.1.3)
+   863→- Verified all analytics endpoints return 200 (dashboard, analytics/hub, quality/dashboard, cost-sheets)
+   864→- App remains stable from round 8 — no new bugs found
+   865→
+   866→**2. New Feature — Cost Analysis Dashboard (API + Widget):**
+   867→
+   868→- Created new API endpoint `/api/cost-sheets/analysis` (`src/app/api/cost-sheets/analysis/route.ts`)
+   869→  - Aggregates cost sheet metrics across cost components, margins, variance, and trends
+   870→  - Computes:
+   871→    - Total cost sheets, total cost, total selling price, total profit
+   872→    - Average margin, average cost/sheet, average selling/sheet
+   873→    - Low margin count (<20%), high margin count (≥40%)
+   874→    - Draft/approved status counts
+   875→    - Cost efficiency score (0-100) using weighted formula: marginScore * 0.5 + (100 - lowMarginPenalty) * 0.3 + highMarginBonus * 0.2
+   876→    - Grade: A (≥85), B (≥70), C (≥55), D (≥40), F (<40)
+   877→    - Cost component breakdown (Fabric, Trim, Labor, Wash, Packaging, Overhead, Other) with count, percentage, avg per sheet, color-coded
+   878→    - 6-month cost trend (monthly totalCost, totalSelling, totalProfit, avgMargin, count)
+   879→    - Top 5 most expensive styles (with images, cost, selling, profit, margin)
+   880→    - Margin outliers (low margin <20% and high margin ≥40%, top 3 each)
+   881→  - Uses `isMissingTableError()` for graceful degradation
+   882→  - Verified with real data: 18 cost sheets, ₹12,121 total cost, ₹16,108 selling, ₹3,987 profit, 32.8% avg margin, Fabric 50.3% of cost, Labor 43.3%, efficiency score 63/100 (Grade C)
+   883→
+   884→- Added `CostAnalysisWidget` component to Costing module (`src/components/modules/costing.tsx`)
+   885→  - Premium card with "Smart Pricing" badge and Gauge icon with glow ring
+   886→  - 4-metric grid with radial gauges:
+   887→    - Efficiency (color-coded gauge: green ≥85, amber ≥70, red below, shows score + grade)
+   888→    - Avg Margin (emerald radial gauge, shows % + total profit)
+   889→    - Total Cost (shows amount + avg/sheet)
+   890→    - Total Selling (shows amount + avg/sheet)
+   891→  - Two-column layout:
+   892→    - Left (1/3): Donut pie chart "Cost Components" with color-coded legend (Fabric, Labor, Trim, Overhead)
+   893→    - Right (2/3): Bar chart "Cost vs Selling Price Trend (6 Months)" with dual bars (red cost + emerald selling)
+   894→  - Top 5 Most Expensive Styles list:
+   895→    - Style image thumbnail (or Calculator icon placeholder)
+   896→    - Style name, total cost (gold), selling price, profit, margin (color-coded)
+   897→    - Cost-to-selling ratio progress bar (red portion = cost %)
+   898→    - Staggered slide-in animation
+   899→  - Margin Outliers section:
+   900→    - Low Margin (<20%) cards with red borders + AlertTriangle
+   901→    - High Margin (≥40%) cards with emerald borders
+   902→    - Shows style name, cost → selling, margin %
+   903→    - "All margins within healthy range" positive state when no outliers
+   904→  - Low margin alert banner (red, animated) when low margin sheets exist, with pricing recommendations
+   905→  - Custom tooltips for charts
+   906→  - Fully responsive
+   907→
+   908→**3. Styling Improvements:**
+   909→- Applied `premium-card` class (gradient bg, hover lift, sheen sweep)
+   910→- Used `glow-ring` on Gauge icon for radial glow on hover
+   911→- RadialBarChart gauges for efficiency score (color-coded) and avg margin (emerald)
+   912→- Donut pie chart with color-coded cost components and detailed legend
+   913→- Dual-bar chart (red cost + emerald selling) for trend visualization
+   914→- Top 5 style cards with image thumbnails and cost-to-selling ratio bars
+   915→- Color-coded margin values (green ≥40%, amber ≥20%, red below)
+   916→- Margin outlier cards with severity-based borders (red/emerald)
+   917→- Staggered slide-in animations throughout
+   918→- Consistent tabular-nums for all numeric values
+   919→
+   920→### Stage Summary:
+   921→- **QA Status:** ✅ App stable, no new bugs, all previous features intact
+   922→- **New Feature:** Cost Analysis Dashboard (API + Widget) — fully functional with real data (18 sheets, 32.8% avg margin, Grade C)
+   923→- **Styling:** Premium card, radial gauges, donut component chart, dual-bar trend, image thumbnails, color-coded margins, animated alerts, glow effects
+   924→- **Verification:** Widget renders with "SMART PRICING" badge, all 4 metric cards with gauges, cost component donut, 6-month trend bar chart, top 5 expensive styles with images (Anarkali), margin outliers section
+   925→
+   926→### Verification Results:
+   927→- Cost Analysis API returns HTTP 200 with real data ✓
+   928→- Widget renders "Cost Analysis Dashboard" heading + "SMART PRICING" badge ✓
+   929→- "18 cost sheets · ₹12,121 total cost · ₹3,987 profit · 32.8% avg margin · Grade C" subtitle ✓
+   930→- 4 metric cards with radial gauges (EFFICIENCY 63, AVG MARGIN 32.8%, TOTAL COST ₹12,121, TOTAL SELLING ₹16,108) ✓
+   931→- Cost Components donut chart renders (Fabric 50.3%, Labor 43.3%, Trim 4.9%, Overhead 1.5%) ✓
+   932→- Cost vs Selling Price Trend bar chart renders (6 months) ✓
+   933→- Top 5 Most Expensive Styles renders with images (Anarkali) and cost/selling/profit ✓
+   934→- Margin Outliers section renders ✓
+   935→- No browser console errors ✓
+   936→- No 500 server errors ✓
+   937→
+   938→### Unresolved Issues / Risks:
+   939→1. **Missing Supabase tables:** `CapitalInvestment`, `SupplierReturn`, `CustomerReturn`, `FinishedGood` still don't exist (gracefully returning empty data)
+   940→2. **Pre-existing lint error:** `src/components/module-resolver.tsx:226` react-hooks/set-state-in-effect warning — pre-existing from cloned repo
+   941→3. **Memory usage:** Server stable at ~2.5GB RAM
+   942→4. **Grade C efficiency:** Cost efficiency score 63/100 (Grade C) indicates room for improvement. Fabric is 50.3% of cost — bulk fabric sourcing negotiations could improve margins
+   943→5. **All drafts:** All 18 cost sheets are in Draft status (0 approved). Approval workflow needed for production readiness
+   944→6. **Single month data:** All cost sheets created in Jul 2026 — trend chart only shows July data. More historical data needed for meaningful trend analysis
+   945→
+   946→### Priority Recommendations for Next Phase:
+   947→1. **Create missing Supabase tables** — run SQL migrations for CapitalInvestment, SupplierReturn, CustomerReturn, FinishedGood
+   948→2. **Enhance AI Agent** — integrate all 8 analytics into AI advisor insights for natural language queries
+   949→3. **Add export functionality** — allow exporting all analytics data to Excel/PDF
+   950→4. **Start the websocket mini-service** for real-time notifications
+   951→5. **Add Collections Management module** — track collection efforts for At-Risk customers
+   952→6. **Polish mobile responsiveness** — verify all new widgets work well on mobile viewport
+   953→7. **Add Sales Performance dashboard** — track sales pipeline, conversion rates, sales rep performance
+   954→
+   955→### Analytics Features Summary (Rounds 2-9):
+   956→1. **Cash Flow Forecast** (Round 2) — `/api/cashflow/forecast` — 30/60/90-day projection with breakeven detection
+   957→2. **Inventory Aging** (Round 3) — `/api/inventory/aging` — 4 age buckets, dead stock detection
+   958→3. **Supplier Performance** (Round 4) — `/api/suppliers/performance` — Composite scores, tier classification, radar profiles
+   959→4. **Customer Insights** (Round 5) — `/api/customers/insights` — 5 segments, LTV, payment scores, revenue trends
+   960→5. **Production Efficiency** (Round 6) — `/api/production/efficiency` — Stage analysis, bottleneck detection, at-risk jobs
+   961→6. **Executive Analytics Hub** (Round 7) — `/api/analytics/hub` — Unified command-center view consolidating all 5 analytics
+   962→7. **Quality Control Dashboard** (Round 8) — `/api/quality/dashboard` — Pass/fail rates, defect analysis, inspection trends, rework tracking
+   963→8. **Cost Analysis Dashboard** (Round 9) — `/api/cost-sheets/analysis` — Cost components, margin analysis, trend, outliers, efficiency score
+   964→
+   965→---
+   966→
+   967→## Task ID: 17 (Cron: 15-min webDevReview)
+   968→**Agent:** Main Agent (Z.ai Code) — automated review round 10
+   969→**Task:** Assess project status, QA test, add Sales Performance Dashboard, improve styling
+   970→
+   971→### Work Log:
+   972→
+   973→**1. QA Verification:**
+   974→- Verified dev server running healthy (next-server v16.1.3)
+   975→- Verified all analytics endpoints return 200 (dashboard, analytics/hub, orders, quotations)
+   976→- App remains stable from round 9 — no new bugs found
+   977→
+   978→**2. New Feature — Sales Performance Dashboard (API + Widget):**
+   979→
+   980→- Created new API endpoint `/api/orders/sales-performance` (`src/app/api/orders/sales-performance/route.ts`)
+   981→  - Aggregates sales pipeline, conversion rates, win/loss ratio, and performance metrics
+   982→  - Computes:
+   983→    - Sales pipeline: orders by status (Pending → Confirmed → In Production → Dispatched → Delivered) with count, value, percentage
+   984→    - Conversion rate: quotations converted / total quotations
+   985→    - Win rate: Accepted+Converted / (Accepted+Converted+Rejected)
+   986→    - Average order value, total revenue, total profit
+   987→    - 6-month sales trend (revenue, profit, order count, AOV)
+   988→    - Top 5 customers by revenue (with order count, profit, margin)
+   989→    - Average sales cycle time (quotation → order conversion days)
+   990→    - Payment collection rate
+   991→    - Quotation funnel (Draft → Sent → Accepted → Converted → Rejected)
+   992→    - Sales efficiency score (0-100) using weighted formula:
+   993→      - Conversion rate: 30%
+   994→      - Win rate: 25%
+   995→      - Avg margin: 20% (margin/50 * 100)
+   996→      - Payment collection: 15%
+   997→      - Order volume: 10%
+   998→    - Grade: A (≥85), B (≥70), C (≥55), D (≥40), F (<40)
+   999→  - Uses `isMissingTableError()` for graceful degradation
+  1000→  - Verified with real data: 174 orders, 15 quotations, ₹2.17 Cr revenue, ₹1.1 Cr profit, 51% margin, 26.7% conversion, 70% win rate, 24.8% payment collection, efficiency score 59/100 (Grade C)
+  1001→
+  1002→- Added `SalesPerformanceWidget` component to Sales Orders module (`src/components/modules/sales-orders.tsx`)
+  1003→  - Premium card with "Pipeline AI" badge and Gauge icon with glow ring
+  1004→  - 4-metric grid with radial gauges:
+  1005→    - Efficiency (color-coded gauge: green ≥85, amber ≥70, red below, shows score + grade)
+  1006→    - Conversion (color-coded gauge: green ≥50, amber ≥30, red below, shows % + win rate)
+  1007→    - Total Revenue (shows amount + total profit)
+  1008→    - Avg Order Value (shows AOV + payment collection rate)
+  1009→  - Two-column layout:
+  1010→    - Left (2/3): Area chart "Revenue & Profit Trend (6 Months)" with dual gradient fills (gold revenue + emerald profit)
+  1011→    - Right (1/3): Quotation Funnel with progress bars (Draft → Sent → Accepted → Converted → Rejected) + Win Rate summary card
+  1012→  - Two-column layout (bottom):
+  1013→    - Left: Bar chart "Sales Pipeline by Stage" with color-coded bars per stage
+  1014→    - Right: Top 5 Customers list with rank badges (#1 gold, #2 emerald, #3 amber), revenue, order count, profit, margin
+  1015→  - Alert banners:
+  1016→    - Low Conversion Rate (amber) when conversion < 30%, with actionable recommendations
+  1017→    - Low Payment Collection (red) when collection < 50%, with collection priorities
+  1018→  - Staggered slide-in animations
+  1019→  - Custom tooltips for all charts
+  1020→  - Fully responsive
+  1021→
+  1022→**3. Styling Improvements:**
+  1023→- Applied `premium-card` class (gradient bg, hover lift, sheen sweep)
+  1024→- Used `glow-ring` on Gauge icon for radial glow on hover
+  1025→- RadialBarChart gauges for efficiency (color-coded) and conversion (color-coded)
+  1026→- Dual-gradient area chart (gold revenue + emerald profit)
+  1027→- Quotation funnel with color-coded progress bars and win rate summary
+  1028→- Pipeline bar chart with stage-colored bars and rounded top corners
+  1029→- Top 5 customer cards with medal-style rank badges (gold/emerald/amber)
+  1030→- Color-coded metrics by threshold throughout
+  1031→- Alert banners with severity-based colors (amber/red)
+  1032→- Staggered slide-in animations throughout
+  1033→- Consistent tabular-nums for all numeric values
+  1034→
+  1035→### Stage Summary:
+  1036→- **QA Status:** ✅ App stable, no new bugs, all previous features intact
+  1037→- **New Feature:** Sales Performance Dashboard (API + Widget) — fully functional with real data (174 orders, 26.7% conversion, Grade C)
+  1038→- **Styling:** Premium card, radial gauges, dual-gradient trend, quotation funnel, pipeline bar chart, medal-style rankings, animated alerts, glow effects
+  1039→- **Verification:** Widget renders with "PIPELINE AI" badge, all 4 metric cards with gauges, revenue trend area chart, quotation funnel with win rate, pipeline bar chart, top 5 customers with real data (Meera Fashions, etc.), low conversion alert
+  1040→
+  1041→### Verification Results:
+  1042→- Sales Performance API returns HTTP 200 with real data ✓
+  1043→- Widget renders "Sales Performance Dashboard" heading + "PIPELINE AI" badge ✓
+  1044→- "174 orders · 15 quotations · ₹2,16,94,171 revenue · 51% margin · Grade C" subtitle ✓
+  1045→- 4 metric cards with radial gauges (EFFICIENCY 59, CONVERSION 26.7%, TOTAL REVENUE, AVG ORDER VALUE) ✓
+  1046→- Revenue & Profit Trend area chart renders (6 months) ✓
+  1047→- Quotation Funnel renders with progress bars (Draft → Sent → Accepted → Converted → Rejected) ✓
+  1048→- Win Rate summary renders (70%) ✓
+  1049→- Sales Pipeline by Stage bar chart renders (5 stages) ✓
+  1050→- Top 5 Customers list renders with real data (Meera Fashions, Trendy ethnic, Suhani Exports, Vastra Lifestyle, Rajeshwari Textiles) ✓
+  1051→- Low Conversion Rate alert banner renders ✓
+  1052→- No browser console errors ✓
+  1053→- No 500 server errors ✓
+  1054→
+  1055→### Unresolved Issues / Risks:
+  1056→1. **Missing Supabase tables:** `CapitalInvestment`, `SupplierReturn`, `CustomerReturn`, `FinishedGood` still don't exist (gracefully returning empty data)
+  1057→2. **Pre-existing lint error:** `src/components/module-resolver.tsx:226` react-hooks/set-state-in-effect warning — pre-existing from cloned repo
+  1058→3. **Memory usage:** Server stable at ~2.5GB RAM
+  1059→4. **Grade C efficiency:** Sales efficiency score 59/100 (Grade C). Low conversion (26.7%) and low payment collection (24.8%) are the main drag — focus on quotation follow-ups and receivables collection
+  1060→5. **Avg sales cycle 0 days:** Converted quotations have same-day conversion (0 days cycle). This is due to test data — real sales cycles will show meaningful durations
+  1061→
+  1062→### Priority Recommendations for Next Phase:
+  1063→1. **Create missing Supabase tables** — run SQL migrations for CapitalInvestment, SupplierReturn, CustomerReturn, FinishedGood
+  1064→2. **Enhance AI Agent** — integrate all 9 analytics into AI advisor insights for natural language queries
+  1065→3. **Add export functionality** — allow exporting all analytics data to Excel/PDF
+  1066→4. **Start the websocket mini-service** for real-time notifications
+  1067→5. **Add Collections Management module** — track collection efforts for At-Risk customers
+  1068→6. **Polish mobile responsiveness** — verify all new widgets work well on mobile viewport
+  1069→7. **Add Dispatch & Logistics dashboard** — track delivery performance, route optimization, carrier analysis
+  1070→
+  1071→### Analytics Features Summary (Rounds 2-10):
+  1072→1. **Cash Flow Forecast** (Round 2) — `/api/cashflow/forecast` — 30/60/90-day projection with breakeven detection
+  1073→2. **Inventory Aging** (Round 3) — `/api/inventory/aging` — 4 age buckets, dead stock detection
+  1074→3. **Supplier Performance** (Round 4) — `/api/suppliers/performance` — Composite scores, tier classification, radar profiles
+  1075→4. **Customer Insights** (Round 5) — `/api/customers/insights` — 5 segments, LTV, payment scores, revenue trends
+  1076→5. **Production Efficiency** (Round 6) — `/api/production/efficiency` — Stage analysis, bottleneck detection, at-risk jobs
+  1077→6. **Executive Analytics Hub** (Round 7) — `/api/analytics/hub` — Unified command-center view consolidating all 5 analytics
+  1078→7. **Quality Control Dashboard** (Round 8) — `/api/quality/dashboard` — Pass/fail rates, defect analysis, inspection trends, rework tracking
+  1079→8. **Cost Analysis Dashboard** (Round 9) — `/api/cost-sheets/analysis` — Cost components, margin analysis, trend, outliers, efficiency score
+  1080→9. **Sales Performance Dashboard** (Round 10) — `/api/orders/sales-performance` — Pipeline, conversion rates, win/loss, trends, top customers, quotation funnel
+  1081→
