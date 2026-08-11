@@ -152,6 +152,8 @@ const navGroups: NavGroup[] = [
       { label: 'Invoices', icon: FileText, view: 'invoices' },
       { label: 'Product Tracker', icon: Search, view: 'product-tracker' },
       { label: 'P&L Statement', icon: Wallet, view: 'pnl' },
+      { label: 'AR Aging', icon: Users, view: 'ar-aging' },
+      { label: 'Job Costing', icon: Factory, view: 'job-costing' },
       { label: 'Company Settings', icon: Settings, view: 'company-settings' },
     ],
   },
