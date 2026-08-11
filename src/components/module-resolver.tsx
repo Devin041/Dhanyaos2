@@ -50,6 +50,8 @@ export const viewLabels: Record<DashboardView, string> = {
   'pnl': 'Profit & Loss Statement',
   'ar-aging': 'AR Aging — Customer Outstanding',
   'job-costing': 'Job Costing — Actual vs Estimated',
+  'banking': 'Banking & Cash Management',
+  'gst-returns': 'GST Returns',
 }
 
 // ─── Module loader registry (import functions only, NOT evaluated at compile time) ──
@@ -101,6 +103,8 @@ const moduleLoaders: Record<DashboardView, ModuleLoaderFn> = {
   'pnl': () => import('@/components/modules/pnl-dashboard').then(m => m.PnLModule),
   'ar-aging': () => import('@/components/modules/ar-aging').then(m => m.ARAgingModule),
   'job-costing': () => import('@/components/modules/job-costing').then(m => m.JobCostingModule),
+  'banking': () => import('@/components/modules/banking').then(m => m.BankingModule),
+  'gst-returns': () => import('@/components/modules/gst-returns').then(m => m.GSTReturnsModule),
 }
 
 // ─── In-memory cache for loaded modules ───────────────────────────────────

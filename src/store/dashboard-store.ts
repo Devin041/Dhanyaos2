@@ -44,6 +44,8 @@ export type DashboardView =
   | 'pnl'
   | 'ar-aging'
   | 'job-costing'
+  | 'banking'
+  | 'gst-returns'
 
 // Data passed from Client Catalog → Costing Module (pre-fill)
 export interface PendingCostingData {

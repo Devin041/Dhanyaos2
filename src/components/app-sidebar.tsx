@@ -154,6 +154,8 @@ const navGroups: NavGroup[] = [
       { label: 'P&L Statement', icon: Wallet, view: 'pnl' },
       { label: 'AR Aging', icon: Users, view: 'ar-aging' },
       { label: 'Job Costing', icon: Factory, view: 'job-costing' },
+      { label: 'Banking', icon: Wallet, view: 'banking' },
+      { label: 'GST Returns', icon: FileText, view: 'gst-returns' },
       { label: 'Company Settings', icon: Settings, view: 'company-settings' },
     ],
   },
