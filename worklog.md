@@ -1099,3 +1099,35 @@ Stage Summary:
 - Two distinct bugs were fixed in a single file (src/app/api/orders/route.ts): (1) missing updatedAt/createdAt on insert, (2) invalid styleId FK from Sample catalog selection.
 - No schema migration was needed — the fix is purely in the API layer and is backward compatible.
 - Recommendation for future: audit other create endpoints (PurchaseOrder, Quotation, ProductionJob, Dispatch, Invoice, Payment, etc.) for the same `updatedAt` NOT NULL issue, since they all use Prisma `@updatedAt` against Supabase which lacks the auto-trigger. The same pattern (explicitly set createdAt + updatedAt on every insert) should be applied wherever Supabase `.insert()` is used on a table with `@updatedAt`.
+
+---
+Task ID: UNIVERSAL-TIMESTAMP-WRAPPER
+Agent: Main Agent (Z.ai Code)
+Task: Audit and universally fix the `updatedAt` NOT NULL insert bug across ALL API create endpoints (not just Sales Orders).
+
+Work Log:
+- Audited prisma/schema.prisma: found ~50 models with `updatedAt DateTime @updatedAt` (NOT NULL). Since Prisma's `@updatedAt` is enforced ONLY at the Prisma-client level (no database trigger), every raw Supabase `.insert()` on these tables that doesn't explicitly set `updatedAt` throws PostgreSQL error 23502 ("null value in column updatedAt violates not-null constraint") → HTTP 500.
+- Identified 65 API route files that call `.insert()` and were therefore ALL potentially affected by this bug (only Sales Orders had been fixed in the previous task).
+- Identified the 7 tables that do NOT have an `updatedAt` column (blocklist): FGStockMovement, Alert, AgentFeedback, AuditLog, EvalRun, EvalResult, Payment.
+- Extended the existing `wrapQueryBuilder` in src/lib/supabase-db.ts to auto-inject `updatedAt` on every `.insert()` call for all tables EXCEPT the 7 in the blocklist. The wrapper also preserves explicit values (if a route already sets `updatedAt`, the wrapper leaves it untouched). The `id` auto-injection (randomUUID) was already present and is unchanged.
+- Modified `wrapClient` to carry the `table` name from `.from(table)` into the query-builder wrapper so the insert interceptor knows whether the target table has an `updatedAt` column.
+- Note: `createdAt` is NOT injected because Prisma's `@default(now())` translates to a real `DEFAULT CURRENT_TIMESTAMP` at the PostgreSQL level, so the DB auto-populates it. Only `updatedAt` lacked a DB default.
+
+Verification (all via curl against the running dev server):
+- POST /api/quotations → 201, `updatedAt` populated ✓ (was previously broken)
+- POST /api/purchase-orders → 201, `updatedAt` populated ✓
+- POST /api/customers → 201, `updatedAt` populated ✓
+- POST /api/invoices → 201, `updatedAt` populated ✓
+- POST /api/production → 201, `updatedAt` populated ✓
+- POST /api/payments → 201, Payment table (no updatedAt column) correctly skipped, no "column does not exist" error ✓
+- POST /api/orders → still 201 (backward compat with the earlier explicit fix) ✓
+- Zero `POST ... 500` errors in dev.log during all tests.
+
+End-to-end browser verification (agent-browser):
+- Opened Sales Orders module → New Order → selected customer "Raghini Textile" → picked "EL-026 Aline" from catalog (auto-filled price 983 / cost 728) → set Qty 5 → clicked Create Order → dev log shows `POST /api/orders 201` → new order SO-20260811-003 appeared at top of the orders table. Confirmed the full golden path works.
+
+Stage Summary:
+- The `updatedAt` insert bug is now universally fixed across ALL 65 API create endpoints via a single wrapper change in src/lib/supabase-db.ts — no per-route edits needed.
+- The 7-table blocklist (FGStockMovement, Alert, AgentFeedback, AuditLog, EvalRun, EvalResult, Payment) ensures those tables don't get a spurious `updatedAt` column that would cause a "column does not exist" error.
+- This is a systemic fix: any future create endpoint that uses `supabase.from('X').insert(...)` will automatically get `updatedAt` injected, preventing recurrence of the bug.
+- Recommendation: if new tables are added to the Prisma schema WITHOUT an `updatedAt` column, add them to `TABLES_WITHOUT_UPDATED_AT` in src/lib/supabase-db.ts.

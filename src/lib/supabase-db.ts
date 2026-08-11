@@ -48,7 +48,21 @@ function getSupabaseClient(): SupabaseClient {
 // `id: randomUUID()` and `updatedAt: now` if not already present in the
 // payload.  This fixes ALL 57+ API routes at once without modifying each one.
 
-function wrapQueryBuilder(qb: any): any {
+// Tables known to NOT have an `updatedAt` column (verified from schema.prisma).
+// Inserting `updatedAt` into these would throw "column updatedAt does not exist".
+// All other tables DO have `updatedAt DateTime @updatedAt` (NOT NULL) and need
+// it to be set explicitly on every insert (Prisma's @updatedAt has no DB trigger).
+const TABLES_WITHOUT_UPDATED_AT = new Set([
+  'FGStockMovement',
+  'Alert',
+  'AgentFeedback',
+  'AuditLog',
+  'EvalRun',
+  'EvalResult',
+  'Payment',
+])
+
+function wrapQueryBuilder(qb: any, table: string): any {
   return new Proxy(qb, {
     get(target: any, prop: string, receiver: any) {
       const value = Reflect.get(target, prop, receiver)
@@ -58,13 +72,22 @@ function wrapQueryBuilder(qb: any): any {
       if (prop === 'insert') {
         return (payload: any) => {
           const now = new Date().toISOString()
+          // Prisma's @updatedAt is enforced ONLY at the Prisma-client level —
+          // it does NOT create a DB trigger. So every Supabase table that has
+          // `updatedAt DateTime @updatedAt` (NOT NULL) will reject inserts
+          // that don't set updatedAt explicitly, throwing:
+          //   "null value in column updatedAt of relation X violates not-null constraint"
+          // We auto-inject `updatedAt` for every table EXCEPT a small blocklist
+          // of tables that don't have the column at all.
+          const shouldAddUpdatedAt = !TABLES_WITHOUT_UPDATED_AT.has(table)
           const inject = (row: any) => {
             if (row && typeof row === 'object' && !Array.isArray(row)) {
               if (!row.id) row.id = randomUUID()
-              // Only add timestamps if not already present — some tables don't have these columns
-              // The wrapper is conservative: it adds them but Supabase will ignore unknown columns
-              // However, some tables (Payment, POItem) don't have createdAt/updatedAt
-              // So we only add id, and let each API route set timestamps explicitly
+              // Auto-populate updatedAt unless the caller already set it
+              // (explicit values win) or the table doesn't have the column.
+              if (shouldAddUpdatedAt && row.updatedAt === undefined) {
+                row.updatedAt = now
+              }
             }
             return row
           }
@@ -73,13 +96,13 @@ function wrapQueryBuilder(qb: any): any {
           } else {
             payload = inject(payload)
           }
-          return wrapQueryBuilder(value.call(target, payload))
+          return wrapQueryBuilder(value.call(target, payload), table)
         }
       }
 
       // For all other methods (select, eq, order, etc.), wrap the returned
       // query builder so chained .insert() calls also get intercepted
-      return (...args: any[]) => wrapQueryBuilder(value.apply(target, args))
+      return (...args: any[]) => wrapQueryBuilder(value.apply(target, args), table)
     },
   })
 }
@@ -90,9 +113,11 @@ function wrapClient(client: SupabaseClient): SupabaseClient {
       const value = Reflect.get(target, prop, receiver)
       if (typeof value !== 'function') return value
 
-      // Intercept .from('table') to wrap the returned query builder
+      // Intercept .from('table') to wrap the returned query builder.
+      // We carry the table name through so the insert wrapper knows whether
+      // the table has an updatedAt column.
       if (prop === 'from') {
-        return (table: string) => wrapQueryBuilder(value.call(target, table))
+        return (table: string) => wrapQueryBuilder(value.call(target, table), table)
       }
 
       return value.bind(target)
