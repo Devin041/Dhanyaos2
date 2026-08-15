@@ -1131,3 +1131,34 @@ Stage Summary:
 - The 7-table blocklist (FGStockMovement, Alert, AgentFeedback, AuditLog, EvalRun, EvalResult, Payment) ensures those tables don't get a spurious `updatedAt` column that would cause a "column does not exist" error.
 - This is a systemic fix: any future create endpoint that uses `supabase.from('X').insert(...)` will automatically get `updatedAt` injected, preventing recurrence of the bug.
 - Recommendation: if new tables are added to the Prisma schema WITHOUT an `updatedAt` column, add them to `TABLES_WITHOUT_UPDATED_AT` in src/lib/supabase-db.ts.
+
+---
+Task ID: SUPABASE-CONNECTION-VERIFICATION
+Agent: Main Agent (Z.ai Code)
+Task: Analyze whether Supabase is properly connected to the Dhanya OS project.
+
+Work Log:
+- User asked to verify Supabase connection status.
+- Checked .env file — found it ONLY contained `DATABASE_URL=file:/home/z/my-project/db/custom.db` (SQLite path). The Supabase credentials (NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY) were MISSING.
+- Root cause: The `ensure-env.sh` script (which restores Supabase credentials to .env) was not run before the current dev server process started. The .env had been overwritten/lost credentials.
+- Verified the impact: API endpoints returned 0 records (mock mode fallback activated because `isSupabaseConfigured = false` in supabase-db.ts). Confirmed via supabase-db.ts line 15: `export const isSupabaseConfigured = !!(supabaseUrl && supabaseAnonKey)` — when env vars missing, app falls back to mock client returning empty data.
+- Fix applied: Ran `bash ensure-env.sh` which restored all 6 credentials to .env (NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY, CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME).
+- Restarted dev server with NODE_OPTIONS=--max-old-space-size=1536 to load new env vars.
+- Verified Supabase connection via 3 independent methods:
+  1. **Direct REST API test** (bypassing Next.js): `curl https://uvlamiwykxekblposogn.supabase.co/rest/v1/Customer?select=id,companyName` with service-role auth → returned real customers (Rajeshwari Textiles, Meera Fashions, Pooja Collections). ✓
+  2. **Next.js API test**: `GET /api/customers?limit=2` → returned 13+ real customers with valid `createdAt`/`updatedAt` timestamps (e.g. "Wrapper Test Co", "Raghini Textile"). ✓
+  3. **Browser end-to-end test** (agent-browser): Homepage Founder Dashboard renders live Supabase data:
+     - INVENTORY: ₹6.5L · 10 items · 18d · 100% fresh
+     - SUPPLIERS: 53/100 score · 7 active · 18 POs · ₹6.6L
+     - CUSTOMERS: ₹2.2Cr · 13 customers · Top: Meera Fashions · 24.5% paid · 6 at-risk
+- Also verified other endpoints return real data: /api/orders (SO-20260811-003), /api/suppliers (Test Supplier Fix), /api/styles (ELY-SHR-010).
+
+Known infrastructure issue (NOT a Supabase problem):
+- The sandbox has only 3.9GB total system memory. When Next.js Turbopack compiles multiple heavy API routes concurrently, the next-server process gets OOM-killed and crashes. This is a sandbox resource limitation, not a Supabase connectivity issue.
+- Workaround used: restart dev server, warm up routes one at a time with sleeps between, avoid hammering many uncompiled routes simultaneously.
+
+Stage Summary:
+- **Supabase IS connected and working correctly.** The project database is the live Supabase PostgreSQL instance at `uvlamiwykxekblposogn.supabase.co`, NOT the local SQLite file (the `DATABASE_URL=file:...` in .env is a legacy/fallback config that Prisma doesn't actually use when Supabase env vars are present).
+- The earlier "Failed to create order" bug was a code-level issue (missing updatedAt on insert, now fixed via the universal wrapper), NOT a connection issue.
+- The app had temporarily fallen into mock mode because .env lost its Supabase credentials (ensure-env.sh wasn't run before the dev server started). Now restored.
+- Recommendation: always run `bash ensure-env.sh` before starting the dev server, or better yet add it to the `dev` script in package.json as a pre-step so credentials are never lost again.
