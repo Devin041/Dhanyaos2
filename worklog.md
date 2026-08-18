@@ -1162,3 +1162,25 @@ Stage Summary:
 - The earlier "Failed to create order" bug was a code-level issue (missing updatedAt on insert, now fixed via the universal wrapper), NOT a connection issue.
 - The app had temporarily fallen into mock mode because .env lost its Supabase credentials (ensure-env.sh wasn't run before the dev server started). Now restored.
 - Recommendation: always run `bash ensure-env.sh` before starting the dev server, or better yet add it to the `dev` script in package.json as a pre-step so credentials are never lost again.
+
+---
+Task ID: SUPABASE-RECONNECT-FIX
+Agent: Main Agent (Z.ai Code)
+Task: Fix recurring Supabase disconnection issue (credentials keep disappearing from .env).
+
+Work Log:
+- User reported Supabase appeared disconnected again.
+- Verified: .env had lost Supabase credentials again (only DATABASE_URL remained). API returned `{"customers":[],"total":0}` — mock mode fallback.
+- Root cause: ensure-env.sh was not running before `bun run dev` started the dev server. Every time the sandbox restarts or .env gets overwritten, credentials are lost and app falls into mock mode silently.
+- Fix applied:
+  1. Ran `bash ensure-env.sh` to restore all 6 credentials (Supabase URL, anon key, service role key, Cloudinary vars).
+  2. Restarted dev server so the new process loads the restored env vars.
+  3. **Permanent fix**: Modified `package.json` dev script to always run ensure-env.sh BEFORE next dev:
+     `"dev": "bash ensure-env.sh && NODE_OPTIONS=--max-old-space-size=1536 next dev -p 3000 2>&1 | tee dev.log"`
+     Now every `bun run dev` auto-restores credentials — no more silent mock-mode fallback.
+- Verified connection: `GET /api/customers?limit=3` returned 13+ real customers (Wrapper Test Co, Raghini Textile, Sai Silks) with valid `updatedAt` timestamps. ✓
+
+Stage Summary:
+- Supabase is connected and working correctly.
+- The root cause of recurring disconnects was ensure-env.sh not running before the dev server. This is now fixed permanently in package.json — `bun run dev` now auto-runs ensure-env.sh first.
+- No code changes needed beyond the package.json dev script tweak.
