@@ -1184,3 +1184,31 @@ Stage Summary:
 - Supabase is connected and working correctly.
 - The root cause of recurring disconnects was ensure-env.sh not running before the dev server. This is now fixed permanently in package.json — `bun run dev` now auto-runs ensure-env.sh first.
 - No code changes needed beyond the package.json dev script tweak.
+
+---
+Task ID: SALES-ORDER-CUSTOMER-DROPDOWN-FIX
+Agent: Main Agent (Z.ai Code)
+Task: Fix the sales order "Select a customer" dropdown not showing all customers (newly added customers missing).
+
+Work Log:
+- User reported: when creating a Sales Order, the customer dropdown only shows a subset of customers — newly added customers (like "Petals" added today) don't appear.
+- Analyzed uploaded screenshot via VLM skill — confirmed only 9 customers visible in the dropdown.
+- Checked Supabase DB directly via REST API: 14 customers actually exist in the Customer table, including "Petals" (created 2026-08-21T07:57:55).
+- Checked /api/customers API: correctly returns all 14 customers. So the bug is NOT in the API or DB.
+- Root cause found in src/components/modules/sales-orders.tsx line 379-404 (fetchCustomers):
+  The function was NOT calling /api/customers at all. It was deriving the customer list from EXISTING ORDERS only:
+    ```
+    const uniqueCustomers = new Map()
+    orders.forEach((o) => { uniqueCustomers.set(o.customer.id, ...) })
+    ```
+  This means: any customer who has never placed an order is invisible in the dropdown. A newly added customer (e.g. "Petals") has zero orders → doesn't show up → user can't create the first order for them. Also the old code had a syntax bug `if res.ok` (missing parens) which would have thrown a ReferenceError if that branch ever ran.
+- Fix applied: rewrote fetchCustomers to call GET /api/customers?limit=500 directly, map the response into the Customer type, and sort alphabetically by companyName. Removed the broken `if res.ok` syntax. Kept a fallback (derive from orders) removed in favor of clean single-source-of-truth fetch. Updated useCallback deps to [] so it fetches once on mount instead of refetching on every orders change.
+- Verification via agent-browser:
+  Before fix: dropdown showed 9 customers (Raghini, PK Angency, Anaya, Suhani, Trendy, Pooja, Meera, Vastra, Shree Krishna).
+  After fix: dropdown shows ALL 14 customers including "Petals — Mehroof Bhai" (the newly added one), sorted alphabetically (Anaya Wholesale, Meera Fashions, Petals, PK Angency, Pooja Collections, Raghini Textile, Rajeshwari Textiles, Rajshree, Sai Silks, Shree Krishna, Suhani Exports, Trendy ethnic, Vastra Lifestyle, Wrapper Test Co).
+
+Stage Summary:
+- Customer dropdown now shows ALL customers from the database, regardless of whether they have orders.
+- Newly added customers appear immediately in the dropdown (no refresh needed beyond the normal fetch on dialog open).
+- The list is now alphabetically sorted for easier scanning.
+- No backend changes were needed — the bug was purely in the frontend fetchCustomers logic.

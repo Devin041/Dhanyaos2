@@ -377,31 +377,28 @@ export function SalesOrders() {
   // ─── Fetch Customers for Create Dialog ────────────────────────────────────
 
   const fetchCustomers = useCallback(async () => {
+    // Fetch ALL customers directly from the customers API — NOT derived
+    // from existing orders. Otherwise, newly added customers (who haven't
+    // placed any order yet) won't appear in the dropdown, which is a
+    // critical UX bug when creating the very first order for a new client.
     try {
-      const res = await fetch('/api/orders')
+      const res = await fetch('/api/customers?limit=500')
       if (res.ok) {
-        // We need a customers endpoint; let's extract unique from orders
-        // Or create a lightweight fetch. For now, use the customer select from order data
+        const data = await res.json()
+        const list: Customer[] = (data.customers || data || []).map((c: any) => ({
+          id: c.id,
+          companyName: c.companyName,
+          buyerName: c.buyerName,
+          phone: c.phone,
+          email: c.email,
+          status: c.status || 'Active',
+        }))
+        // Sort alphabetically by companyName for easy scanning
+        list.sort((a, b) => (a.companyName || '').localeCompare(b.companyName || ''))
+        setCustomers(list)
       }
-    } catch { /* empty */ }
-    // Fetch customers directly from orders we have
-    const uniqueCustomers = new Map<string, Customer>()
-    orders.forEach((o) => {
-      if (!uniqueCustomers.has(o.customer.id)) {
-        uniqueCustomers.set(o.customer.id, {
-          id: o.customer.id,
-          companyName: o.customer.companyName,
-          buyerName: o.customer.buyerName,
-          phone: o.customer.phone,
-          email: o.customer.email,
-          status: 'Active',
-        })
-      }
-    })
-    if (uniqueCustomers.size > 0) {
-      setCustomers(Array.from(uniqueCustomers.values()))
-    }
-  }, [orders])
+    } catch { /* ignore — customers list will be empty but order creation still works */ }
+  }, [])
 
   useEffect(() => {
     fetchCustomers()
