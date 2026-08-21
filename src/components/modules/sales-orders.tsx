@@ -318,20 +318,55 @@ export function SalesOrders() {
   }, [fetchOrders, fetchPerf])
 
   // Load catalog products for item selector (Sprint 2)
+  // IMPORTANT: The catalog must include EVERY product the user has costed,
+  // not just the ones in the Sample Catalog. Otherwise, newly added costings
+  // (e.g. "Purple Master Aline", "EL-01111") won't show up in the dropdown
+  // and the user can't create an order for them. We therefore merge two
+  // sources: the Sample Catalog (/api/samples) AND Cost Sheets (/api/cost-sheets),
+  // deduplicating by styleNo.
   useEffect(() => {
     async function loadCatalog() {
+      const merged = new Map<string, { id: string; styleNo: string; styleName: string; photoCount: number }>()
+
+      // Source 1: Sample Catalog (has photos)
       try {
         const res = await fetch('/api/samples')
         const data = await res.json()
-        if (res.ok && Array.isArray(data)) {
-          setCatalogProducts(data.map((s: any) => ({
-            id: s.id,
-            styleNo: s.styleNo,
-            styleName: s.styleName,
-            photoCount: s.photoCount || 0,
-          })))
+        const arr = Array.isArray(data) ? data : (data.samples || [])
+        for (const s of arr) {
+          if (s.styleNo) {
+            merged.set(s.styleNo, {
+              id: s.id,
+              styleNo: s.styleNo,
+              styleName: s.styleName || s.styleNo,
+              photoCount: s.photoCount || 0,
+            })
+          }
         }
       } catch { /* ignore */ }
+
+      // Source 2: Cost Sheets (has pricing + new products not yet in Sample Catalog)
+      try {
+        const res = await fetch('/api/cost-sheets?limit=500')
+        const data = await res.json()
+        const arr = data.costSheets || data || []
+        for (const c of arr) {
+          if (c.styleNo && !merged.has(c.styleNo)) {
+            merged.set(c.styleNo, {
+              id: c.id,
+              styleNo: c.styleNo,
+              styleName: c.styleName || c.styleNo,
+              photoCount: 0,
+            })
+          }
+        }
+      } catch { /* ignore */ }
+
+      // Sort alphabetically by styleNo for easy scanning
+      const list = Array.from(merged.values()).sort((a, b) =>
+        (a.styleNo || '').localeCompare(b.styleNo || '', undefined, { numeric: true, sensitivity: 'base' })
+      )
+      setCatalogProducts(list)
     }
     loadCatalog()
   }, [])

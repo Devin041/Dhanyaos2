@@ -1212,3 +1212,47 @@ Stage Summary:
 - Newly added customers appear immediately in the dropdown (no refresh needed beyond the normal fetch on dialog open).
 - The list is now alphabetically sorted for easier scanning.
 - No backend changes were needed — the bug was purely in the frontend fetchCustomers logic.
+
+---
+Task ID: SALES-ORDER-CATALOG-DROPDOWN-FIX
+Agent: Main Agent (Z.ai Code)
+Task: Fix the sales order product/style dropdown not showing newly costed products from the Costing module.
+
+Work Log:
+- User reported: when creating a Sales Order, the "Select from Catalog" dropdown doesn't show new products they costed in the Costing module.
+- Analyzed uploaded screenshot via VLM skill — confirmed dropdown only showed EL-016 through EL-026 (11 items, all from Sample Catalog).
+- Checked Supabase DB directly:
+  - Sample table: 26 entries (EL-001 to EL-026), all created on 2026-07-28.
+  - CostSheet table: 28+ entries including user's NEW products:
+    * "Purple Master Aline" (created 2026-08-21 today)
+    * "style Lemon petals" (created 2026-08-21 today)
+    * "style grey pattels" (created 2026-08-20)
+    * "EL-01111 Farsi Kurti Long Size" (created 2026-08-20)
+    * "EL-012 Farsi Kurti" (created 2026-08-06)
+    * "EL-102", "EL-103" Anarkali (older but not in Sample table)
+- Root cause found in src/components/modules/sales-orders.tsx line 320-337 (loadCatalog):
+  The catalog dropdown was loading ONLY from `/api/samples` (the Sample Catalog table). Any product that has a costing but no Sample Catalog entry was invisible in the dropdown. This is the same class of bug as the customer dropdown issue — deriving the list from a single incomplete source instead of fetching all relevant records.
+- Fix applied: rewrote loadCatalog to merge TWO sources:
+  1. `/api/samples` (Sample Catalog — has photos, shows 📷 icon)
+  2. `/api/cost-sheets?limit=500` (Cost Sheets — has pricing + any newly costed products)
+  Deduplicate by styleNo using a Map. Sort alphabetically with numeric-aware comparison (so EL-002 comes before EL-010).
+- Verification via agent-browser:
+  Before fix: dropdown showed 11 products (EL-016 to EL-026).
+  After fix: dropdown shows 32 products — all 26 Sample Catalog entries PLUS 6 additional products from Cost Sheets:
+    - EL-102, EL-103 (Anarkali)
+    - EL-01111 (Farsi Kurti Long Size)
+    - Purple Master Aline
+    - style grey pattels
+    - style Lemon petals
+- End-to-end test: selected "Purple Master Aline" from the new dropdown → auto-fill worked correctly:
+    Style Name: ALNE
+    Unit Price: ₹498 (from CostSheet.sellingPrice = 497.50, rounded)
+    Unit Cost: ₹444 (from CostSheet.totalCost = 444.20, rounded)
+  This proves the pricing auto-fill logic still works for cost-sheet-derived products.
+
+Stage Summary:
+- The sales order product dropdown now shows EVERY product the user has costed, regardless of whether it exists in the Sample Catalog.
+- Newly costed products appear immediately (no refresh needed beyond the normal page load).
+- Products are sorted alphabetically with numeric-aware comparison for easy scanning.
+- The auto-fill (style name, unit price, unit cost) continues to work correctly for cost-sheet-derived products because handleProductSelect already fetched pricing via /api/cost-sheets?search={styleNo}.
+- Same pattern of bug as the customer dropdown (fetching from a single incomplete source instead of the authoritative table). Recommend auditing other dropdowns (Quotation create, etc.) for the same class of issue.
