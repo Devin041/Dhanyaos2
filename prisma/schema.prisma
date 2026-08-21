@@ -137,12 +137,16 @@ model OrderItem {
   styleId      String?
   style        Style?     @relation(fields: [styleId], references: [id])
   styleName    String
-  quantity     Int
+  quantity     Int                 // client order quantity (what customer wants)
   unitPrice    Float
   unitCost     Float
   totalAmount  Float
   totalCost    Float
   profit       Float
+  // Production planning (overproduction scenario)
+  // e.g. client orders 80 pcs but production runs 120 pcs → surplus 40 goes to FG inventory
+  productionQty Int        @default(0)  // what will actually be manufactured
+  surplusQty    Int        @default(0)  // productionQty - quantity (auto, goes to FG stock)
   colorBreakdown OrderItemColor[]
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
@@ -153,6 +157,7 @@ model OrderItemColor {
   orderItemId  String
   orderItem    OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
   color        String
+  size         String    @default("-")  // size label (S/M/L/XL/XXL or Free)
   quantity     Int
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt

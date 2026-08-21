@@ -84,6 +84,24 @@ import {
 } from 'recharts'
 import { useToast } from '@/hooks/use-toast'
 
+// ─── Inline helper: tiny input to add a label (color/size) on Enter ──────────
+function AddLabelInput({ onAdd, placeholder }: { onAdd: (v: string) => void; placeholder: string }) {
+  return (
+    <input
+      type="text"
+      placeholder={placeholder}
+      className="h-6 w-20 px-2 text-[10px] bg-background/60 border border-border/40 rounded"
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          const v = (e.target as HTMLInputElement).value.trim()
+          if (v) onAdd(v)
+          ;(e.target as HTMLInputElement).value = ''
+        }
+      }}
+    />
+  )
+}
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 interface OrderItem {
@@ -135,14 +153,27 @@ interface Customer {
   status: string
 }
 
+interface ColorSizeRow {
+  color: string
+  size: string
+  quantity: number
+}
 interface NewLineItem {
   styleId: string
   styleNo: string
   styleName: string
-  quantity: number
+  quantity: number         // client order qty (auto-calc from matrix if used)
   unitPrice: number
   unitCost: number
   image: string | null
+  // Color × Size matrix
+  colors: string[]         // e.g. ['Red','Blue','Green']
+  sizes: string[]          // e.g. ['S','M','L','XL','XXL']
+  matrix: Record<string, Record<string, number>>  // matrix[color][size] = qty
+  useMatrix: boolean       // toggle between simple qty vs color×size grid
+  // Production planning
+  productionQty: number   // what will actually be manufactured
+  surplusQty: number      // productionQty - quantity (auto)
 }
 
 // ─── Sales Performance Types (NEW) ───────────────────────────────────────────
@@ -259,13 +290,22 @@ export function SalesOrders() {
   const [customers, setCustomers] = useState<Customer[]>([])
   const [createLoading, setCreateLoading] = useState(false)
   const [newCustomerId, setNewCustomerId] = useState('')
-  const [newItems, setNewItems] = useState<NewLineItem[]>([
-    { styleId: '', styleNo: '', styleName: '', quantity: 1, unitPrice: 0, unitCost: 0, image: null },
-  ])
+  const emptyLineItem = (): NewLineItem => ({
+    styleId: '', styleNo: '', styleName: '',
+    quantity: 1, unitPrice: 0, unitCost: 0, image: null,
+    colors: [], sizes: [], matrix: {}, useMatrix: false,
+    productionQty: 0, surplusQty: 0,
+  })
+  const [newItems, setNewItems] = useState<NewLineItem[]>([emptyLineItem()])
   const [catalogProducts, setCatalogProducts] = useState<Array<{ id: string; styleNo: string; styleName: string; photoCount: number }>>([])
   const [newDeliveryDate, setNewDeliveryDate] = useState('')
   const [newDiscount, setNewDiscount] = useState('0')
   const [newNotes, setNewNotes] = useState('')
+  const [newShippingAddress, setNewShippingAddress] = useState('')
+  const [newGstType, setNewGstType] = useState<'IntraState' | 'InterState'>('IntraState')
+  const [newGstPercent, setNewGstPercent] = useState('18')
+  const [newBrokerName, setNewBrokerName] = useState('')
+  const [newBrokerCommission, setNewBrokerCommission] = useState('0')
 
   // Detail panel
   const [detailOrder, setDetailOrder] = useState<Order | null>(null)
@@ -406,7 +446,78 @@ export function SalesOrders() {
       unitPrice,
       unitCost,
       image: imageUrl,
+      // Reset color×size matrix when a new product is chosen
+      colors: [],
+      sizes: [],
+      matrix: {},
+      useMatrix: false,
+      productionQty: 0,
+      surplusQty: 0,
     } : item))
+  }
+
+  // ─── Color×Size Matrix helpers ─────────────────────────────────────────────
+  // Add a color/size label to a line item
+  const addColor = (idx: number, color: string) => {
+    if (!color.trim()) return
+    setNewItems(newItems.map((item, i) => {
+      if (i !== idx) return item
+      if (item.colors.includes(color)) return item
+      return { ...item, colors: [...item.colors, color] }
+    }))
+  }
+  const removeColor = (idx: number, color: string) => {
+    setNewItems(newItems.map((item, i) => {
+      if (i !== idx) return item
+      const newMatrix = { ...item.matrix }
+      delete newMatrix[color]
+      return { ...item, colors: item.colors.filter(c => c !== color), matrix: newMatrix }
+    }))
+  }
+  const addSize = (idx: number, size: string) => {
+    if (!size.trim()) return
+    setNewItems(newItems.map((item, i) => {
+      if (i !== idx) return item
+      if (item.sizes.includes(size)) return item
+      return { ...item, sizes: [...item.sizes, size] }
+    }))
+  }
+  const removeSize = (idx: number, size: string) => {
+    setNewItems(newItems.map((item, i) => {
+      if (i !== idx) return item
+      const newMatrix: Record<string, Record<string, number>> = {}
+      for (const [c, row] of Object.entries(item.matrix)) {
+        const { [size]: _removed, ...rest } = row
+        newMatrix[c] = rest
+      }
+      return { ...item, sizes: item.sizes.filter(s => s !== size), matrix: newMatrix }
+    }))
+  }
+  const setMatrixCell = (idx: number, color: string, size: string, qty: number) => {
+    setNewItems(newItems.map((item, i) => {
+      if (i !== idx) return item
+      const m = { ...item.matrix }
+      if (!m[color]) m[color] = {}
+      m[color] = { ...m[color], [size]: Math.max(0, Math.floor(qty || 0)) }
+      return { ...item, matrix: m }
+    }))
+  }
+  // Bulk-fill: set qty per color for all sizes (e.g., 120 pcs / 5 sizes = 24 each)
+  const distributeQtyPerColor = (idx: number, qtyPerColor: number) => {
+    setNewItems(newItems.map((item, i) => {
+      if (i !== idx) return item
+      if (item.colors.length === 0 || item.sizes.length === 0) return item
+      const perSize = Math.floor(qtyPerColor / item.sizes.length)
+      const remainder = qtyPerColor - perSize * item.sizes.length
+      const m: Record<string, Record<string, number>> = {}
+      for (const c of item.colors) {
+        m[c] = {}
+        item.sizes.forEach((s, si) => { m[c][s] = perSize + (si < remainder ? 1 : 0) })
+      }
+      // Auto-set productionQty to match if not already set
+      const total = item.colors.length * qtyPerColor
+      return { ...item, matrix: m, productionQty: item.productionQty || total }
+    }))
   }
 
   // ─── Fetch Customers for Create Dialog ────────────────────────────────────
@@ -460,9 +571,42 @@ export function SalesOrders() {
 
   // ─── Create Order ─────────────────────────────────────────────────────────
 
+  // Compute the effective order quantity for a line item:
+  // if using the color×size matrix, sum all cells; otherwise use the quantity field.
+  const lineItemQty = (i: NewLineItem): number => {
+    if (i.useMatrix && i.colors.length > 0 && i.sizes.length > 0) {
+      let total = 0
+      for (const c of i.colors) for (const s of i.sizes) total += i.matrix[c]?.[s] || 0
+      return total
+    }
+    return i.quantity
+  }
+  // Compute the surplus = productionQty - orderQty
+  const lineItemSurplus = (i: NewLineItem): number => {
+    const q = lineItemQty(i)
+    const p = i.productionQty || q
+    return Math.max(0, p - q)
+  }
+  // Flatten matrix into rows for the API
+  const lineItemColorRows = (i: NewLineItem): ColorSizeRow[] => {
+    if (!i.useMatrix) return []
+    const rows: ColorSizeRow[] = []
+    for (const c of i.colors) for (const s of i.sizes) {
+      const q = i.matrix[c]?.[s] || 0
+      if (q > 0) rows.push({ color: c, size: s, quantity: q })
+    }
+    return rows
+  }
+
   const handleCreateOrder = async () => {
-    if (!newCustomerId || newItems.some((i) => !i.styleName || i.quantity <= 0 || i.unitPrice <= 0)) {
-      toast({ title: 'Please fill in customer and all required item fields', variant: 'destructive' })
+    // Validate
+    if (!newCustomerId) {
+      toast({ title: 'Please select a customer', variant: 'destructive' })
+      return
+    }
+    const invalid = newItems.some((i) => !i.styleName || lineItemQty(i) <= 0 || i.unitPrice <= 0)
+    if (invalid) {
+      toast({ title: 'Each item needs a product, quantity > 0, and unit price > 0', variant: 'destructive' })
       return
     }
     setCreateLoading(true)
@@ -472,18 +616,29 @@ export function SalesOrders() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           customerId: newCustomerId,
-          items: newItems.map((i) => ({
-            styleId: i.styleId || undefined,
-            styleNo: i.styleNo || undefined,
-            styleName: i.styleName,
-            quantity: i.quantity,
-            unitPrice: i.unitPrice,
-            unitCost: i.unitCost,
-            image: i.image || undefined,
-          })),
+          items: newItems.map((i) => {
+            const q = lineItemQty(i)
+            const p = i.productionQty || q
+            const colors = lineItemColorRows(i)
+            return {
+              styleId: i.styleId || undefined,
+              styleNo: i.styleNo || undefined,
+              styleName: i.styleName,
+              quantity: q,
+              unitPrice: i.unitPrice,
+              unitCost: i.unitCost,
+              productionQty: p,
+              colors: colors.length > 0 ? colors : undefined,
+            }
+          }),
           deliveryDate: newDeliveryDate || undefined,
           discountPercent: parseFloat(newDiscount) || 0,
           notes: newNotes || undefined,
+          shippingAddress: newShippingAddress || undefined,
+          gstType: newGstType,
+          gstPercent: parseFloat(newGstPercent) || 0,
+          brokerName: newBrokerName || undefined,
+          brokerCommissionPercent: parseFloat(newBrokerCommission) || 0,
         }),
       })
       if (res.ok) {
@@ -504,14 +659,19 @@ export function SalesOrders() {
 
   const resetCreateForm = () => {
     setNewCustomerId('')
-    setNewItems([{ styleId: '', styleNo: '', styleName: '', quantity: 1, unitPrice: 0, unitCost: 0, image: null }])
+    setNewItems([emptyLineItem()])
     setNewDeliveryDate('')
     setNewDiscount('0')
     setNewNotes('')
+    setNewShippingAddress('')
+    setNewGstType('IntraState')
+    setNewGstPercent('18')
+    setNewBrokerName('')
+    setNewBrokerCommission('0')
   }
 
   const addItemRow = () => {
-    setNewItems([...newItems, { styleId: '', styleNo: '', styleName: '', quantity: 1, unitPrice: 0, unitCost: 0, image: null }])
+    setNewItems([...newItems, emptyLineItem()])
   }
 
   const removeItemRow = (idx: number) => {
@@ -527,17 +687,28 @@ export function SalesOrders() {
 
   const createTotals = newItems.reduce(
     (acc, item) => {
-      const lineTotal = item.quantity * item.unitPrice
-      const lineCost = item.quantity * item.unitCost
+      const q = lineItemQty(item)
+      const lineTotal = q * item.unitPrice
+      const lineCost = q * item.unitCost
       acc.amount += lineTotal
       acc.cost += lineCost
+      acc.qty += q
+      acc.productionQty += item.productionQty || q
+      acc.surplusQty += lineItemSurplus(item)
       return acc
     },
-    { amount: 0, cost: 0 },
+    { amount: 0, cost: 0, qty: 0, productionQty: 0, surplusQty: 0 },
   )
   const discountAmt = createTotals.amount * (parseFloat(newDiscount) || 0) / 100
-  const finalAmount = createTotals.amount - discountAmt
-  const profit = finalAmount - createTotals.cost
+  const taxableAmount = createTotals.amount - discountAmt
+  const gstPercentVal = parseFloat(newGstPercent) || 0
+  const totalGst = newGstType === 'IntraState'
+    ? taxableAmount * gstPercentVal / 100  // (CGST + SGST split visually, same total)
+    : taxableAmount * gstPercentVal / 100
+  const grandTotal = taxableAmount + totalGst
+  const commissionAmt = grandTotal * (parseFloat(newBrokerCommission) || 0) / 100
+  const netPayable = grandTotal - commissionAmt
+  const profit = taxableAmount - createTotals.cost
 
   // ─── Order Detail Actions ─────────────────────────────────────────────────
 
@@ -865,34 +1036,56 @@ export function SalesOrders() {
           CREATE ORDER DIALOG
          ═══════════════════════════════════════════════════════════════════ */}
       <Dialog open={createOpen} onOpenChange={(open) => { setCreateOpen(open); if (!open) resetCreateForm() }}>
-        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto bg-background/95 backdrop-blur-xl border-border/50">
+        <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto bg-background/95 backdrop-blur-xl border-border/50">
           <DialogHeader>
             <DialogTitle className="text-primary flex items-center gap-2">
               <Plus className="h-5 w-5" />
               Create New Sales Order
             </DialogTitle>
-            <DialogDescription>Add a new sales order with line items</DialogDescription>
+            <DialogDescription>Comprehensive order form — color×size matrix, GST, broker & production planning</DialogDescription>
           </DialogHeader>
 
           <div className="space-y-5 py-2">
-            {/* Customer Select */}
-            <div className="space-y-2">
-              <Label className="text-xs font-medium">Customer *</Label>
-              <Select value={newCustomerId} onValueChange={setNewCustomerId}>
-                <SelectTrigger className="bg-muted/50">
-                  <SelectValue placeholder="Select a customer..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {customers.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>
-                      {c.companyName}{c.buyerName ? ` — ${c.buyerName}` : ''}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            {/* ── Customer + Delivery ─────────────────────────────────────────── */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="space-y-2 sm:col-span-2">
+                <Label className="text-xs font-medium">Customer *</Label>
+                <Select value={newCustomerId} onValueChange={setNewCustomerId}>
+                  <SelectTrigger className="bg-muted/50">
+                    <SelectValue placeholder="Select a customer..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {customers.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.companyName}{c.buyerName ? ` — ${c.buyerName}` : ''}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label className="text-xs font-medium">Delivery Date</Label>
+                <Input
+                  type="date"
+                  className="h-8 text-sm bg-muted/50"
+                  value={newDeliveryDate}
+                  onChange={(e) => setNewDeliveryDate(e.target.value)}
+                />
+              </div>
             </div>
 
-            {/* Line Items */}
+            {/* Shipping address */}
+            <div className="space-y-2">
+              <Label className="text-xs font-medium">Shipping Address <span className="text-muted-foreground">(optional)</span></Label>
+              <Input
+                placeholder="Delivery address (defaults to customer billing if blank)"
+                className="h-8 text-sm bg-muted/50"
+                value={newShippingAddress}
+                onChange={(e) => setNewShippingAddress(e.target.value)}
+              />
+            </div>
+
+            {/* ── Line Items ─────────────────────────────────────────────────── */}
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <Label className="text-xs font-medium">Line Items *</Label>
@@ -900,18 +1093,30 @@ export function SalesOrders() {
                   <Plus className="h-3 w-3" /> Add Item
                 </Button>
               </div>
-              <div className="space-y-2">
+              <div className="space-y-3">
                 {newItems.map((item, idx) => (
-                  <div key={idx} className="glass-card rounded-lg p-3 space-y-2">
+                  <div key={idx} className="glass-card rounded-lg p-3 space-y-3">
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-medium text-muted-foreground">Item {idx + 1}</span>
-                      {newItems.length > 1 && (
-                        <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive" onClick={() => removeItemRow(idx)}>
-                          <X className="h-3 w-3" />
-                        </Button>
-                      )}
+                      <div className="flex items-center gap-2">
+                        <label className="flex items-center gap-1 text-[10px] text-muted-foreground cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={item.useMatrix}
+                            onChange={(e) => updateItem(idx, 'useMatrix', e.target.checked)}
+                            className="h-3 w-3"
+                          />
+                          Color × Size matrix
+                        </label>
+                        {newItems.length > 1 && (
+                          <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive" onClick={() => removeItemRow(idx)}>
+                            <X className="h-3 w-3" />
+                          </Button>
+                        )}
+                      </div>
                     </div>
-                    {/* Product selector from Sample Catalog (Sprint 2) */}
+
+                    {/* Product selector + image */}
                     <div className="flex items-center gap-2">
                       <Select value={item.styleId} onValueChange={(v) => handleProductSelect(idx, v)}>
                         <SelectTrigger className="h-8 text-xs bg-muted/50 flex-1">
@@ -929,27 +1134,18 @@ export function SalesOrders() {
                           ))}
                         </SelectContent>
                       </Select>
-                      {/* Product image thumbnail */}
                       {item.image && (
                         <img src={item.image} alt={item.styleName} className="h-8 w-8 rounded object-cover shrink-0" />
                       )}
                     </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2">
-                      <div className="sm:col-span-2 lg:col-span-2">
-                        <Input
-                          placeholder="Style / Product name *"
-                          className="h-8 text-sm bg-muted/50"
-                          value={item.styleName}
-                          onChange={(e) => updateItem(idx, 'styleName', e.target.value)}
-                        />
-                      </div>
+
+                    {/* Style name + price + cost */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                       <Input
-                        type="number"
-                        placeholder="Qty"
+                        placeholder="Style / Product name *"
                         className="h-8 text-sm bg-muted/50"
-                        value={item.quantity || ''}
-                        onChange={(e) => updateItem(idx, 'quantity', parseInt(e.target.value) || 0)}
-                        min={1}
+                        value={item.styleName}
+                        onChange={(e) => updateItem(idx, 'styleName', e.target.value)}
                       />
                       <Input
                         type="number"
@@ -970,11 +1166,156 @@ export function SalesOrders() {
                         step={0.01}
                       />
                     </div>
-                    {item.quantity > 0 && item.unitPrice > 0 && (
+
+                    {/* ── Color × Size matrix OR simple qty ───────────────────── */}
+                    {item.useMatrix ? (
+                      <div className="space-y-2 border rounded-md p-2 bg-muted/20">
+                        {/* Color + Size inputs */}
+                        <div className="flex flex-wrap items-center gap-2">
+                          <div className="flex items-center gap-1">
+                            <span className="text-[10px] font-medium text-muted-foreground">Colors:</span>
+                            {item.colors.map((c) => (
+                              <span key={c} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/15 text-primary text-[10px]">
+                                {c}
+                                <button type="button" onClick={() => removeColor(idx, c)} className="hover:text-destructive">×</button>
+                              </span>
+                            ))}
+                            <AddLabelInput onAdd={(v) => addColor(idx, v)} placeholder="+ color" />
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <span className="text-[10px] font-medium text-muted-foreground">Sizes:</span>
+                            {item.sizes.map((s) => (
+                              <span key={s} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-secondary text-secondary-foreground text-[10px]">
+                                {s}
+                                <button type="button" onClick={() => removeSize(idx, s)} className="hover:text-destructive">×</button>
+                              </span>
+                            ))}
+                            <AddLabelInput onAdd={(v) => addSize(idx, v)} placeholder="+ size" />
+                          </div>
+                        </div>
+
+                        {/* Quick distribute input */}
+                        {item.colors.length > 0 && item.sizes.length > 0 && (
+                          <div className="flex items-center gap-2 text-[10px]">
+                            <span className="text-muted-foreground">Quick fill:</span>
+                            <Input
+                              type="number"
+                              placeholder="pcs per color"
+                              className="h-6 w-28 text-[10px] bg-muted/50"
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  distributeQtyPerColor(idx, parseInt((e.target as HTMLInputElement).value) || 0)
+                                  ;(e.target as HTMLInputElement).value = ''
+                                }
+                              }}
+                              min={0}
+                            />
+                            <span className="text-muted-foreground">→ auto-distribute across {item.sizes.length} sizes</span>
+                          </div>
+                        )}
+
+                        {/* Matrix grid */}
+                        {item.colors.length > 0 && item.sizes.length > 0 && (
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-[10px]">
+                              <thead>
+                                <tr>
+                                  <th className="text-left p-1 text-muted-foreground">Color \ Size</th>
+                                  {item.sizes.map((s) => (
+                                    <th key={s} className="p-1 text-center font-medium">{s}</th>
+                                  ))}
+                                  <th className="p-1 text-right text-muted-foreground">Color Total</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {item.colors.map((c) => {
+                                  const rowTotal = item.sizes.reduce((sum, s) => sum + (item.matrix[c]?.[s] || 0), 0)
+                                  return (
+                                    <tr key={c}>
+                                      <td className="p-1 font-medium">{c}</td>
+                                      {item.sizes.map((s) => (
+                                        <td key={s} className="p-0.5">
+                                          <input
+                                            type="number"
+                                            min={0}
+                                            value={item.matrix[c]?.[s] || ''}
+                                            onChange={(e) => setMatrixCell(idx, c, s, parseInt(e.target.value) || 0)}
+                                            className="w-full h-7 px-1 text-center bg-background/60 border border-border/40 rounded"
+                                          />
+                                        </td>
+                                      ))}
+                                      <td className="p-1 text-right font-semibold text-primary">{rowTotal}</td>
+                                    </tr>
+                                  )
+                                })}
+                              </tbody>
+                              <tfoot>
+                                <tr className="border-t">
+                                  <td className="p-1 font-medium">Size Total</td>
+                                  {item.sizes.map((s) => {
+                                    const colTotal = item.colors.reduce((sum, c) => sum + (item.matrix[c]?.[s] || 0), 0)
+                                    return <td key={s} className="p-1 text-center font-semibold text-primary">{colTotal}</td>
+                                  })}
+                                  <td className="p-1 text-right font-bold text-primary">{lineItemQty(item)}</td>
+                                </tr>
+                              </tfoot>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      /* Simple qty input */
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        <div>
+                          <Label className="text-[10px] text-muted-foreground">Order Qty (client)</Label>
+                          <Input
+                            type="number"
+                            placeholder="Quantity"
+                            className="h-8 text-sm bg-muted/50"
+                            value={item.quantity || ''}
+                            onChange={(e) => updateItem(idx, 'quantity', parseInt(e.target.value) || 0)}
+                            min={1}
+                          />
+                        </div>
+                        <div className="sm:col-span-2" />
+                      </div>
+                    )}
+
+                    {/* ── Production planning ─────────────────────────────────── */}
+                    <div className="grid grid-cols-3 gap-2 p-2 rounded-md bg-amber-500/5 border border-amber-500/20">
+                      <div>
+                        <Label className="text-[10px] text-amber-600 dark:text-amber-400">Client Order Qty</Label>
+                        <p className="text-sm font-semibold">{lineItemQty(item)} pcs</p>
+                      </div>
+                      <div>
+                        <Label className="text-[10px] text-amber-600 dark:text-amber-400">Production Qty</Label>
+                        <Input
+                          type="number"
+                          placeholder={String(lineItemQty(item))}
+                          className="h-7 text-sm bg-muted/50"
+                          value={item.productionQty || ''}
+                          onChange={(e) => updateItem(idx, 'productionQty', parseInt(e.target.value) || 0)}
+                          min={0}
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-[10px] text-emerald-600 dark:text-emerald-400">Surplus → FG Inventory</Label>
+                        <p className="text-sm font-semibold text-emerald-500">+{lineItemSurplus(item)} pcs</p>
+                      </div>
+                    </div>
+                    {lineItemSurplus(item) > 0 && (
+                      <p className="text-[10px] text-muted-foreground italic">
+                        Overproduction: extra {lineItemSurplus(item)} pcs will be added to Finished Goods inventory
+                        for future orders / resale.
+                      </p>
+                    )}
+
+                    {/* Line summary */}
+                    {lineItemQty(item) > 0 && item.unitPrice > 0 && (
                       <p className="text-[11px] text-muted-foreground text-right">
-                        Line: {formatINR(item.quantity * item.unitPrice)}
+                        Line: {formatINR(lineItemQty(item) * item.unitPrice)}
                         {item.unitCost > 0 && (
-                          <> · Cost: {formatINR(item.quantity * item.unitCost)} · Profit: {formatINR(item.quantity * (item.unitPrice - item.unitCost))}</>
+                          <> · Cost: {formatINR(lineItemQty(item) * item.unitCost)} · Profit: {formatINR(lineItemQty(item) * (item.unitPrice - item.unitCost))}</>
                         )}
                       </p>
                     )}
@@ -983,17 +1324,54 @@ export function SalesOrders() {
               </div>
             </div>
 
-            {/* Delivery & Discount */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {/* ── GST + Broker ──────────────────────────────────────────────── */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <div className="space-y-2">
-                <Label className="text-xs font-medium">Delivery Date</Label>
+                <Label className="text-xs font-medium">GST Type</Label>
+                <Select value={newGstType} onValueChange={(v) => setNewGstType(v as 'IntraState' | 'InterState')}>
+                  <SelectTrigger className="bg-muted/50 h-8 text-xs"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="IntraState">IntraState (CGST+SGST)</SelectItem>
+                    <SelectItem value="InterState">InterState (IGST)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label className="text-xs font-medium">GST %</Label>
                 <Input
-                  type="date"
+                  type="number"
                   className="h-8 text-sm bg-muted/50"
-                  value={newDeliveryDate}
-                  onChange={(e) => setNewDeliveryDate(e.target.value)}
+                  value={newGstPercent}
+                  onChange={(e) => setNewGstPercent(e.target.value)}
+                  min={0}
+                  step={0.5}
                 />
               </div>
+              <div className="space-y-2">
+                <Label className="text-xs font-medium">Broker Name <span className="text-muted-foreground">(optional)</span></Label>
+                <Input
+                  className="h-8 text-sm bg-muted/50"
+                  value={newBrokerName}
+                  onChange={(e) => setNewBrokerName(e.target.value)}
+                  placeholder="—"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-xs font-medium">Commission %</Label>
+                <Input
+                  type="number"
+                  className="h-8 text-sm bg-muted/50"
+                  value={newBrokerCommission}
+                  onChange={(e) => setNewBrokerCommission(e.target.value)}
+                  min={0}
+                  max={100}
+                  step={0.5}
+                />
+              </div>
+            </div>
+
+            {/* Discount + Notes */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div className="space-y-2">
                 <Label className="text-xs font-medium">Discount (%)</Label>
                 <Input
@@ -1006,25 +1384,23 @@ export function SalesOrders() {
                   step={0.5}
                 />
               </div>
+              <div className="space-y-2 sm:col-span-2">
+                <Label className="text-xs font-medium">Notes</Label>
+                <Input
+                  placeholder="Order notes or special instructions..."
+                  className="h-8 text-sm bg-muted/50"
+                  value={newNotes}
+                  onChange={(e) => setNewNotes(e.target.value)}
+                />
+              </div>
             </div>
 
-            {/* Notes */}
-            <div className="space-y-2">
-              <Label className="text-xs font-medium">Notes</Label>
-              <Textarea
-                placeholder="Order notes or special instructions..."
-                className="min-h-[60px] text-sm bg-muted/50 resize-none"
-                value={newNotes}
-                onChange={(e) => setNewNotes(e.target.value)}
-              />
-            </div>
-
-            {/* Order Summary */}
+            {/* ── Order Summary ─────────────────────────────────────────────── */}
             {createTotals.amount > 0 && (
               <div className="glass-card rounded-lg p-4 space-y-2">
                 <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Order Summary</h4>
                 <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Subtotal ({newItems.reduce((s, i) => s + i.quantity, 0)} items)</span>
+                  <span className="text-muted-foreground">Subtotal ({createTotals.qty} pcs)</span>
                   <span>{formatINR(createTotals.amount)}</span>
                 </div>
                 {parseFloat(newDiscount) > 0 && (
@@ -1033,13 +1409,36 @@ export function SalesOrders() {
                     <span className="text-destructive">-{formatINR(discountAmt)}</span>
                   </div>
                 )}
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Taxable Amount</span>
+                  <span>{formatINR(taxableAmount)}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">
+                    GST {newGstPercent}% {newGstType === 'IntraState' ? '(CGST+SGST)' : '(IGST)'}
+                  </span>
+                  <span>{formatINR(totalGst)}</span>
+                </div>
                 <Separator className="my-1" />
                 <div className="flex justify-between font-semibold">
-                  <span>Total Amount</span>
-                  <span className="text-primary">{formatINR(finalAmount)}</span>
+                  <span>Grand Total</span>
+                  <span className="text-primary">{formatINR(grandTotal)}</span>
                 </div>
+                {commissionAmt > 0 && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Broker Commission ({newBrokerCommission}%)</span>
+                    <span className="text-destructive">-{formatINR(commissionAmt)}</span>
+                  </div>
+                )}
+                {commissionAmt > 0 && (
+                  <div className="flex justify-between font-semibold">
+                    <span>Net Receivable</span>
+                    <span className="text-primary">{formatINR(netPayable)}</span>
+                  </div>
+                )}
                 {createTotals.cost > 0 && (
                   <>
+                    <Separator className="my-1" />
                     <div className="flex justify-between text-sm">
                       <span className="text-muted-foreground">Total Cost</span>
                       <span>{formatINR(createTotals.cost)}</span>
@@ -1051,8 +1450,26 @@ export function SalesOrders() {
                     <div className="flex justify-between text-sm">
                       <span className="text-muted-foreground">Gross Margin</span>
                       <span className={profit >= 0 ? 'text-emerald-400' : 'text-red-400'}>
-                        {finalAmount > 0 ? ((profit / finalAmount) * 100).toFixed(1) : 0}%
+                        {taxableAmount > 0 ? ((profit / taxableAmount) * 100).toFixed(1) : 0}%
                       </span>
+                    </div>
+                  </>
+                )}
+                {/* Production summary */}
+                {(createTotals.productionQty > 0 || createTotals.surplusQty > 0) && (
+                  <>
+                    <Separator className="my-1" />
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Client Order Qty</span>
+                      <span className="font-semibold">{createTotals.qty} pcs</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Production Qty</span>
+                      <span className="font-semibold text-amber-500">{createTotals.productionQty} pcs</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Surplus → FG Inventory</span>
+                      <span className="font-semibold text-emerald-500">+{createTotals.surplusQty} pcs</span>
                     </div>
                   </>
                 )}

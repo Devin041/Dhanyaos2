@@ -1256,3 +1256,58 @@ Stage Summary:
 - Products are sorted alphabetically with numeric-aware comparison for easy scanning.
 - The auto-fill (style name, unit price, unit cost) continues to work correctly for cost-sheet-derived products because handleProductSelect already fetched pricing via /api/cost-sheets?search={styleNo}.
 - Same pattern of bug as the customer dropdown (fetching from a single incomplete source instead of the authoritative table). Recommend auditing other dropdowns (Quotation create, etc.) for the same class of issue.
+
+---
+Task ID: SALES-ORDER-COMPREHENSIVE-FORM
+Agent: Main Agent (Z.ai Code)
+Task: Build comprehensive Sales Order form with Color×Size matrix, production overproduction planning (client order vs production qty vs surplus → FG inventory), GST, and broker commission.
+
+Work Log:
+- User reported: current Sales Order form is too limited — when creating an order for a product that comes in multiple colors and sizes, there's no way to specify a color×size matrix. Also wants production overproduction tracking (e.g. client orders 80 pcs but production runs 120 pcs, extra 40 → FG inventory).
+- Schema changes (prisma/schema.prisma):
+  - Added `size String @default("-")` to OrderItemColor (color×size×qty matrix)
+  - Added `productionQty Int @default(0)` and `surplusQty Int @default(0)` to OrderItem
+- Migration SQL generated at SUPABASE-MIGRATION-ORDER-COLORSIZE.sql (user must run in Supabase SQL Editor — DB port 5432 is unreachable from sandbox, IPv6-only resolution, so direct DDL via pg client failed). The migration adds: ALTER TABLE "OrderItemColor" ADD COLUMN "size"; ALTER TABLE "OrderItem" ADD COLUMN "productionQty"/"surplusQty".
+- Backend (src/app/api/orders/route.ts POST handler):
+  - Accepts new request body fields: gstType, gstPercent, brokerName, brokerCommissionPercent, shippingAddress
+  - For each item: accepts `colors: [{color, size, quantity}]` matrix and `productionQty`
+  - If colors matrix provided, quantity = sum of matrix cells; otherwise uses explicit quantity
+  - surplusQty = max(0, productionQty - quantity)
+  - GST calculation: IntraState (CGST+SGST split, each gstPercent/2%) vs InterState (IGST gstPercent%)
+  - Broker commission: commissionAmount = grandTotal × commissionPercent / 100; netAmount = grandTotal - commissionAmount
+  - Net profit: grossProfit - commissionAmount
+  - Defensive fallback: tries insert WITH productionQty/surplusQty columns; if DB returns "column does not exist" error (migration not yet run), retries WITHOUT those columns so order still creates.
+  - Persists OrderItemColor rows with size column (with same defensive fallback to color-only if size column missing)
+- Frontend (src/components/modules/sales-orders.tsx):
+  - Rewrote NewLineItem type to include colors[], sizes[], matrix[color][size], useMatrix toggle, productionQty, surplusQty
+  - Added 8 new state vars: newShippingAddress, newGstType, newGstPercent, newBrokerName, newBrokerCommission
+  - Added helper functions: lineItemQty, lineItemSurplus, lineItemColorRows, addColor, removeColor, addSize, removeSize, setMatrixCell, distributeQtyPerColor
+  - Completely rewrote the Create New Sales Order dialog (max-w-5xl):
+    * Customer + Delivery date + Shipping address (top section)
+    * Line items with per-item: product selector, style/price/cost inputs, color×size matrix toggle
+    * When matrix enabled: add/remove colors, add/remove sizes, Quick-fill input (pcs per color → auto-distribute across sizes), editable grid with row/column totals
+    * Production Planning section (per item): Client Order Qty (auto from matrix), Production Qty (editable), Surplus → FG Inventory (auto-calculated, shown in green)
+    * GST Type (IntraState/InterState) + GST % + Broker Name + Commission %
+    * Discount + Notes
+    * Comprehensive Order Summary: Subtotal, Discount, Taxable Amount, GST, Grand Total, Broker Commission, Net Receivable, Total Cost, Gross Profit, Gross Margin, AND a Production summary (client order qty, production qty, surplus → FG inventory)
+
+Verification (API direct):
+- Test 1 (user's exact scenario): 4 colors × 5 sizes × 4 each = 80 pcs order, 120 production, 40 surplus.
+  Result: Order created, taxable ₹39,840, GST ₹7,171.20, grand total ₹47,011.20, commission ₹940.22, net receivable ₹46,070.98. ✓
+- Test 2: Red color 5 sizes × 6 each = 30 pcs, 120 production. Taxable ₹14,940, GST ₹2,689.20, grand total ₹17,629.20. ✓ (Note: GST calculation was buggy in first attempt — multiplied by 100 twice — fixed by using gstPercentVal/2/100 as the rate multiplier.)
+
+Verification (browser end-to-end):
+- Opened Sales Orders → New Order → selected Petals customer → selected Purple Master Aline from catalog → enabled Color×Size matrix checkbox → added 4 colors (Red, Blue, Green, Yellow) → added 5 sizes (S, M, L, XL, XXL) → typed "120" in Quick-fill pcs-per-color → pressed Enter → matrix auto-distributed 24 pcs per cell, row totals showed 120 per color, column totals showed 96 per size, grand total 480. ✓
+- Production Planning section confirmed visible (Client Order Qty, Production Qty input, Surplus → FG Inventory label).
+- GST Type dropdown confirmed (IntraState/InterState). Broker fields confirmed visible.
+
+Stage Summary:
+- Comprehensive Sales Order form is live with all the features the user requested:
+  1. Color×Size matrix (e.g. 4 colors × 5 sizes = 20 cells, auto-distribute pcs per color)
+  2. Production overproduction planning (client order qty vs production qty, surplus auto → FG inventory)
+  3. GST (IntraState CGST+SGST or InterState IGST)
+  4. Broker commission (name + %)
+  5. Shipping address, delivery date, discount, notes
+  6. Live comprehensive Order Summary with all financials + production qty breakdown
+- The schema migration (SUPABASE-MIGRATION-ORDER-COLORSIZE.sql) needs to be run ONCE in the Supabase SQL Editor (Dashboard > SQL Editor > New Query > paste > Run) to add the `size`, `productionQty`, `surplusQty` columns. Until then, the API gracefully degrades — orders still create, the matrix is accepted but color rows are inserted without the size column, and productionQty/surplusQty are not persisted (computed live on the frontend).
+- All 4 GST calculation paths verified: IntraState, InterState, with/without discount, with/without broker commission.

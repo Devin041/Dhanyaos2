@@ -181,7 +181,11 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { customerId, items, deliveryDate, discountPercent, notes } = body
+    const {
+      customerId, items, deliveryDate, discountPercent, notes,
+      gstType, gstPercent, brokerName, brokerCommissionPercent,
+      shippingAddress,
+    } = body
 
     if (!customerId || !items || !Array.isArray(items) || items.length === 0) {
       return NextResponse.json({ error: 'Customer and at least one item are required' }, { status: 400 })
@@ -239,13 +243,41 @@ export async function POST(request: NextRequest) {
     }
 
     // Calculate totals for each item
-    const calculatedItems = items.map((item: { styleId?: string; styleNo?: string; styleName: string; quantity: number; unitPrice: number; unitCost: number }) => {
-      const quantity = Number(item.quantity) || 0
+    const calculatedItems = items.map((item: {
+      styleId?: string
+      styleNo?: string
+      styleName: string
+      quantity?: number
+      unitPrice?: number
+      unitCost?: number
+      productionQty?: number
+      colors?: Array<{ color: string; size?: string; quantity: number }>
+    }) => {
+      // If a color×size matrix was provided, the order quantity is the sum
+      // of all matrix cells. Otherwise use the explicit quantity field.
+      let quantity: number
+      let colorRows: Array<{ color: string; size: string; quantity: number }> = []
+      if (Array.isArray(item.colors) && item.colors.length > 0) {
+        colorRows = item.colors.map(c => ({
+          color: String(c.color || ''),
+          size: String(c.size || '-'),
+          quantity: Number(c.quantity) || 0,
+        }))
+        quantity = colorRows.reduce((s, r) => s + r.quantity, 0)
+      } else {
+        quantity = Number(item.quantity) || 0
+      }
+
       const unitPrice = Number(item.unitPrice) || 0
       const unitCost = Number(item.unitCost) || 0
       const totalAmount = quantity * unitPrice
       const totalCost = quantity * unitCost
       const profit = totalAmount - totalCost
+
+      // Production planning: default productionQty to order quantity if not set.
+      // surplus = production - order (extra pieces go to FG inventory).
+      const productionQty = Number(item.productionQty) || quantity
+      const surplusQty = Math.max(0, productionQty - quantity)
 
       // Resolve a valid Style FK: prefer the incoming styleId if it is a real
       // Style row, else fall back to styleNo lookup, else null.
@@ -265,6 +297,10 @@ export async function POST(request: NextRequest) {
         totalAmount: Math.round(totalAmount * 100) / 100,
         totalCost: Math.round(totalCost * 100) / 100,
         profit: Math.round(profit * 100) / 100,
+        productionQty,
+        surplusQty,
+        _colorRows: colorRows, // carried separately, not inserted into OrderItem
+        _styleNo: item.styleNo, // carried for image lookup
       }
     })
 
@@ -275,6 +311,32 @@ export async function POST(request: NextRequest) {
     const discountedAmount = totalAmount * (1 - discount / 100)
     const grossProfit = discountedAmount - totalCost
     const grossMargin = discountedAmount > 0 ? Math.round((grossProfit / discountedAmount) * 10000) / 100 : 0
+
+    // GST calculation
+    const gstTypeVal = gstType === 'InterState' ? 'InterState' : 'IntraState'
+    const gstPercentVal = Number(gstPercent) || 18
+    const taxableAmount = Math.round(discountedAmount * 100) / 100
+    let cgstAmount = 0, sgstAmount = 0, igstAmount = 0, totalGst = 0
+    if (gstTypeVal === 'IntraState') {
+      // CGST + SGST split the GST percent in half
+      // e.g. 18% GST → 9% CGST + 9% SGST → use gstPercentVal / 2 / 100 as multiplier
+      const halfRate = gstPercentVal / 2 / 100
+      const half = Math.round(taxableAmount * halfRate * 100) / 100
+      cgstAmount = half
+      sgstAmount = half
+      totalGst = Math.round((cgstAmount + sgstAmount) * 100) / 100
+    } else {
+      igstAmount = Math.round(taxableAmount * gstPercentVal / 100 * 100) / 100
+      totalGst = igstAmount
+    }
+    const grandTotal = Math.round((taxableAmount + totalGst) * 100) / 100
+
+    // Broker / Commission
+    const commissionPercent = Number(brokerCommissionPercent) || 0
+    const commissionAmount = Math.round(grandTotal * commissionPercent / 100 * 100) / 100
+    const netAmount = Math.round((grandTotal - commissionAmount) * 100) / 100
+    const netProfit = Math.round((grossProfit - commissionAmount) * 100) / 100
+    const netMargin = grandTotal > 0 ? Math.round((netProfit / grandTotal) * 10000) / 100 : 0
 
     // Generate order number: SO-YYYYMMDD-XXX
     const today = startOfDay(new Date())
@@ -307,11 +369,28 @@ export async function POST(request: NextRequest) {
         customerId,
         orderDate: nowIso,
         deliveryDate: deliveryDate ? new Date(deliveryDate).toISOString() : null,
+        shippingAddress: shippingAddress || null,
         status: 'Pending',
-        totalAmount: Math.round(discountedAmount * 100) / 100,
+        // GST
+        gstType: gstTypeVal,
+        gstPercent: gstPercentVal,
+        taxableAmount,
+        cgstAmount,
+        sgstAmount,
+        igstAmount,
+        totalGst,
+        // Broker / Commission
+        brokerName: brokerName || null,
+        commissionPercent,
+        commissionAmount,
+        netAmount,
+        // Totals
+        totalAmount: grandTotal,
         totalCost: Math.round(totalCost * 100) / 100,
         grossProfit: Math.round(grossProfit * 100) / 100,
         grossMargin,
+        netProfit,
+        netMargin,
         paymentStatus: 'Unpaid',
         paidAmount: 0,
         discountPercent: discount,
@@ -326,20 +405,84 @@ export async function POST(request: NextRequest) {
     // Create items sequentially
     // NOTE: OrderItem also has a NOT NULL `updatedAt` column (Prisma @updatedAt),
     // so we must set createdAt + updatedAt explicitly for each row.
-    const itemsWithOrderId = calculatedItems.map(item => ({
-      ...item,
-      salesOrderId: order.id,
-      createdAt: nowIso,
-      updatedAt: nowIso,
-    }))
-    const { data: createdItems, error: itemsErr } = await supabase
+    // Also: productionQty / surplusQty columns may not exist in the DB yet
+    // (requires running SUPABASE-MIGRATION-ORDER-COLORSIZE.sql). We try with
+    // them first; if that fails with a "column does not exist" error, we retry
+    // without those columns so the order still creates.
+    const itemsWithOrderId = calculatedItems.map(item => {
+      const { _colorRows, _styleNo, ...rest } = item
+      return {
+        ...rest,
+        salesOrderId: order.id,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      }
+    })
+    let createdItems: any[] | null = null
+    let itemsErr: any = null
+    const { data: itemsData, error: itemsErr1 } = await supabase
       .from('OrderItem')
       .insert(itemsWithOrderId)
       .select('*')
-    if (itemsErr) {
-      // Rollback: delete the order we just created
-      await supabase.from('SalesOrder').delete().eq('id', order.id)
-      throw itemsErr
+    if (itemsErr1) {
+      // Fallback: retry without productionQty/surplusQty (for DBs not yet migrated)
+      const msg = String(itemsErr1.message || '')
+      if (/productionQty|surplusQty|column .* does not exist/i.test(msg)) {
+        const stripped = itemsWithOrderId.map(({ productionQty, surplusQty, ...rest }: any) => rest)
+        const { data: itemsData2, error: itemsErr2 } = await supabase
+          .from('OrderItem')
+          .insert(stripped)
+          .select('*')
+        if (itemsErr2) {
+          await supabase.from('SalesOrder').delete().eq('id', order.id)
+          throw itemsErr2
+        }
+        createdItems = itemsData2
+      } else {
+        await supabase.from('SalesOrder').delete().eq('id', order.id)
+        throw itemsErr1
+      }
+    } else {
+      createdItems = itemsData
+    }
+    itemsErr = null
+
+    // Persist color×size breakdown rows into OrderItemColor.
+    // The `size` column requires the migration SQL. If it doesn't exist,
+    // we fall back to inserting color-only rows (size omitted).
+    const colorRows: Array<{ orderItemId: string; color: string; size: string; quantity: number }> = []
+    createdItems.forEach((item: any, idx: number) => {
+      const rows = calculatedItems[idx]._colorRows || []
+      for (const r of rows) {
+        colorRows.push({ orderItemId: item.id, color: r.color, size: r.size, quantity: r.quantity })
+      }
+    })
+    if (colorRows.length > 0) {
+      // Try with size column first
+      const withSize = colorRows.map(r => ({
+        orderItemId: r.orderItemId,
+        color: r.color,
+        size: r.size,
+        quantity: r.quantity,
+      }))
+      const { error: colorErr1 } = await supabase.from('OrderItemColor').insert(withSize)
+      if (colorErr1) {
+        const msg = String(colorErr1.message || '')
+        if (/size|column .* does not exist/i.test(msg)) {
+          // Fallback: insert without size column
+          const withoutSize = colorRows.map(r => ({
+            orderItemId: r.orderItemId,
+            color: r.color,
+            quantity: r.quantity,
+          }))
+          const { error: colorErr2 } = await supabase.from('OrderItemColor').insert(withoutSize)
+          if (colorErr2) {
+            console.error('OrderItemColor insert failed (non-fatal):', colorErr2.message)
+          }
+        } else {
+          console.error('OrderItemColor insert failed (non-fatal):', colorErr1.message)
+        }
+      }
     }
 
     return NextResponse.json({ order: { ...order, items: createdItems } }, { status: 201 })
