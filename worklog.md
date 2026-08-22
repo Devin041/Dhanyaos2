@@ -1311,3 +1311,52 @@ Stage Summary:
   6. Live comprehensive Order Summary with all financials + production qty breakdown
 - The schema migration (SUPABASE-MIGRATION-ORDER-COLORSIZE.sql) needs to be run ONCE in the Supabase SQL Editor (Dashboard > SQL Editor > New Query > paste > Run) to add the `size`, `productionQty`, `surplusQty` columns. Until then, the API gracefully degrades — orders still create, the matrix is accepted but color rows are inserted without the size column, and productionQty/surplusQty are not persisted (computed live on the frontend).
 - All 4 GST calculation paths verified: IntraState, InterState, with/without discount, with/without broker commission.
+
+---
+Task ID: MIGRATION-VERIFICATION
+Agent: Main Agent (Z.ai Code)
+Task: Verify that the Supabase migration (size, productionQty, surplusQty columns) was successfully applied and the comprehensive Sales Order form fully works end-to-end.
+
+Work Log:
+- User reported they ran the migration SQL in Supabase SQL Editor and shared a screenshot confirming it.
+- Analyzed screenshot via VLM: Supabase SQL Editor showing query results that list OrderItemColor columns (id, orderItemId, color, quantity, createdAt, updatedAt, **size**) and OrderItem columns (id, salesOrderId, styleId, styleName, quantity, unitPrice, unitCost, ...). The `size` column is now present.
+- Verified migration by direct DB probes via Supabase REST:
+  - POST to OrderItemColor with `size: "S"` → previously returned "Could not find the 'size' column" (PGRST204); now accepts `size` column (error moved to id NOT NULL, meaning size column EXISTS).
+  - POST to OrderItem with `productionQty: 120, surplusQty: 40` → previously fell back to no-productionQty insert; now accepts both columns (error moved to id NOT NULL, confirming both columns EXIST).
+- Ran full end-to-end API test with user's exact scenario:
+  - Client: Petals (id a4e3196e-6576-4aa6-931a-592dfd3f89fd)
+  - Product: Purple Master Aline (ALNE), ₹498 price, ₹444 cost
+  - Matrix: 4 colors (Red, Blue, Green, Yellow) × 5 sizes (S, M, L, XL, XXL) × 4 each = 80 pcs order
+  - Production Qty: 120 (surplus 40 → FG inventory)
+  - GST: IntraState 18% (CGST+SGST)
+  - Broker: Ravi, 2% commission
+  - Result: Order SO-20260822-001 created successfully ✓
+    * Taxable: ₹39,840.00 (80 × ₹498)
+    * GST: ₹7,171.20 (18% IntraState)
+    * Grand Total: ₹47,011.20
+    * Broker Commission: ₹940.22 (2%)
+    * Net Receivable: ₹46,070.98
+    * Gross Profit: ₹4,320.00
+    * Net Profit: ₹3,379.78
+    * Item quantity: 80 (matrix sum) ✓
+    * **productionQty: 120 ← now persisted in DB!** ✓
+    * **surplusQty: 40 ← now persisted in DB!** ✓
+- Verified color×size matrix persistence in OrderItemColor table:
+  - Queried OrderItemColor for the created order's item → returned 20 rows (4 colors × 5 sizes), each with quantity=4, color+size correctly stored.
+  - Sample: {color: "Blue", size: "L", quantity: 4}, {color: "Red", size: "XL", quantity: 4}, etc.
+- Browser end-to-end test (agent-browser):
+  - Opened Sales Orders → New Order → selected Petals customer → selected Purple Master Aline from catalog → enabled Color×Size matrix → added 4 colors + 5 sizes → Quick-filled pcs per color → set production qty → clicked Create Order → `POST /api/orders 201` → new order SO-20260822-002 appeared at top of orders table. ✓
+
+Stage Summary:
+- Migration is fully applied. All 3 new columns exist in Supabase:
+  - OrderItemColor.size (TEXT NOT NULL DEFAULT '-')
+  - OrderItem.productionQty (INTEGER NOT NULL DEFAULT 0)
+  - OrderItem.surplusQty (INTEGER NOT NULL DEFAULT 0)
+- Comprehensive Sales Order form is now 100% functional end-to-end:
+  - Color×Size matrix persists correctly (verified 20 rows in OrderItemColor for a 4×5 grid)
+  - Production overproduction planning persists correctly (productionQty=120, surplusQty=40 both saved)
+  - GST calculation correct (IntraState CGST+SGST split verified)
+  - Broker commission calculation correct (2% of grand total verified)
+  - All financial totals (taxable, GST, grand total, commission, net receivable, gross/net profit) compute and persist correctly
+- The defensive fallback logic in the API (retry without productionQty/surplusQty if columns missing, retry without size if OrderItemColor.size missing) is now dormant — all columns exist — but remains in place as a safety net for any future schema drift.
+- Cleaned up all test orders created during verification.
