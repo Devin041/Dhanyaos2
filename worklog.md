@@ -1360,3 +1360,35 @@ Stage Summary:
   - All financial totals (taxable, GST, grand total, commission, net receivable, gross/net profit) compute and persist correctly
 - The defensive fallback logic in the API (retry without productionQty/surplusQty if columns missing, retry without size if OrderItemColor.size missing) is now dormant — all columns exist — but remains in place as a safety net for any future schema drift.
 - Cleaned up all test orders created during verification.
+
+---
+Task ID: PO-CATALOG-VENDOR-GST-PRODUCTION-FIX
+Agent: Main Agent (Z.ai Code)
+Task: Fix 3 issues — (1) Purchase Order product dropdown missing newly costed products, (2) Vendor form missing GST field, (3) Production/Manufacturing module also needs full product catalog for manual job creation.
+
+Work Log:
+- User reported via screenshot (Create Purchase Order modal open): the Product/Style dropdown doesn't show all products from Costing module. Also asked for GST field in Vendor form. Also noted that when PO raises go to Manufacturing, all products should be selectable there too.
+
+Issue 1 — Purchase Order catalog fix (src/components/modules/purchase-orders.tsx):
+- Root cause: loadSamples() was fetching ONLY from /api/samples (Sample Catalog). Same bug class as the sales-orders catalog dropdown I fixed earlier.
+- Fix: rewrote loadSamples() to merge TWO sources — /api/samples (photos) + /api/cost-sheets?limit=500 (pricing + new products). Dedupe by styleNo using a Map. Sort alphabetically with numeric-aware comparison.
+- Verified via agent-browser: Before fix showed 26 products (EL-001 to EL-026). After fix shows 32 products including Purple Master Aline, style grey pattels, style Lemon petals, EL-01111, EL-102, EL-103 — all user's newly costed products.
+
+Issue 2 — Vendor GST + State fields (src/components/modules/vendors.tsx + src/app/api/vendors/route.ts):
+- Root cause: Vendor schema had no gstNumber/state columns. User needs these for GST-compliant purchase bills (GSTIN on vendor invoices, state for CGST+SGST vs IGST determination).
+- Schema: added `gstNumber String?` and `state String?` to Vendor model in prisma/schema.prisma.
+- Migration SQL: created SUPABASE-MIGRATION-VENDOR-GST.sql (ALTER TABLE "Vendor" ADD COLUMN IF NOT EXISTS "gstNumber" TEXT; ADD COLUMN IF NOT EXISTS "state" TEXT;). User needs to run this in Supabase SQL Editor.
+- API: updated POST and PATCH handlers to accept gstNumber + state. Added defensive fallback — tries insert/update WITH gstNumber/state; on "column does not exist" error, retries WITHOUT them (so vendor creation still works even if migration not yet run).
+- Frontend: added gstNumber + state to form state, openAddDialog reset, openEditDialog populate, handleSave payload. Added 2-column grid section in the dialog with GST Number input (15-char maxlength, auto-uppercase) and State input, both with helper text.
+- Verified via agent-browser: Vendor Add dialog now shows "GST Number (GSTIN)" + "State (Place of Supply)" fields with placeholders e.g. 24ABCDE1234F1Z5 and e.g. Gujarat.
+
+Issue 3 — Production module product catalog (src/components/modules/production.tsx):
+- Root cause: manual job creation form used a plain text Input for Style No (placeholder "e.g. ELY-KU-001"). No dropdown — user had to type the style number manually with no way to see/select from all available products.
+- Fix: added catalogProducts state + useEffect that loads merged Sample Catalog + Cost Sheets (same logic as PO). Replaced the Style No text Input with a Select dropdown that lists all catalog products. When user picks a product, styleNo + styleName both auto-fill. Kept a small text Input below the dropdown as "or type a custom style no" override for products not yet in the catalog.
+- Verified via agent-browser: Production → New Job → Manual Entry → Style No dropdown now shows all 32 products including Purple Master Aline, style grey pattels, style Lemon petals, EL-01111.
+
+Stage Summary:
+- Three dropdown/product-listing bugs fixed using the same pattern: merge Sample Catalog + Cost Sheets as the single source of truth for "available products", dedupe by styleNo, sort numerically.
+- Vendor form now supports GST Number + State for GST-compliant billing. Migration SQL ready at SUPABASE-MIGRATION-VENDOR-GST.sql — user needs to run it once in Supabase SQL Editor to persist these columns (until then, defensive fallback keeps vendor creation working).
+- Production manual job creation now has a proper product dropdown — no more manual typing of style numbers.
+- Same class of bug (fetching from a single incomplete source) has now been fixed in: sales-orders, purchase-orders, production. Recommend auditing Quotation create dialog and any other product-picker for the same issue.

@@ -74,6 +74,8 @@ export async function POST(request: NextRequest) {
       phone,
       email,
       address,
+      gstNumber,
+      state,
       specialization,
       paymentTerms,
     } = body
@@ -86,22 +88,46 @@ export async function POST(request: NextRequest) {
     }
 
     const now = new Date().toISOString()
-    const { data: vendor, error } = await supabase
+    // Build insert payload with optional gstNumber/state — these columns may
+    // not exist yet if the VENDOR-GST migration hasn't been run. We try with
+    // them; on "column does not exist" error we retry without them.
+    const basePayload = {
+      vendorName: vendorName.trim(),
+      contactPerson: contactPerson?.trim() || null,
+      phone: phone?.trim() || null,
+      email: email?.trim() || null,
+      address: address?.trim() || null,
+      specialization: specialization?.trim() || '',
+      paymentTerms: paymentTerms ? Number(paymentTerms) : 30,
+      status: 'Active',
+      createdAt: now,
+      updatedAt: now,
+    }
+    let vendor: any = null
+    let error: any = null
+    // First try WITH gstNumber/state
+    const { data: v1, error: e1 } = await supabase
       .from('Vendor')
-      .insert({
-        vendorName: vendorName.trim(),
-        contactPerson: contactPerson?.trim() || null,
-        phone: phone?.trim() || null,
-        email: email?.trim() || null,
-        address: address?.trim() || null,
-        specialization: specialization?.trim() || '',
-        paymentTerms: paymentTerms ? Number(paymentTerms) : 30,
-        status: 'Active',
-        createdAt: now,
-        updatedAt: now,
-      })
+      .insert({ ...basePayload, gstNumber: gstNumber?.trim() || null, state: state?.trim() || null })
       .select('*')
       .single()
+    if (e1) {
+      const msg = String(e1.message || '')
+      if (/gstNumber|state|column .* does not exist/i.test(msg)) {
+        // Fallback: insert without gstNumber/state (migration not yet applied)
+        const { data: v2, error: e2 } = await supabase
+          .from('Vendor')
+          .insert(basePayload)
+          .select('*')
+          .single()
+        if (e2) throw e2
+        vendor = v2
+      } else {
+        throw e1
+      }
+    } else {
+      vendor = v1
+    }
 
     if (error) throw error
 
@@ -128,7 +154,7 @@ export async function PATCH(request: NextRequest) {
     }
 
     const body = await request.json()
-    const { vendorName, contactPerson, phone, email, address, specialization, status, paymentTerms } = body
+    const { vendorName, contactPerson, phone, email, address, gstNumber, state, specialization, status, paymentTerms } = body
 
     const { data: existing, error: existErr } = await supabase
       .from('Vendor')
@@ -148,6 +174,8 @@ export async function PATCH(request: NextRequest) {
     if (phone !== undefined) updateData.phone = phone?.trim() || null
     if (email !== undefined) updateData.email = email?.trim() || null
     if (address !== undefined) updateData.address = address?.trim() || null
+    if (gstNumber !== undefined) updateData.gstNumber = gstNumber?.trim() || null
+    if (state !== undefined) updateData.state = state?.trim() || null
     if (specialization !== undefined) updateData.specialization = specialization?.trim() || ''
     if (paymentTerms !== undefined) updateData.paymentTerms = Number(paymentTerms)
     if (status) updateData.status = status
@@ -159,7 +187,24 @@ export async function PATCH(request: NextRequest) {
       .select('*')
       .single()
 
-    if (error) throw error
+    // If update fails because gstNumber/state column doesn't exist, retry without them
+    if (error) {
+      const msg = String(error.message || '')
+      if (/gstNumber|state|column .* does not exist/i.test(msg)) {
+        const { [updateData.gstNumber ? 'gstNumber' : '']: _g, [updateData.state ? 'state' : '']: _s, ...stripped } = updateData
+        delete stripped.gstNumber
+        delete stripped.state
+        const { data: v2, error: e2 } = await supabase
+          .from('Vendor')
+          .update(stripped)
+          .eq('id', id)
+          .select('*')
+          .single()
+        if (e2) throw e2
+        return NextResponse.json({ vendor: v2 })
+      }
+      throw error
+    }
 
     return NextResponse.json({ vendor })
   } catch (error) {

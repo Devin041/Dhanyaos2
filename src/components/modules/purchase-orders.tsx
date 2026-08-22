@@ -284,22 +284,52 @@ export function PurchaseOrders() {
   }, [])
 
   // Load samples for product selector (Sprint 1)
+  // IMPORTANT: same fix as sales-orders — merge Sample Catalog AND Cost Sheets
+  // so newly costed products also appear in the dropdown. Otherwise the user
+  // can't link a PO to a product that has a costing but no Sample Catalog entry.
   useEffect(() => {
     async function loadSamples() {
+      const merged = new Map<string, { id: string; styleNo: string; styleName: string; photoCount: number }>()
+
+      // Source 1: Sample Catalog
       try {
         const res = await fetch('/api/samples')
         const data = await res.json()
-        if (res.ok && Array.isArray(data)) {
-          setSamples(data.map((s: any) => ({
-            id: s.id,
-            styleNo: s.styleNo,
-            styleName: s.styleName,
-            photoCount: s.photoCount || 0,
-          })))
+        const arr = Array.isArray(data) ? data : (data.samples || [])
+        for (const s of arr) {
+          if (s.styleNo) {
+            merged.set(s.styleNo, {
+              id: s.id,
+              styleNo: s.styleNo,
+              styleName: s.styleName || s.styleNo,
+              photoCount: s.photoCount || 0,
+            })
+          }
         }
-      } catch {
-        // ignore
-      }
+      } catch { /* ignore */ }
+
+      // Source 2: Cost Sheets
+      try {
+        const res = await fetch('/api/cost-sheets?limit=500')
+        const data = await res.json()
+        const arr = data.costSheets || data || []
+        for (const c of arr) {
+          if (c.styleNo && !merged.has(c.styleNo)) {
+            merged.set(c.styleNo, {
+              id: c.id,
+              styleNo: c.styleNo,
+              styleName: c.styleName || c.styleNo,
+              photoCount: 0,
+            })
+          }
+        }
+      } catch { /* ignore */ }
+
+      // Sort alphabetically with numeric-aware comparison
+      const list = Array.from(merged.values()).sort((a, b) =>
+        (a.styleNo || '').localeCompare(b.styleNo || '', undefined, { numeric: true, sensitivity: 'base' })
+      )
+      setSamples(list)
     }
     loadSamples()
   }, [])

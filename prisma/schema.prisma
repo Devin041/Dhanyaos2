@@ -587,6 +587,8 @@ model Vendor {
   phone           String?
   email           String?
   address         String?
+  gstNumber       String?                 // GSTIN for tax invoices
+  state           String?                 // state (for GST place-of-supply)
   specialization  String          @default("")
   paymentTerms    Int             @default(30)  // Payment cycle in days (30, 45, 60, etc.)
   status          String          @default("Active")

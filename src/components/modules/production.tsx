@@ -307,6 +307,40 @@ export function ProductionModule() {
     endDate: '',
   })
 
+  // Product catalog (for manual job product selector — merged from Sample
+  // Catalog + Cost Sheets so ALL costed products appear, not just samples)
+  const [catalogProducts, setCatalogProducts] = useState<Array<{ id: string; styleNo: string; styleName: string }>>([])
+
+  // Fetch product catalog once on mount
+  useEffect(() => {
+    async function loadCatalog() {
+      const merged = new Map<string, { id: string; styleNo: string; styleName: string }>()
+      try {
+        const res = await fetch('/api/samples')
+        const data = await res.json()
+        const arr = Array.isArray(data) ? data : (data.samples || [])
+        for (const s of arr) {
+          if (s.styleNo) merged.set(s.styleNo, { id: s.id, styleNo: s.styleNo, styleName: s.styleName || s.styleNo })
+        }
+      } catch { /* ignore */ }
+      try {
+        const res = await fetch('/api/cost-sheets?limit=500')
+        const data = await res.json()
+        const arr = data.costSheets || data || []
+        for (const c of arr) {
+          if (c.styleNo && !merged.has(c.styleNo)) {
+            merged.set(c.styleNo, { id: c.id, styleNo: c.styleNo, styleName: c.styleName || c.styleNo })
+          }
+        }
+      } catch { /* ignore */ }
+      const list = Array.from(merged.values()).sort((a, b) =>
+        (a.styleNo || '').localeCompare(b.styleNo || '', undefined, { numeric: true, sensitivity: 'base' })
+      )
+      setCatalogProducts(list)
+    }
+    loadCatalog()
+  }, [])
+
   // Edit completed qty
   const [editQty, setEditQty] = useState('')
   const [editQtyId, setEditQtyId] = useState<string | null>(null)
@@ -896,12 +930,38 @@ export function ProductionModule() {
                 <div className="space-y-4">
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
-                      <Label className="text-xs text-muted-foreground">Style No *</Label>
+                      <Label className="text-xs text-muted-foreground">Style No * <span className="text-[10px] text-muted-foreground/70">(select from catalog)</span></Label>
+                      <Select
+                        value={manualJob.styleNo}
+                        onValueChange={(v) => {
+                          const p = catalogProducts.find(p => p.styleNo === v)
+                          setManualJob({
+                            ...manualJob,
+                            styleNo: v,
+                            styleName: p?.styleName || manualJob.styleName,
+                          })
+                        }}
+                      >
+                        <SelectTrigger className="bg-muted/50 border-border">
+                          <SelectValue placeholder="Select product from catalog..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {catalogProducts.map((p) => (
+                            <SelectItem key={p.id} value={p.styleNo}>
+                              <span className="flex items-center gap-2">
+                                <span className="font-medium">{p.styleNo}</span>
+                                <span className="text-muted-foreground text-[10px]">{p.styleName}</span>
+                              </span>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {/* Allow manual override if product not in catalog */}
                       <Input
-                        placeholder="e.g. ELY-KU-001"
+                        placeholder="...or type a custom style no"
                         value={manualJob.styleNo}
                         onChange={(e) => setManualJob({ ...manualJob, styleNo: e.target.value })}
-                        className="bg-muted/50 border-border"
+                        className="bg-muted/50 border-border text-xs h-7"
                       />
                     </div>
                     <div className="space-y-2">

@@ -505,6 +505,8 @@ export function VendorsModule() {
     phone: '',
     email: '',
     address: '',
+    gstNumber: '',
+    state: '',
     specialization: '',
     paymentTerms: '30',
     status: 'Active',
@@ -617,6 +619,8 @@ export function VendorsModule() {
       phone: '',
       email: '',
       address: '',
+      gstNumber: '',
+      state: '',
       specialization: '',
       paymentTerms: '30',
       status: 'Active',
@@ -635,6 +639,8 @@ export function VendorsModule() {
       phone: vendor.phone || '',
       email: vendor.email || '',
       address: vendor.address || '',
+      gstNumber: (vendor as any).gstNumber || '',
+      state: (vendor as any).state || '',
       specialization: vendor.specialization || '',
       paymentTerms: isCustom ? termsStr : termsStr,
       status: vendor.status,
@@ -653,6 +659,8 @@ export function VendorsModule() {
         phone: form.phone.trim() || null,
         email: form.email.trim() || null,
         address: form.address.trim() || null,
+        gstNumber: form.gstNumber.trim() || null,
+        state: form.state.trim() || null,
         specialization: form.specialization.trim() || null,
         paymentTerms: parseInt(form.paymentTerms, 10) || 30,
         status: form.status,
@@ -1370,6 +1378,39 @@ export function VendorsModule() {
                 }
                 className="bg-muted/50 border-border"
               />
+            </div>
+
+            {/* GST Number + State */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label className="text-xs">GST Number <span className="text-muted-foreground">(GSTIN)</span></Label>
+                <Input
+                  placeholder="e.g. 24ABCDE1234F1Z5"
+                  value={form.gstNumber}
+                  onChange={(e) =>
+                    setForm({ ...form, gstNumber: e.target.value.toUpperCase() })
+                  }
+                  className="bg-muted/50 border-border uppercase"
+                  maxLength={15}
+                />
+                <p className="text-[10px] text-muted-foreground">
+                  15-digit GSTIN — needed for GST-compliant purchase bills
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Label className="text-xs">State <span className="text-muted-foreground">(Place of Supply)</span></Label>
+                <Input
+                  placeholder="e.g. Gujarat"
+                  value={form.state}
+                  onChange={(e) =>
+                    setForm({ ...form, state: e.target.value })
+                  }
+                  className="bg-muted/50 border-border"
+                />
+                <p className="text-[10px] text-muted-foreground">
+                  Determines CGST+SGST vs IGST on bills
+                </p>
+              </div>
             </div>
 
             {/* Specialization */}
