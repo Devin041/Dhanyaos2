@@ -1392,3 +1392,51 @@ Stage Summary:
 - Vendor form now supports GST Number + State for GST-compliant billing. Migration SQL ready at SUPABASE-MIGRATION-VENDOR-GST.sql — user needs to run it once in Supabase SQL Editor to persist these columns (until then, defensive fallback keeps vendor creation working).
 - Production manual job creation now has a proper product dropdown — no more manual typing of style numbers.
 - Same class of bug (fetching from a single incomplete source) has now been fixed in: sales-orders, purchase-orders, production. Recommend auditing Quotation create dialog and any other product-picker for the same issue.
+
+---
+Task ID: MIGRATION-FINAL-VERIFICATION
+Agent: Main Agent (Z.ai Code)
+Task: Verify all migrations (Vendor GST, OrderItem productionQty/surplusQty, OrderItemColor size) are applied and everything works end-to-end.
+
+Work Log:
+- User confirmed they ran all migrations and shared screenshot.
+- Analyzed screenshot via VLM: Supabase SQL Editor showing Vendor columns query result with "id, vendorName, contactPerson, phone, email, address, specialization" — but gstNumber/state NOT in the visible result. This was a STALE query result (Supabase SQL Editor cached the old schema).
+- Verified actual DB state via direct REST API probes (insert with new columns → check if accepted or rejected with "column does not exist"):
+  1. Vendor with gstNumber + state → ACCEPTED (error moved to id NOT NULL, confirming both columns EXIST)
+  2. OrderItem with productionQty + surplusQty → ACCEPTED (both columns EXIST)
+  3. OrderItemColor with size → ACCEPTED (size column EXISTS)
+- Full end-to-end vendor creation test:
+  POST /api/vendors with gstNumber="24ABCDE1234F1Z5", state="Gujarat"
+  Result: Vendor created ✓
+  - GST Number: 24ABCDE1234F1Z5 ← persisted in DB ✓
+  - State: Gujarat ← persisted in DB ✓
+- Full end-to-end sales order test (color×size + production + GST + broker):
+  POST /api/orders with 2 colors × 5 sizes × 4 each = 40 pcs order, 120 production qty
+  Result: Order SO-20260822-004 created ✓
+  - Client Order Qty: 40 pcs (matrix sum)
+  - Production Qty: 120 pcs ← persisted ✓
+  - Surplus → FG Inv: 80 pcs (120 - 40) ← persisted ✓
+  - Taxable: ₹19,920.00 (40 × ₹498)
+  - GST 18% IntraState: ₹3,585.60
+  - Grand Total: ₹23,505.60
+  - Broker Commission (2%): ₹470.11
+  - Net Receivable: ₹23,035.49
+  - Net Profit: ₹1,689.89
+- Color×size matrix persistence verified:
+  Queried OrderItemColor for the created order's item → 10 rows returned (2 colors × 5 sizes), each with quantity=4, color+size correctly stored.
+  Sample: {color: "Blue", size: "L", quantity: 4}, {color: "Red", size: "XXL", quantity: 4}, etc.
+- Cleaned up all test data.
+
+Stage Summary:
+- ALL THREE migrations are successfully applied in Supabase:
+  1. Vendor.gstNumber (TEXT) ✓
+  2. Vendor.state (TEXT) ✓
+  3. OrderItem.productionQty (INTEGER NOT NULL DEFAULT 0) ✓
+  4. OrderItem.surplusQty (INTEGER NOT NULL DEFAULT 0) ✓
+  5. OrderItemColor.size (TEXT NOT NULL DEFAULT '-') ✓
+- Everything now fully works end-to-end:
+  - Vendor form: GST + State fields save correctly
+  - Sales Order form: Color×Size matrix persists, productionQty/surplusQty persist, GST + broker commission compute correctly
+  - Purchase Order form: All 32 products visible (Sample Catalog + Cost Sheets merged)
+  - Production module: Product catalog dropdown shows all 32 products
+- The screenshot user shared showed a stale Supabase SQL Editor result (it cached the pre-migration schema). The actual DB has the new columns — confirmed via direct REST API inserts.
