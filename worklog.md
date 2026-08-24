@@ -1477,3 +1477,26 @@ Stage Summary:
   1. PO form shows both suppliers AND vendors ✓
   2. Vendor form has Type field (customizable) ✓
   3. Supplier form Type field now supports custom types via + Custom button ✓
+
+---
+Task ID: PO-PAGE-NULL-CRASH-FIX
+Agent: Main Agent (Z.ai Code)
+Task: Fix "Cannot read properties of null (reading 'name')" crash on Purchase Orders page after migration (vendor-only POs have supplier=null).
+
+Work Log:
+- User reported PO page crash via screenshot (error: "Cannot read properties of null (reading 'name')").
+- Root cause: My earlier change made PurchaseOrder.supplierId nullable (for vendor-only POs). Three vendor-only test POs existed with supplierId=null, supplier=null. The frontend list rendering at line 778 accessed `po.supplier.name` directly without null-check → JavaScript threw "Cannot read properties of null" → React Error Boundary caught it → showed "Something went wrong".
+- Two-part fix:
+  1. **Backend GET /api/purchase-orders** — added vendor fetching (vendorIds → vendorMap with vendorName, vendorType, contactPerson, phone, paymentTerms) and included `vendorId` + `vendor` fields in the response. Now vendor-only POs return vendor info instead of null-everything.
+  2. **Frontend purchase-orders.tsx** — added `getCounterparty(po)` helper that returns supplier OR vendor (with kind tag, name, type, rating, paymentTerms, contact, phone, email). Replaced ALL unguarded `po.supplier.*` / `selectedPO.supplier.*` accesses in the list view (line 778) and detail panel (lines 1225-1234) with null-safe `getCounterparty()` calls. Added SUP/VEN badge tags (amber/violet) so users can tell at a glance whether a PO is supplier-based or vendor-based.
+- Updated PurchaseOrder interface: supplierId/supplier are now nullable, added vendorId/vendor fields.
+- Converted PODetail from empty interface extension (lint error) to type alias.
+- Verified via API: GET /api/purchase-orders now returns vendorId + vendor for vendor-only POs (e.g., PO-20260824-004 → vendor: Surat Dyeing Works, vendorType: Dyeing).
+- Verified via agent-browser: PO page loads successfully — 22 POs listed, no error. Vendor-only POs show "VEN | Surat Dyeing Works | Dyeing", supplier-based POs show "SUP | FineWear | 5/5".
+
+Stage Summary:
+- The "Something went wrong" crash on the Purchase Orders page is fully resolved.
+- Root cause was a missing null-check after I made supplierId nullable (necessary for vendor-only POs per the user's request).
+- The fix is comprehensive: the getCounterparty() helper ensures the app gracefully handles POs with supplier=null, vendor=null, or both set — no more null reference crashes.
+- Added visual SUP/VEN badges so users can distinguish supplier-based vs vendor-based POs at a glance.
+- Lint clean, no TypeScript errors.

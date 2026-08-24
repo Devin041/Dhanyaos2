@@ -90,8 +90,11 @@ interface CounterpartyOption {
 interface PurchaseOrder {
   id: string
   poNumber: string
-  supplierId: string
-  supplier: { name: string; supplierType: string; rating: number; paymentTerms: number }
+  supplierId: string | null
+  supplier: { name: string; supplierType: string; rating: number; paymentTerms: number } | null
+  // Vendor linkage (nullable — vendor-only POs have supplierId = null)
+  vendorId: string | null
+  vendor: { vendorName: string; vendorType: string; contactPerson: string | null; phone: string | null; paymentTerms: number } | null
   fabricName: string
   quantity: number
   unit: string
@@ -106,8 +109,48 @@ interface PurchaseOrder {
   updatedAt: string
 }
 
-interface PODetail extends PurchaseOrder {
-  supplier: Supplier
+// PODetail is the same shape as PurchaseOrder — kept as a type alias for
+// semantic clarity in the detail panel (both supplier and vendor are nullable).
+type PODetail = PurchaseOrder
+
+// Helper: returns the "counterparty" for a PO — supplier if set, else vendor.
+// Use this everywhere instead of po.supplier.* to avoid "Cannot read properties of null" crashes.
+function getCounterparty(po: PurchaseOrder) {
+  if (po.supplier) {
+    return {
+      kind: 'Supplier' as const,
+      name: po.supplier.name,
+      type: po.supplier.supplierType,
+      rating: po.supplier.rating,
+      paymentTerms: po.supplier.paymentTerms,
+      contactPerson: (po.supplier as any).contactPerson || null,
+      phone: (po.supplier as any).phone || null,
+      email: (po.supplier as any).email || null,
+    }
+  }
+  if (po.vendor) {
+    return {
+      kind: 'Vendor' as const,
+      name: po.vendor.vendorName,
+      type: po.vendor.vendorType,
+      rating: null,
+      paymentTerms: po.vendor.paymentTerms,
+      contactPerson: po.vendor.contactPerson,
+      phone: po.vendor.phone,
+      email: null,
+    }
+  }
+  // Neither set — shouldn't happen but guard anyway
+  return {
+    kind: 'Unknown' as const,
+    name: '— (no counterparty)',
+    type: '—',
+    rating: null,
+    paymentTerms: 0,
+    contactPerson: null,
+    phone: null,
+    email: null,
+  }
 }
 
 interface Summary {
@@ -775,11 +818,36 @@ export function PurchaseOrders() {
                       </TableCell>
                       <TableCell className="py-3">
                         <div className="flex flex-col gap-0.5">
-                          <span className="text-xs font-medium text-foreground">{po.supplier.name}</span>
-                          <div className="flex items-center gap-1">
-                            <Star className="h-2.5 w-2.5 fill-amber-400 text-amber-400" />
-                            <span className="text-[10px] text-muted-foreground">{po.supplier.rating}/5</span>
-                          </div>
+                          <span className="text-xs font-medium text-foreground">
+                            {(() => {
+                              const cp = getCounterparty(po)
+                              return (
+                                <>
+                                  {cp.kind !== 'Unknown' && (
+                                    <span className={`text-[8px] px-1 py-0.5 rounded font-medium mr-1.5 ${
+                                      cp.kind === 'Supplier'
+                                        ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+                                        : 'bg-violet-500/15 text-violet-600 dark:text-violet-400'
+                                    }`}>
+                                      {cp.kind === 'Supplier' ? 'SUP' : 'VEN'}
+                                    </span>
+                                  )}
+                                  {cp.name}
+                                </>
+                              )
+                            })()}
+                          </span>
+                          {(() => {
+                            const cp = getCounterparty(po)
+                            return cp.rating !== null ? (
+                              <div className="flex items-center gap-1">
+                                <Star className="h-2.5 w-2.5 fill-amber-400 text-amber-400" />
+                                <span className="text-[10px] text-muted-foreground">{cp.rating}/5</span>
+                              </div>
+                            ) : (
+                              <span className="text-[10px] text-muted-foreground">{cp.type}</span>
+                            )
+                          })()}
                         </div>
                       </TableCell>
                       <TableCell className="py-3 text-xs text-foreground/80">{po.fabricName}</TableCell>
@@ -1219,20 +1287,40 @@ export function PurchaseOrders() {
               {/* Supplier Details */}
               <Card className="glass-card border-border/40 p-4">
                 <p className="text-xs font-semibold text-muted-foreground mb-2 flex items-center gap-1.5">
-                  <Package className="h-3 w-3" /> Supplier
+                  <Package className="h-3 w-3" /> {getCounterparty(selectedPO).kind === 'Vendor' ? 'Vendor' : getCounterparty(selectedPO).kind === 'Supplier' ? 'Supplier' : 'Counterparty'}
                 </p>
                 <div className="space-y-1.5">
-                  <p className="text-sm font-medium text-foreground">{selectedPO.supplier.name}</p>
-                  <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
-                    <span>Type: {selectedPO.supplier.supplierType}</span>
-                    <span className="flex items-center gap-1">
-                      Rating: <Star className="h-2.5 w-2.5 fill-amber-400 text-amber-400" /> {selectedPO.supplier.rating}/5
-                    </span>
-                    <span>Terms: {selectedPO.supplier.paymentTerms} days</span>
-                    {selectedPO.supplier.contactPerson && <span>Contact: {selectedPO.supplier.contactPerson}</span>}
-                    {selectedPO.supplier.phone && <span>Phone: {selectedPO.supplier.phone}</span>}
-                    {selectedPO.supplier.email && <span className="col-span-2">Email: {selectedPO.supplier.email}</span>}
-                  </div>
+                  {(() => {
+                    const cp = getCounterparty(selectedPO)
+                    return (
+                      <>
+                        <p className="text-sm font-medium text-foreground flex items-center gap-1.5">
+                          {cp.kind !== 'Unknown' && (
+                            <span className={`text-[8px] px-1 py-0.5 rounded font-medium ${
+                              cp.kind === 'Supplier'
+                                ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+                                : 'bg-violet-500/15 text-violet-600 dark:text-violet-400'
+                            }`}>
+                              {cp.kind === 'Supplier' ? 'SUP' : 'VEN'}
+                            </span>
+                          )}
+                          {cp.name}
+                        </p>
+                        <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
+                          <span>Type: {cp.type}</span>
+                          {cp.rating !== null && (
+                            <span className="flex items-center gap-1">
+                              Rating: <Star className="h-2.5 w-2.5 fill-amber-400 text-amber-400" /> {cp.rating}/5
+                            </span>
+                          )}
+                          <span>Terms: {cp.paymentTerms} days</span>
+                          {cp.contactPerson && <span>Contact: {cp.contactPerson}</span>}
+                          {cp.phone && <span>Phone: {cp.phone}</span>}
+                          {cp.email && <span className="col-span-2">Email: {cp.email}</span>}
+                        </div>
+                      </>
+                    )
+                  })()}
                 </div>
               </Card>
 

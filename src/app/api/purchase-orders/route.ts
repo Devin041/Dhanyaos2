@@ -75,6 +75,19 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    // Fetch vendor details for orders (vendor-only POs have vendorId set)
+    const vendorIds = [...new Set(ordersRaw.map((o: any) => o.vendorId).filter(Boolean))]
+    let vendorMap: Record<string, any> = {}
+    if (vendorIds.length > 0) {
+      const { data: vendors } = await supabase
+        .from('Vendor')
+        .select('id, vendorName, vendorType, contactPerson, phone, paymentTerms')
+        .in('id', vendorIds)
+      if (vendors) {
+        vendorMap = Object.fromEntries(vendors.map((v: any) => [v.id, v]))
+      }
+    }
+
     // Summary KPIs
     const now = new Date()
     const monthStart = startOfMonth(now).toISOString()
@@ -112,6 +125,9 @@ export async function GET(request: NextRequest) {
         poNumber: o.poNumber,
         supplierId: o.supplierId,
         supplier: o.supplierId ? supplierMap[o.supplierId] || null : null,
+        // Vendor linkage (for vendor-only POs)
+        vendorId: o.vendorId || null,
+        vendor: o.vendorId ? vendorMap[o.vendorId] || null : null,
         styleNo: o.styleNo || null,
         styleName: o.styleName || null,
         costSheetId: o.costSheetId || null,
