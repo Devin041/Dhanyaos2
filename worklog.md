@@ -1605,3 +1605,34 @@ Work Log:
 Stage Summary:
 - Universal PO is fully functional end-to-end. Single PO now contains mixed items (Fabric + Goods + Accessory + Service) with full GST + broker commission calculation, poType auto-derivation (MIXED), and complete detail view with per-type breakdown.
 - Migration is applied. One small follow-up migration (SUPABASE-MIGRATION-PO-ITEM-EXTRA.sql) is needed for full product name display on goods items — but everything works without it (defensive fallbacks in place).
+
+---
+Task ID: PRODUCTION-ELIGIBLE-ORDERS-FIX
+Agent: Main Agent (Z.ai Code)
+Task: Fix "saare sales orders fetch hoke nahi aa rahe" in Production module's "From Sales Order" picker.
+
+Work Log:
+- User reported: Production module → New Job → "From Sales Order" only shows a subset of sales orders (not all).
+- Investigated /api/production/eligible-orders endpoint.
+- Found TWO bugs:
+  1. **Wrong table name**: Line 36-39 was querying `from('SalesOrderItem')` — but that table DOES NOT EXIST in Supabase. The actual table is `OrderItem` (per Prisma schema model `OrderItem`). The query was silently failing (Supabase returns empty data on missing relation, doesn't always throw), so `itemsMap` stayed empty → all orders showed 0 items → eligibility filter couldn't determine production progress correctly.
+  2. **Too-restrictive status filter**: Line 24 was `.in('status', ['Confirmed', 'Pending'])` — missing 'In Production' and 'In Progress' statuses which are also eligible (production hasn't finished for them). DB status distribution: Pending (4), Confirmed (14), In Production (14), In Progress (2), Delivered (62), Dispatched (38), Cancelled (55). The filter was excluding 30 eligible orders.
+
+Fix Applied:
+- Rewrote src/app/api/production/eligible-orders/route.ts:
+  - Changed `from('SalesOrderItem')` → `from('OrderItem')` (correct table name matching Prisma schema)
+  - Expanded status filter to `.in('status', ['Pending', 'Confirmed', 'In Production', 'In Progress'])` — added "In Production" and "In Progress" which were being excluded
+  - Added error logging for OrderItem fetch (previously silent failure)
+  - Added comment explaining the table-name gotcha so future developers don't repeat it
+  - Changed sort order from `orderDate asc` to `orderDate desc` (newest first — more useful when picking)
+  - Improved eligibility check: also match styleName when comparing production jobs (some jobs store styleName not styleNo)
+
+Verification:
+- Before fix: eligible-orders API returned 18 orders
+- After fix: eligible-orders API returns 34 orders (Pending 4 + Confirmed 14 + In Production 14 + In Progress 2)
+- Browser test: Production → New Job → "From Sales Order" tab now shows all 34 eligible orders across multiple customers (Petals, Raghini Textile, Suhani Exports, Anaya Wholesale, Trendy ethnic, PK Angency, Meera Fashions, etc.) with item counts visible.
+
+Stage Summary:
+- All eligible sales orders now appear in the Production module's "From Sales Order" picker.
+- Root cause was a classic "wrong table name" bug (SalesOrderItem vs OrderItem) silently returning empty results, combined with a too-narrow status filter that excluded "In Production" and "In Progress" orders.
+- Same pattern (silent failure on wrong table name) might affect other API routes that reference relation tables. Recommend auditing other endpoints that query child tables via wrong names.
