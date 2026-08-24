@@ -1771,3 +1771,55 @@ Stage Summary:
   5. Payment due date auto-calculated (today + terms)
 - Same defensive fallback pattern used throughout — works whether migration applied or not.
 - Migration SQL ready at SUPABASE-MIGRATION-FABRIC-RECEIPT.sql.
+
+---
+Task ID: FABRIC-RECEIPT-MIGRATION-VERIFICATION
+Agent: Main Agent (Z.ai Code)
+Task: Verify Fabric Receipt Ledger migration applied successfully and full end-to-end flow works (PO → GRN → FabricStock → FabricReceipt → Production auto-suggest → Payment terms).
+
+Work Log:
+- User confirmed they ran SUPABASE-MIGRATION-FABRIC-RECEIPT.sql in Supabase SQL Editor.
+- Verified via direct REST API probes — all new columns/tables exist:
+  1. FabricStock.color — accepted "Pink" ✓
+  2. FabricReceipt table — exists, accepted all fields ✓
+  3. PurchaseOrder.paymentTerms + paymentDueDate — accepted "120" + "2026-12-24" ✓
+  4. GrnItem.color + lotNumber — accepted "Pink" + "L1" ✓
+
+- Full end-to-end test (PO → GRN → Approve → FabricStock + FabricReceipt):
+  
+  Step 1: Created Universal PO PO-20260824-009 with paymentTerms=120:
+    - poType: FABRIC
+    - 4 line items: Silk × Pink/Maroon/Peach/Red × 40/60/70/80m
+    - Taxable: ₹62,500 | GST 18%: ₹11,250 | Grand: ₹73,750
+    - DB verified: paymentTerms=120, paymentDueDate=2026-12-22 (120 days from 24 Aug) ✓
+  
+  Step 2: Created GRN GRN-20260824-002 against that PO:
+    - 2 items: Silk Pink (LOT-A, 40m received, 40 accepted) + Silk Maroon (LOT-A, 60m received, 58 accepted, 2 rejected QC)
+    - GRN form pre-filled ALL PO line items (color + lot per item) ✓
+  
+  Step 3: Approved GRN → FabricStock updated + FabricReceipt created:
+    - FabricStock: 
+      * Silk | Maroon | LOT-A | 58m available | ₹250/m
+      * Silk | Pink | LOT-A | 40m available | ₹250/m
+    - FabricReceipt audit ledger (2 rows):
+      * Silk Pink: 40m | from PO-20260824-009 via GRN-20260824-002 | supplier: FineWear | received: 2026-08-24
+      * Silk Maroon: 58m (60 received, 2 rejected) | from PO-20260824-009 via GRN-20260824-002 | supplier: FineWear | received: 2026-08-24
+
+- Browser verification:
+  - Fabric Stock page: shows Silk entries with FineWear supplier + LOT-A ✓
+  - Production → New Job → Manual Entry → "Fabric (from stock)" dropdown:
+    * "Silk · Maroon · Lot LOT-A | 58m available · ₹250/m"
+    * "Silk · Pink · Lot LOT-A | 40m available · ₹250/m"
+    * (Plus 10+ other fabrics)
+  - Production fabric auto-suggest now pulls from ACTUAL received fabric (via GRN), not just manually-entered stock ✓
+
+Stage Summary:
+- Full end-to-end flow is working perfectly:
+  1. PO raised with fabric items (color-wise) + payment terms (120 days → due date auto-calculated)
+  2. Fabric received via GRN against PO — pre-fills ALL PO line items with colors + lot
+  3. GRN approve → updates FabricStock (color-wise) + creates FabricReceipt (audit ledger with poId, grnId, color, lot, qty, rate, date)
+  4. Production → fabric auto-suggest shows ACTUAL received fabric with color/lot/meters/rate
+  5. Payment due date auto-calculated (today + paymentTerms)
+- User can now answer: "yeh 40m Pink Silk kis PO se aaya?" → "PO-20260824-009 via GRN-20260824-002 from FineWear on 24 Aug"
+- This was the user's exact requirement — fully delivered.
+- Cleaned up test data (cancelled test PO).
