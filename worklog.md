@@ -1919,3 +1919,33 @@ Stage Summary:
 - GRN PO filter fixed: all non-cancelled POs now appear in GRN dropdown
 - End-to-end flow is now automated:
   PO → GRN → FabricStock (color/lot) → Production (auto-suggest + auto-calc) → Fabric consumption (auto) → FG entry (auto)
+
+---
+Task ID: GRN-UX-REDESIGN
+Agent: Main Agent (Z.ai Code)
+Task: Redesign GRN create dialog UX — wider dialog, better table layout, improved spacing, 3-column top section, 2-column remarks/notes.
+
+Work Log:
+- User reported GRN form UX was poor — table columns cramped, layout not readable.
+- VLM analysis confirmed: dialog too narrow (sm:max-w-2xl = 672px), table columns suffocated, poor vertical rhythm, no visual hierarchy.
+- Redesigned src/components/modules/grn.tsx Create Dialog:
+  1. Widened dialog from `sm:max-w-2xl` → `sm:max-w-5xl` (672px → 1024px)
+  2. Top section: PO Reference + Supplier + Received Date now in 3-column grid (was stacked vertically)
+  3. Added "✓ PO selected — items auto-filled below" confirmation when PO selected
+  4. Line Items section: added Layers icon + row count badge
+  5. "Add Item" button made more prominent (primary color border)
+  6. Table column widths increased: Fabric 140→160px, Color 90→100px, numeric columns 80→90px, Rate 90→100px, Value 100→110px
+  7. Added summary footer: "Total received: X units · Accepted: Y · Rejected: Z" + "Total Value: ₹X"
+  8. Quality Remarks + Notes now in 2-column grid (was stacked)
+  9. Textareas: resize-none added, bg-muted/50 for consistent styling
+  10. DialogFooter: border-top added for visual separation
+  11. Added Package + Layers icons from lucide-react
+- VLM rated the redesigned form 8.5/10 (Excellent) — "highly readable, well-proportioned columns, efficient use of horizontal space"
+
+Stage Summary:
+- GRN create dialog UX completely redesigned — wider, cleaner, more professional.
+- Top section in 3-column grid (PO + Supplier + Date side by side)
+- Table columns wider and properly proportioned
+- Summary footer with live totals (received/accepted/rejected/value)
+- Quality Remarks + Notes side by side (2-column grid)
+- VLM verified: 8.5/10 rating, all UX issues resolved.

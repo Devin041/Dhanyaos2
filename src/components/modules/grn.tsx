@@ -43,6 +43,8 @@ import {
   Search,
   Plus,
   PackageCheck,
+  Package,
+  Layers,
   Eye,
   CheckCircle2,
   XCircle,
@@ -595,15 +597,15 @@ export function GrnModule() {
       <Table>
         <TableHeader>
           <TableRow className="border-border/50 hover:bg-transparent">
-            <TableHead className="text-[11px] font-semibold text-muted-foreground min-w-[140px]">Fabric</TableHead>
-            <TableHead className="text-[11px] font-semibold text-muted-foreground w-[90px]">Color</TableHead>
-            <TableHead className="text-[11px] font-semibold text-muted-foreground w-[80px]">Lot</TableHead>
-            <TableHead className="text-[11px] font-semibold text-muted-foreground text-right w-[80px]">Ordered</TableHead>
-            <TableHead className="text-[11px] font-semibold text-muted-foreground text-right w-[80px]">Received</TableHead>
-            <TableHead className="text-[11px] font-semibold text-muted-foreground text-right w-[80px]">Accepted</TableHead>
-            <TableHead className="text-[11px] font-semibold text-muted-foreground text-right w-[80px]">Rejected</TableHead>
-            <TableHead className="text-[11px] font-semibold text-muted-foreground text-right w-[90px]">Rate/Unit</TableHead>
-            <TableHead className="text-[11px] font-semibold text-muted-foreground text-right w-[100px]">Value</TableHead>
+            <TableHead className="text-[11px] font-semibold text-muted-foreground min-w-[160px]">Fabric</TableHead>
+            <TableHead className="text-[11px] font-semibold text-muted-foreground w-[100px]">Color</TableHead>
+            <TableHead className="text-[11px] font-semibold text-muted-foreground w-[90px]">Lot</TableHead>
+            <TableHead className="text-[11px] font-semibold text-muted-foreground text-right w-[90px]">Ordered</TableHead>
+            <TableHead className="text-[11px] font-semibold text-muted-foreground text-right w-[90px]">Received</TableHead>
+            <TableHead className="text-[11px] font-semibold text-muted-foreground text-right w-[90px]">Accepted</TableHead>
+            <TableHead className="text-[11px] font-semibold text-muted-foreground text-right w-[90px]">Rejected</TableHead>
+            <TableHead className="text-[11px] font-semibold text-muted-foreground text-right w-[100px]">Rate/Unit</TableHead>
+            <TableHead className="text-[11px] font-semibold text-muted-foreground text-right w-[110px]">Value</TableHead>
             {editable && <TableHead className="text-[11px] font-semibold text-muted-foreground w-32">Defects</TableHead>}
             {editable && <TableHead className="w-8" />}
           </TableRow>
@@ -966,76 +968,87 @@ export function GrnModule() {
 
       {/* ─── Create Dialog ───────────────────────────────────────────── */}
       <Dialog open={createOpen} onOpenChange={(open) => { setCreateOpen(open); if (!open) resetForm() }}>
-        <DialogContent className="glass-card border-border/50 sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="glass-card border-border/50 sm:max-w-5xl max-h-[92vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="text-base">New Goods Received Note</DialogTitle>
+            <DialogTitle className="text-base flex items-center gap-2">
+              <Package className="h-4 w-4 text-primary" />
+              New Goods Received Note
+            </DialogTitle>
             <DialogDescription className="text-xs">
-              Record incoming fabric against a purchase order or as a direct receipt.
+              Record incoming fabric against a purchase order or as a direct receipt. Fabric stock updates automatically on approval.
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-2">
-            {/* PO Reference */}
-            <div className="space-y-1.5">
-              <Label className="text-xs font-medium">PO Reference (optional)</Label>
-              <Select value={form.poId} onValueChange={handlePOSelect}>
-                <SelectTrigger className="h-8 text-xs">
-                  <SelectValue placeholder="Select a purchase order..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {purchaseOrders.map((po) => (
-                    <SelectItem key={po.id} value={po.id} className="text-xs">
-                      {po.poNumber} — {(po.supplier?.name) || (po.vendor?.vendorName) || po.supplierName || '—'} — {po.fabricName} ({po.quantity} {po.unit})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            {/* Top section: PO + Supplier + Date in a 3-column grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {/* PO Reference */}
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium">PO Reference <span className="text-muted-foreground">(optional)</span></Label>
+                <Select value={form.poId} onValueChange={handlePOSelect}>
+                  <SelectTrigger className="h-9 text-xs bg-muted/50">
+                    <SelectValue placeholder="Select a PO..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {purchaseOrders.map((po) => (
+                      <SelectItem key={po.id} value={po.id} className="text-xs">
+                        {po.poNumber} — {(po.supplier?.name) || (po.vendor?.vendorName) || po.supplierName || '—'} — {po.fabricName}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {form.poId && (
+                  <p className="text-[10px] text-emerald-500">✓ PO selected — items auto-filled below</p>
+                )}
+              </div>
 
-            {/* Supplier */}
-            <div className="space-y-1.5">
-              <Label className="text-xs font-medium">Supplier</Label>
-              <div className="flex gap-2">
+              {/* Supplier */}
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium">Supplier / Vendor</Label>
                 <Select value={form.supplierId} onValueChange={handleSupplierSelect}>
-                  <SelectTrigger className="h-8 text-xs flex-1">
+                  <SelectTrigger className="h-9 text-xs bg-muted/50">
                     <SelectValue placeholder="Select supplier..." />
                   </SelectTrigger>
                   <SelectContent>
                     {suppliers.map((s) => (
                       <SelectItem key={s.id} value={s.id} className="text-xs">
-                        {s.name}
+                        {s.name} <span className="text-muted-foreground">({s.supplierType})</span>
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
                 <Input
-                  className="h-8 text-xs flex-1"
-                  placeholder="or type supplier name"
+                  className="h-8 text-xs bg-muted/50"
+                  placeholder="or type name manually"
                   value={form.supplierName}
                   onChange={(e) => setForm((prev) => ({ ...prev, supplierName: e.target.value }))}
                 />
               </div>
+
+              {/* Received Date */}
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium">Received Date</Label>
+                <Input
+                  type="date"
+                  className="h-9 text-xs bg-muted/50"
+                  value={form.receivedDate}
+                  onChange={(e) => setForm((prev) => ({ ...prev, receivedDate: e.target.value }))}
+                />
+              </div>
             </div>
 
-            {/* Received Date */}
-            <div className="space-y-1.5">
-              <Label className="text-xs font-medium">Received Date</Label>
-              <Input
-                type="date"
-                className="h-8 text-xs"
-                value={form.receivedDate}
-                onChange={(e) => setForm((prev) => ({ ...prev, receivedDate: e.target.value }))}
-              />
-            </div>
-
-            {/* Items */}
+            {/* Items section */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <Label className="text-xs font-medium">Items</Label>
+                <Label className="text-xs font-medium flex items-center gap-1.5">
+                  <Layers className="h-3 w-3" />
+                  Line Items
+                  <span className="text-muted-foreground text-[10px]">({items.length} rows)</span>
+                </Label>
                 <Button
                   variant="outline"
                   size="sm"
-                  className="h-6 gap-1 text-[11px]"
+                  className="h-7 gap-1 text-[11px] text-primary border-primary/30"
                   onClick={addItem}
                 >
                   <Plus className="h-3 w-3" />
@@ -1043,42 +1056,47 @@ export function GrnModule() {
                 </Button>
               </div>
               {renderItemTable(true)}
-              <div className="flex justify-end">
+              <div className="flex items-center justify-between pt-1 border-t border-border/30">
+                <span className="text-[10px] text-muted-foreground">
+                  Total received: <span className="font-medium text-foreground">{items.reduce((s, i) => s + (i.receivedQty || 0), 0)} units</span>
+                  {' · '}Accepted: <span className="font-medium text-emerald-500">{items.reduce((s, i) => s + (i.acceptedQty || 0), 0)}</span>
+                  {' · '}Rejected: <span className="font-medium text-red-500">{items.reduce((s, i) => s + (i.rejectedQty || 0), 0)}</span>
+                </span>
                 <span className="text-xs text-muted-foreground">
                   Total Value:{' '}
-                  <span className="font-semibold text-foreground">{formatINR(totalFormValue)}</span>
+                  <span className="font-bold text-primary text-sm">{formatINR(totalFormValue)}</span>
                 </span>
               </div>
             </div>
 
-            {/* Quality Remarks */}
-            <div className="space-y-1.5">
-              <Label className="text-xs font-medium">Quality Remarks</Label>
-              <Textarea
-                className="text-xs min-h-[60px]"
-                placeholder="Overall quality observations..."
-                value={form.qualityRemarks}
-                onChange={(e) => setForm((prev) => ({ ...prev, qualityRemarks: e.target.value }))}
-              />
-            </div>
-
-            {/* Notes */}
-            <div className="space-y-1.5">
-              <Label className="text-xs font-medium">Notes</Label>
-              <Textarea
-                className="text-xs min-h-[60px]"
-                placeholder="Additional notes..."
-                value={form.notes}
-                onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))}
-              />
+            {/* Quality Remarks + Notes in 2-column grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium">Quality Remarks</Label>
+                <Textarea
+                  className="text-xs min-h-[60px] bg-muted/50 resize-none"
+                  placeholder="Overall quality observations..."
+                  value={form.qualityRemarks}
+                  onChange={(e) => setForm((prev) => ({ ...prev, qualityRemarks: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium">Notes</Label>
+                <Textarea
+                  className="text-xs min-h-[60px] bg-muted/50 resize-none"
+                  placeholder="Additional notes..."
+                  value={form.notes}
+                  onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))}
+                />
+              </div>
             </div>
           </div>
 
-          <DialogFooter className="gap-2 pt-2">
+          <DialogFooter className="gap-2 pt-2 border-t border-border/30">
             <Button variant="outline" size="sm" onClick={() => { setCreateOpen(false); resetForm() }}>
               Cancel
             </Button>
-            <Button size="sm" onClick={handleCreate} disabled={submitting}>
+            <Button size="sm" onClick={handleCreate} disabled={submitting} className="gap-1.5">
               {submitting ? 'Creating...' : 'Create GRN'}
             </Button>
           </DialogFooter>
