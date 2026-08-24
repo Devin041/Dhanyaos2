@@ -283,6 +283,9 @@ export function PurchaseOrders() {
   const [newDiscount, setNewDiscount] = useState('0')
   // Payment terms (NEW — auto-copied from supplier when counterparty selected)
   const [newPaymentTerms, setNewPaymentTerms] = useState('30')
+  // Sales Order linkage (NEW — PO can be linked to a SO for product-wise tracking)
+  const [newSalesOrderId, setNewSalesOrderId] = useState('')
+  const [salesOrders, setSalesOrders] = useState<Array<{ id: string; orderNo: string; customerName: string; styleNo: string | null; styleName: string | null; status: string }>>([])
 
   // Action state
   const [actionLoading, setActionLoading] = useState(false)
@@ -393,6 +396,29 @@ export function PurchaseOrders() {
       } catch { /* ignore */ }
     }
     loadCounterparties()
+
+    // Fetch sales orders for the SO linkage dropdown (only active ones —
+    // exclude Cancelled/Completed/Dispatched since those don't need procurement)
+    async function loadSalesOrders() {
+      try {
+        const res = await fetch('/api/orders?limit=200')
+        if (res.ok) {
+          const data = await res.json()
+          const orders = (data.orders || []).filter((o: any) =>
+            !['Cancelled', 'Completed', 'Dispatched'].includes(o.status)
+          )
+          setSalesOrders(orders.map((o: any) => ({
+            id: o.id,
+            orderNo: o.orderNo,
+            customerName: o.customer?.companyName || o.customer?.buyerName || '—',
+            styleNo: o.items?.[0]?.styleNo || o.items?.[0]?.styleName || null,
+            styleName: o.items?.[0]?.styleName || null,
+            status: o.status,
+          })))
+        }
+      } catch { /* ignore */ }
+    }
+    loadSalesOrders()
   }, [])
 
   // Load samples for product selector (Sprint 1)
@@ -525,6 +551,8 @@ export function PurchaseOrders() {
           discountPercent: parseFloat(newDiscount) || 0,
           // Payment terms (NEW — auto-calculated due date on backend)
           paymentTerms: parseInt(newPaymentTerms) || 30,
+          // Sales Order linkage (NEW — for product-wise procurement tracking)
+          salesOrderId: newSalesOrderId || undefined,
         }
         const res = await fetch('/api/purchase-orders', {
           method: 'POST',
@@ -542,6 +570,7 @@ export function PurchaseOrders() {
           setNewGstType('IntraState'); setNewGstPercent('18')
           setNewBrokerName(''); setNewBrokerCommission('0'); setNewDiscount('0')
           setNewPaymentTerms('30')
+          setNewSalesOrderId('')
           fetchOrders()
         } else {
           toast.error(data.error || 'Failed to create purchase order')
@@ -1176,6 +1205,57 @@ export function PurchaseOrders() {
             {/* ─── Universal PO mode (line items + GST + broker) ─── */}
             {useUniversalPO && (
               <div className="space-y-3">
+                {/* Sales Order linkage (NEW — link this PO to a specific SO for
+                    product-wise procurement tracking) */}
+                {salesOrders.length > 0 && (
+                  <div className="space-y-1.5">
+                    <Label className="text-[10px] font-medium text-muted-foreground">
+                      Linked Sales Order <span className="text-muted-foreground/70">(optional — for product-wise tracking)</span>
+                    </Label>
+                    <Select
+                      value={newSalesOrderId}
+                      onValueChange={(v) => {
+                        setNewSalesOrderId(v)
+                        // Auto-fill product info from the selected SO
+                        const so = salesOrders.find(s => s.id === v)
+                        if (so) {
+                          setSelectedStyleNo(so.styleNo || '')
+                          setSelectedStyleName(so.styleName || '')
+                        }
+                      }}
+                    >
+                      <SelectTrigger className="h-8 text-xs bg-muted/50">
+                        <SelectValue placeholder="Select a sales order (optional)..." />
+                      </SelectTrigger>
+                      <SelectContent className="max-h-72">
+                        {salesOrders.map((so) => (
+                          <SelectItem key={so.id} value={so.id} className="text-xs">
+                            <span className="flex items-center gap-1.5">
+                              <span className="font-medium">{so.orderNo}</span>
+                              <span className="text-muted-foreground">· {so.customerName}</span>
+                              {so.styleNo && (
+                                <span className="text-muted-foreground/70 text-[10px]">· {so.styleNo}</span>
+                              )}
+                              <span className={`text-[8px] px-1 py-0.5 rounded ${
+                                so.status === 'Confirmed' ? 'bg-emerald-500/15 text-emerald-600' :
+                                so.status === 'Pending' ? 'bg-amber-500/15 text-amber-600' :
+                                'bg-sky-500/15 text-sky-600'
+                              }`}>
+                                {so.status}
+                              </span>
+                            </span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {newSalesOrderId && (
+                      <p className="text-[10px] text-emerald-500">
+                        ✓ Linked to SO — procurement cost will be tracked against this order
+                      </p>
+                    )}
+                  </div>
+                )}
+
                 <POLineItemBuilder
                   items={universalItems}
                   onChange={setUniversalItems}

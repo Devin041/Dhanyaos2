@@ -169,6 +169,8 @@ export async function GET(request: NextRequest) {
         // Payment terms (NEW)
         paymentTerms: o.paymentTerms || 30,
         paymentDueDate: o.paymentDueDate ? format(new Date(o.paymentDueDate), 'yyyy-MM-dd') : null,
+        // Sales Order linkage (NEW — PO can be linked to a SO for tracking)
+        salesOrderId: o.salesOrderId || null,
         // Universal line items (each item has its own type)
         items: itemsByPo[o.id] || [],
         expectedDelivery: o.expectedDelivery ? format(new Date(o.expectedDelivery), 'yyyy-MM-dd') : null,
@@ -226,6 +228,8 @@ export async function POST(request: NextRequest) {
       discountPercent,
       // Payment terms (NEW — copied from supplier, editable)
       paymentTerms,
+      // Sales Order linkage (NEW — PO can be linked to a SO for tracking)
+      salesOrderId,
     } = body
 
     // Support both legacy single-fabric and new universal line items
@@ -382,6 +386,7 @@ export async function POST(request: NextRequest) {
     if (poTypeVal) insertBase.poType = poTypeVal
     if (supplierId) insertBase.supplierId = supplierId
     if (notes) insertBase.notes = notes
+    if (salesOrderId) insertBase.salesOrderId = salesOrderId
 
     let po: any = null
     // Insert with retry-without-new-columns fallback
@@ -397,7 +402,7 @@ export async function POST(request: NextRequest) {
     // PostgREST complains about a missing column (PGRST204 / "Could not find
     // the 'X' column"), we progressively strip the offending columns and retry.
     // This makes the API resilient to migrations not being applied yet.
-    const NEW_COLUMNS = ['poType', 'vendorId', 'brokerName', 'commissionPercent', 'commissionAmount', 'netAmount', 'notes', 'paymentTerms', 'paymentDueDate']
+    const NEW_COLUMNS = ['poType', 'vendorId', 'brokerName', 'commissionPercent', 'commissionAmount', 'netAmount', 'notes', 'paymentTerms', 'paymentDueDate', 'salesOrderId']
 
     if (vendorId) insertBase.vendorId = vendorId
     let currentPayload = { ...insertBase }
@@ -511,6 +516,7 @@ export async function POST(request: NextRequest) {
         supplier: supplier || null,
         vendorId: po.vendorId || null,
         vendor: vendor || null,
+        salesOrderId: po.salesOrderId || salesOrderId || null,
         styleNo: styleNo || null,
         styleName: styleName || null,
         costSheetId: costSheetId || null,

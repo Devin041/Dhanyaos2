@@ -712,11 +712,26 @@ export function SalesOrders() {
 
   // ─── Order Detail Actions ─────────────────────────────────────────────────
 
+  // Linked POs for the detail view (POs raised against this SO)
+  const [linkedPOs, setLinkedPOs] = useState<any[]>([])
+  const [linkedPOsLoading, setLinkedPOsLoading] = useState(false)
+
   const openDetail = async (order: Order) => {
     setDetailOrder(order)
     setDetailOpen(true)
     setEditNotes(order.notes || '')
     setPayAmount('')
+    // Fetch linked POs (purchase orders raised against this sales order)
+    setLinkedPOsLoading(true)
+    try {
+      const res = await fetch('/api/purchase-orders?limit=500')
+      if (res.ok) {
+        const data = await res.json()
+        const linked = (data.orders || []).filter((po: any) => po.salesOrderId === order.id)
+        setLinkedPOs(linked)
+      }
+    } catch { /* ignore */ }
+    setLinkedPOsLoading(false)
   }
 
   const handleStatusChange = async (orderId: string, newStatus: string) => {
@@ -1793,6 +1808,84 @@ export function SalesOrders() {
                       />
                     )}
                   </div>
+                </div>
+
+                {/* ─── Linked Purchase Orders (procurement tracking) ─── */}
+                <div className="space-y-2">
+                  <Label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+                    Linked Purchase Orders <span className="text-muted-foreground/70 normal-case">({linkedPOs.length})</span>
+                  </Label>
+                  {linkedPOsLoading ? (
+                    <p className="text-xs text-muted-foreground">Loading...</p>
+                  ) : linkedPOs.length === 0 ? (
+                    <div className="rounded-md border border-dashed border-border/40 p-3 text-center">
+                      <p className="text-xs text-muted-foreground">
+                        No POs linked to this order yet.
+                      </p>
+                      <p className="text-[10px] text-muted-foreground/70 mt-0.5">
+                        Create a PO from Purchase Orders → New PO → select this SO in "Linked Sales Order"
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                      {linkedPOs.map((po: any) => {
+                        const cp = po.supplier?.name || po.vendor?.vendorName || po.supplierName || '—'
+                        const cpKind = po.supplier ? 'SUP' : po.vendor ? 'VEN' : ''
+                        return (
+                          <div key={po.id} className="rounded-md border border-border/30 bg-muted/20 p-2 flex items-center justify-between text-xs">
+                            <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                              <span className="font-medium text-primary shrink-0">{po.poNumber}</span>
+                              {cpKind && (
+                                <span className={`text-[8px] px-1 py-0.5 rounded font-medium shrink-0 ${
+                                  cpKind === 'SUP' ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400' : 'bg-violet-500/15 text-violet-600 dark:text-violet-400'
+                                }`}>{cpKind}</span>
+                              )}
+                              <span className="text-muted-foreground truncate">{cp}</span>
+                              {po.poType && po.poType !== 'GENERAL' && (
+                                <span className="text-[8px] px-1 py-0.5 rounded bg-slate-500/15 text-slate-600 dark:text-slate-400 shrink-0">{po.poType}</span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <span className="font-semibold">{formatINR(po.totalAmount || 0)}</span>
+                              <span className={`text-[9px] px-1 py-0.5 rounded ${
+                                po.status === 'Received' ? 'bg-emerald-500/15 text-emerald-600' :
+                                po.status === 'Pending' ? 'bg-amber-500/15 text-amber-600' :
+                                po.status === 'Cancelled' ? 'bg-red-500/15 text-red-600' :
+                                'bg-slate-500/15 text-slate-600'
+                              }`}>{po.status}</span>
+                            </div>
+                          </div>
+                        )
+                      })}
+                      {/* Procurement summary */}
+                      <div className="mt-2 pt-2 border-t border-border/30 space-y-1">
+                        {(() => {
+                          const totalProcurement = linkedPOs.reduce((s: number, po: any) => s + (po.totalAmount || 0), 0)
+                          const revenue = detailOrder?.totalAmount || 0
+                          const profit = revenue - totalProcurement
+                          const margin = revenue > 0 ? (profit / revenue) * 100 : 0
+                          return (
+                            <>
+                              <div className="flex justify-between text-xs">
+                                <span className="text-muted-foreground">Total Procurement Cost</span>
+                                <span className="font-semibold">{formatINR(totalProcurement)}</span>
+                              </div>
+                              <div className="flex justify-between text-xs">
+                                <span className="text-muted-foreground">Order Revenue</span>
+                                <span className="font-semibold">{formatINR(revenue)}</span>
+                              </div>
+                              <div className="flex justify-between text-xs font-semibold border-t border-border/30 pt-1">
+                                <span>{profit >= 0 ? 'Estimated Profit' : 'Estimated Loss'}</span>
+                                <span className={profit >= 0 ? 'text-emerald-500' : 'text-red-500'}>
+                                  {profit >= 0 ? '+' : ''}{formatINR(profit)} ({margin.toFixed(1)}%)
+                                </span>
+                              </div>
+                            </>
+                          )
+                        })()}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             </>

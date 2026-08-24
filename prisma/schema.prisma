@@ -126,6 +126,7 @@ model SalesOrder {
   items           OrderItem[]
   productionJobs  ProductionJob[]
   dispatches      Dispatch[]
+  purchaseOrders  PurchaseOrder[]          // POs raised against this SO (NEW)
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
 }
@@ -210,6 +211,11 @@ model PurchaseOrder {
   paidAmount        Float     @default(0)
   receivedQty       Float     @default(0)
   notes             String?
+  // Sales Order linkage — a PO can be raised against a specific Sales Order
+  // so that all procurement (fabric + accessories + services) for that order
+  // is tracked together. Enables product-wise and order-wise cost tracking.
+  salesOrderId      String?
+  salesOrder        SalesOrder? @relation(fields: [salesOrderId], references: [id])
   // Universal line items (each item can be Fabric / Goods / Accessory / Service)
   items             POItem[]
   grnNotes          GrnNote[]
