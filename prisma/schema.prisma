@@ -168,8 +168,13 @@ model OrderItemColor {
 model PurchaseOrder {
   id                String    @id @default(cuid())
   poNumber          String    @unique
-  supplierId        String
-  supplier          Supplier  @relation(fields: [supplierId], references: [id])
+  supplierId        String?
+  supplier          Supplier? @relation(fields: [supplierId], references: [id])
+  // Vendor linkage — a PO can be raised against a Vendor (job worker /
+  // outsourcer) instead of a Supplier (raw material provider). Either
+  // supplierId or vendorId should be set, but not both.
+  vendorId          String?
+  vendor            Vendor?   @relation(fields: [vendorId], references: [id])
   // Product linkage (Sprint 1 — product lifecycle)
   styleNo           String?
   styleName         String?
@@ -589,9 +594,11 @@ model Vendor {
   address         String?
   gstNumber       String?                 // GSTIN for tax invoices
   state           String?                 // state (for GST place-of-supply)
+  vendorType      String          @default("Job Worker")  // type of vendor (customizable)
   specialization  String          @default("")
   paymentTerms    Int             @default(30)  // Payment cycle in days (30, 45, 60, etc.)
   status          String          @default("Active")
+  purchaseOrders  PurchaseOrder[]
   stageTrackings  StageTracking[]
   vendorBills     VendorBill[]
   createdAt       DateTime        @default(now())

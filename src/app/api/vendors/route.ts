@@ -76,6 +76,7 @@ export async function POST(request: NextRequest) {
       address,
       gstNumber,
       state,
+      vendorType,        // NEW: customizable type (Job Worker, Embroidery, Dyeing, etc.)
       specialization,
       paymentTerms,
     } = body
@@ -105,23 +106,38 @@ export async function POST(request: NextRequest) {
     }
     let vendor: any = null
     let error: any = null
-    // First try WITH gstNumber/state
+    // First try WITH gstNumber/state/vendorType (all three may not exist yet)
     const { data: v1, error: e1 } = await supabase
       .from('Vendor')
-      .insert({ ...basePayload, gstNumber: gstNumber?.trim() || null, state: state?.trim() || null })
+      .insert({ ...basePayload, gstNumber: gstNumber?.trim() || null, state: state?.trim() || null, vendorType: vendorType?.trim() || 'Job Worker' })
       .select('*')
       .single()
     if (e1) {
       const msg = String(e1.message || '')
-      if (/gstNumber|state|column .* does not exist/i.test(msg)) {
-        // Fallback: insert without gstNumber/state (migration not yet applied)
-        const { data: v2, error: e2 } = await supabase
+      if (/gstNumber|state|vendorType|column .* does not exist/i.test(msg)) {
+        // Fallback: try with just vendorType (if only gstNumber/state missing)
+        const { data: v1b, error: e1b } = await supabase
           .from('Vendor')
-          .insert(basePayload)
+          .insert({ ...basePayload, vendorType: vendorType?.trim() || 'Job Worker' })
           .select('*')
           .single()
-        if (e2) throw e2
-        vendor = v2
+        if (e1b) {
+          const msg2 = String(e1b.message || '')
+          if (/vendorType|column .* does not exist/i.test(msg2)) {
+            // Final fallback: insert without any new columns
+            const { data: v2, error: e2 } = await supabase
+              .from('Vendor')
+              .insert(basePayload)
+              .select('*')
+              .single()
+            if (e2) throw e2
+            vendor = v2
+          } else {
+            throw e1b
+          }
+        } else {
+          vendor = v1b
+        }
       } else {
         throw e1
       }
@@ -154,7 +170,7 @@ export async function PATCH(request: NextRequest) {
     }
 
     const body = await request.json()
-    const { vendorName, contactPerson, phone, email, address, gstNumber, state, specialization, status, paymentTerms } = body
+    const { vendorName, contactPerson, phone, email, address, gstNumber, state, vendorType, specialization, status, paymentTerms } = body
 
     const { data: existing, error: existErr } = await supabase
       .from('Vendor')
@@ -176,6 +192,7 @@ export async function PATCH(request: NextRequest) {
     if (address !== undefined) updateData.address = address?.trim() || null
     if (gstNumber !== undefined) updateData.gstNumber = gstNumber?.trim() || null
     if (state !== undefined) updateData.state = state?.trim() || null
+    if (vendorType !== undefined) updateData.vendorType = vendorType?.trim() || 'Job Worker'
     if (specialization !== undefined) updateData.specialization = specialization?.trim() || ''
     if (paymentTerms !== undefined) updateData.paymentTerms = Number(paymentTerms)
     if (status) updateData.status = status
@@ -187,13 +204,14 @@ export async function PATCH(request: NextRequest) {
       .select('*')
       .single()
 
-    // If update fails because gstNumber/state column doesn't exist, retry without them
+    // If update fails because gstNumber/state/vendorType column doesn't exist, retry without them
     if (error) {
       const msg = String(error.message || '')
-      if (/gstNumber|state|column .* does not exist/i.test(msg)) {
-        const { [updateData.gstNumber ? 'gstNumber' : '']: _g, [updateData.state ? 'state' : '']: _s, ...stripped } = updateData
+      if (/gstNumber|state|vendorType|column .* does not exist/i.test(msg)) {
+        const stripped = { ...updateData }
         delete stripped.gstNumber
         delete stripped.state
+        delete stripped.vendorType
         const { data: v2, error: e2 } = await supabase
           .from('Vendor')
           .update(stripped)

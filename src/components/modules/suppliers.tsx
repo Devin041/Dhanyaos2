@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { ExportButton } from '@/components/export-button'
 import { Input } from '@/components/ui/input'
+import { TypeCombo } from '@/components/ui/type-combo'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -1224,23 +1225,15 @@ export function Suppliers() {
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
                 <Label className="text-xs">Type</Label>
-                <Select
+                <TypeCombo
                   value={form.supplierType}
-                  onValueChange={(v) =>
-                    setForm({ ...form, supplierType: v })
-                  }
-                >
-                  <SelectTrigger className="bg-muted/50 border-border">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {SUPPLIER_TYPES.map((t) => (
-                      <SelectItem key={t} value={t}>
-                        {t}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                  onChange={(v) => setForm({ ...form, supplierType: v })}
+                  options={SUPPLIER_TYPES}
+                  placeholder="e.g. Fabric, Dyeing, Washing…"
+                />
+                <p className="text-[10px] text-muted-foreground">
+                  Pick from the list or click "+ Custom" to add a new type.
+                </p>
               </div>
               <div className="space-y-2">
                 <Label className="text-xs">Payment Terms</Label>

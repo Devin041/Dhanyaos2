@@ -5,6 +5,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { ExportButton } from '@/components/export-button'
 import { Input } from '@/components/ui/input'
+import { TypeCombo } from '@/components/ui/type-combo'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -507,6 +508,7 @@ export function VendorsModule() {
     address: '',
     gstNumber: '',
     state: '',
+    vendorType: 'Job Worker',
     specialization: '',
     paymentTerms: '30',
     status: 'Active',
@@ -621,6 +623,7 @@ export function VendorsModule() {
       address: '',
       gstNumber: '',
       state: '',
+      vendorType: 'Job Worker',
       specialization: '',
       paymentTerms: '30',
       status: 'Active',
@@ -641,6 +644,7 @@ export function VendorsModule() {
       address: vendor.address || '',
       gstNumber: (vendor as any).gstNumber || '',
       state: (vendor as any).state || '',
+      vendorType: (vendor as any).vendorType || 'Job Worker',
       specialization: vendor.specialization || '',
       paymentTerms: isCustom ? termsStr : termsStr,
       status: vendor.status,
@@ -661,6 +665,7 @@ export function VendorsModule() {
         address: form.address.trim() || null,
         gstNumber: form.gstNumber.trim() || null,
         state: form.state.trim() || null,
+        vendorType: form.vendorType.trim() || 'Job Worker',
         specialization: form.specialization.trim() || null,
         paymentTerms: parseInt(form.paymentTerms, 10) || 30,
         status: form.status,
@@ -1411,6 +1416,20 @@ export function VendorsModule() {
                   Determines CGST+SGST vs IGST on bills
                 </p>
               </div>
+            </div>
+
+            {/* Vendor Type (customizable — pick from list or add custom) */}
+            <div className="space-y-2">
+              <Label className="text-xs">Vendor Type</Label>
+              <TypeCombo
+                value={form.vendorType}
+                onChange={(v) => setForm({ ...form, vendorType: v })}
+                options={['Job Worker', 'Embroidery', 'Dyeing', 'Washing', 'Printing', 'Stitching', 'Cutting', 'Hand Work', 'Packing']}
+                placeholder="e.g. Job Worker, Dyeing, Washing…"
+              />
+              <p className="text-[10px] text-muted-foreground">
+                Type of work this vendor does. Pick from the list or click "+ Custom" to add a new type.
+              </p>
             </div>
 
             {/* Specialization */}

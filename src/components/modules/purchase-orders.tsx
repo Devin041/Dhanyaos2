@@ -77,6 +77,16 @@ interface Supplier {
   status: string
 }
 
+// Merged counterparty option — either a Supplier OR a Vendor.
+// We tag each with `kind` so the backend knows which FK to populate.
+interface CounterpartyOption {
+  id: string
+  label: string          // display name
+  kind: 'Supplier' | 'Vendor'
+  type: string           // supplierType or vendorType
+  sub: string            // contact person or extra info
+}
+
 interface PurchaseOrder {
   id: string
   poNumber: string
@@ -189,6 +199,8 @@ export function PurchaseOrders() {
 
   // Create form state
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
+  // Merged list of Suppliers + Vendors for the counterparty dropdown.
+  const [counterparties, setCounterparties] = useState<CounterpartyOption[]>([])
   const [form, setForm] = useState({
     supplierId: '',
     fabricName: '',
@@ -250,37 +262,75 @@ export function PurchaseOrders() {
     setPage(1)
   }, [activeTab, search])
 
-  // Load suppliers for create form
+  // Load suppliers AND vendors for create form — POs can be raised against
+  // either a Supplier (raw materials) or a Vendor (job worker / outsourcer).
+  // We fetch ALL of them directly from their respective APIs (NOT derived
+  // from existing POs, which would miss newly-added counterparties).
   useEffect(() => {
-    // Fetch suppliers for the create form dropdown
-    async function loadSuppliers() {
+    async function loadCounterparties() {
+      const merged: CounterpartyOption[] = []
+
+      // Source 1: All Suppliers
       try {
-        const res = await fetch('/api/purchase-orders?limit=100')
-        const data = await res.json()
-        if (res.ok && data.orders) {
-          const supplierMap = new Map<string, Supplier>()
-          for (const po of data.orders) {
-            if (!supplierMap.has(po.supplierId)) {
-              supplierMap.set(po.supplierId, {
-                id: po.supplierId,
-                name: po.supplier.name,
-                supplierType: po.supplier.supplierType,
-                contactPerson: null,
-                phone: null,
-                email: null,
-                paymentTerms: po.supplier.paymentTerms,
-                rating: po.supplier.rating,
-                status: 'Active',
-              })
-            }
+        const res = await fetch('/api/suppliers?limit=500')
+        if (res.ok) {
+          const data = await res.json()
+          const arr = data.suppliers || data || []
+          for (const s of arr) {
+            merged.push({
+              id: s.id,
+              label: s.name,
+              kind: 'Supplier',
+              type: s.supplierType || '—',
+              sub: s.contactPerson || s.phone || '',
+            })
           }
-          setSuppliers(Array.from(supplierMap.values()))
         }
-      } catch {
-        // ignore
-      }
+      } catch { /* ignore */ }
+
+      // Source 2: All Vendors
+      try {
+        const res = await fetch('/api/vendors?limit=500')
+        if (res.ok) {
+          const data = await res.json()
+          const arr = data.vendors || data || []
+          for (const v of arr) {
+            merged.push({
+              id: v.id,
+              label: v.vendorName,
+              kind: 'Vendor',
+              type: v.vendorType || v.specialization || '—',
+              sub: v.contactPerson || v.phone || '',
+            })
+          }
+        }
+      } catch { /* ignore */ }
+
+      // Sort alphabetically by name
+      merged.sort((a, b) => (a.label || '').localeCompare(b.label || ''))
+      setCounterparties(merged)
+
+      // Also keep the legacy suppliers state for backward compat in detail view
+      try {
+        const res = await fetch('/api/suppliers?limit=500')
+        if (res.ok) {
+          const data = await res.json()
+          const arr = data.suppliers || data || []
+          setSuppliers(arr.map((s: any) => ({
+            id: s.id,
+            name: s.name,
+            supplierType: s.supplierType || 'Fabric',
+            contactPerson: s.contactPerson || null,
+            phone: s.phone || null,
+            email: s.email || null,
+            paymentTerms: s.paymentTerms || 15,
+            rating: s.rating || 3,
+            status: s.status || 'Active',
+          })))
+        }
+      } catch { /* ignore */ }
     }
-    loadSuppliers()
+    loadCounterparties()
   }, [])
 
   // Load samples for product selector (Sprint 1)
@@ -367,11 +417,16 @@ export function PurchaseOrders() {
   // ─── Create PO ──────────────────────────────────────────────────────────
 
   const handleCreate = async () => {
-    // Validate based on mode
+    // Validate based on mode — must pick a counterparty (supplier OR vendor)
     if (!form.supplierId) {
-      toast.error('Please select a supplier')
+      toast.error('Please select a supplier or vendor')
       return
     }
+
+    // Determine whether the selected counterparty is a Supplier or a Vendor.
+    // The dropdown value is encoded as "kind:id" so we can split it here.
+    const selected = counterparties.find(c => c.id === form.supplierId)
+    const isVendor = selected?.kind === 'Vendor'
 
     if (useMultiFabric) {
       // Multi-fabric mode: validate fabric items
@@ -391,7 +446,9 @@ export function PurchaseOrders() {
     setCreating(true)
     try {
       const payload: any = {
-        supplierId: form.supplierId,
+        // Send the right ID field based on whether it's a supplier or vendor.
+        // The backend accepts either; whichever is set determines the counterparty.
+        ...(isVendor ? { vendorId: form.supplierId } : { supplierId: form.supplierId }),
         expectedDelivery: form.expectedDelivery || undefined,
         notes: form.notes || undefined,
         // Product linkage
@@ -883,24 +940,43 @@ export function PurchaseOrders() {
               )}
             </div>
 
-            {/* Supplier */}
+            {/* Counterparty — Supplier OR Vendor (merged) */}
             <div className="space-y-1.5">
-              <Label className="text-xs font-medium text-foreground/80">Supplier *</Label>
+              <Label className="text-xs font-medium text-foreground/80">Supplier / Vendor *</Label>
               <Select value={form.supplierId} onValueChange={(v) => setForm({ ...form, supplierId: v })}>
                 <SelectTrigger className="bg-muted/50 border-border h-9">
-                  <SelectValue placeholder="Select supplier" />
+                  <SelectValue placeholder="Select supplier or vendor..." />
                 </SelectTrigger>
-                <SelectContent>
-                  {suppliers.map((s) => (
-                    <SelectItem key={s.id} value={s.id}>
+                <SelectContent className="max-h-80">
+                  {counterparties.length === 0 && (
+                    <div className="px-3 py-2 text-xs text-muted-foreground">
+                      No suppliers/vendors yet. Add one from the Suppliers or Vendors module.
+                    </div>
+                  )}
+                  {counterparties.map((c) => (
+                    <SelectItem key={`${c.kind}-${c.id}`} value={c.id}>
                       <span className="flex items-center gap-2">
-                        {s.name}
-                        <span className="text-muted-foreground text-[10px]">({s.supplierType})</span>
+                        <span className={`text-[9px] px-1 py-0.5 rounded font-medium ${
+                          c.kind === 'Supplier'
+                            ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+                            : 'bg-violet-500/15 text-violet-600 dark:text-violet-400'
+                        }`}>
+                          {c.kind === 'Supplier' ? 'SUP' : 'VEN'}
+                        </span>
+                        <span className="font-medium">{c.label}</span>
+                        <span className="text-muted-foreground text-[10px]">({c.type})</span>
+                        {c.sub && (
+                          <span className="text-muted-foreground/70 text-[10px]">· {c.sub}</span>
+                        )}
                       </span>
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+              <p className="text-[10px] text-muted-foreground">
+                Includes both Suppliers (raw materials) and Vendors (job workers / outsourcers).
+                Tagged SUP / VEN for clarity.
+              </p>
             </div>
 
             {/* Mode Toggle: Single Fabric vs Multi-Fabric */}

@@ -149,6 +149,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const {
       supplierId,
+      vendorId,           // NEW: a PO can be raised against a Vendor instead of a Supplier
       fabricName,
       quantity,
       unit,
@@ -167,9 +168,10 @@ export async function POST(request: NextRequest) {
     const hasItems = items && Array.isArray(items) && items.length > 0
     const hasLegacy = fabricName && quantity && ratePerUnit
 
-    if (!supplierId || (!hasItems && !hasLegacy)) {
+    // Either supplierId OR vendorId must be set (a PO needs a counterparty).
+    if ((!supplierId && !vendorId) || (!hasItems && !hasLegacy)) {
       return NextResponse.json(
-        { error: 'supplierId and (items[] OR fabricName+quantity+ratePerUnit) are required' },
+        { error: 'Either supplierId or vendorId, and (items[] OR fabricName+quantity+ratePerUnit) are required' },
         { status: 400 }
       )
     }
@@ -210,30 +212,64 @@ export async function POST(request: NextRequest) {
 
     const now = new Date().toISOString()
 
-    // Insert PO (without new columns — Supabase may not have them yet)
-    const { data: po, error } = await supabase
-      .from('PurchaseOrder')
-      .insert({
-        poNumber,
-        supplierId,
-        fabricName: primaryFabric,
-        quantity: primaryQty,
-        unit: primaryUnit,
-        ratePerUnit: primaryRate,
-        taxableAmount: 0,
-        totalAmount,
-        expectedDelivery: expectedDelivery ? new Date(expectedDelivery).toISOString() : null,
-        status: 'Pending',
-        paymentStatus: 'Unpaid',
-        paidAmount: 0,
-        receivedQty: 0,
-        createdAt: now,
-        updatedAt: now,
-      })
-      .select()
-      .single()
+    // Insert PO. supplierId is now nullable (a vendor-only PO has supplierId=null).
+    // vendorId is a new column — try with it first; fall back without if column missing.
+    const insertBase: Record<string, any> = {
+      poNumber,
+      fabricName: primaryFabric,
+      quantity: primaryQty,
+      unit: primaryUnit,
+      ratePerUnit: primaryRate,
+      taxableAmount: 0,
+      totalAmount,
+      expectedDelivery: expectedDelivery ? new Date(expectedDelivery).toISOString() : null,
+      status: 'Pending',
+      paymentStatus: 'Unpaid',
+      paidAmount: 0,
+      receivedQty: 0,
+      createdAt: now,
+      updatedAt: now,
+    }
+    // Only set supplierId if provided (else it stays null for vendor-only POs)
+    if (supplierId) insertBase.supplierId = supplierId
 
-    if (error) throw error
+    let po: any = null
+    let error: any = null
+    // First attempt: WITH vendorId column (requires migration)
+    if (vendorId) {
+      const { data: po1, error: e1 } = await supabase
+        .from('PurchaseOrder')
+        .insert({ ...insertBase, vendorId })
+        .select()
+        .single()
+      if (e1) {
+        const msg = String(e1.message || '')
+        if (/vendorId|column .* does not exist/i.test(msg)) {
+          // Fallback: insert without vendorId (migration not yet applied)
+          const { data: po2, error: e2 } = await supabase
+            .from('PurchaseOrder')
+            .insert(insertBase)
+            .select()
+            .single()
+          if (e2) throw e2
+          po = po2
+        } else {
+          throw e1
+        }
+      } else {
+        po = po1
+      }
+    } else {
+      // No vendorId — plain insert (supplier-only or legacy PO)
+      const { data: po3, error: e3 } = await supabase
+        .from('PurchaseOrder')
+        .insert(insertBase)
+        .select()
+        .single()
+      if (e3) throw e3
+      po = po3
+    }
+    error = null
 
     // Insert multi-fabric line items if provided
     if (hasItems) {
@@ -289,10 +325,22 @@ export async function POST(request: NextRequest) {
       },
       { status: 201 }
     )
-  } catch (error) {
+  } catch (error: any) {
     console.error('Purchase Orders API POST error:', error)
+    // Surface a helpful message for the common "supplierId NOT NULL" case
+    // (means the PO-VENDOR-TYPE migration hasn't been run yet — vendor-only
+    // POs require supplierId to be nullable).
+    const msg = String(error?.message || '')
+    if (/null value in column "supplierId"/i.test(msg)) {
+      return NextResponse.json(
+        {
+          error: 'Vendor-only purchase orders require a database migration. Please run SUPABASE-MIGRATION-PO-VENDOR-TYPE.sql in the Supabase SQL Editor (it makes supplierId nullable so POs can be vendor-only).',
+        },
+        { status: 500 }
+      )
+    }
     return NextResponse.json(
-      { error: 'Failed to create purchase order' },
+      { error: error?.message || 'Failed to create purchase order' },
       { status: 500 }
     )
   }
