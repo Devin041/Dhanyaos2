@@ -168,6 +168,9 @@ model OrderItemColor {
 model PurchaseOrder {
   id                String    @id @default(cuid())
   poNumber          String    @unique
+  // PO Type — universal classification (user-selectable, auto-derived from items if not set)
+  // GENERAL | FABRIC | GOODS | ACCESSORY | SERVICE | MIXED
+  poType            String    @default("GENERAL")
   supplierId        String?
   supplier          Supplier? @relation(fields: [supplierId], references: [id])
   // Vendor linkage — a PO can be raised against a Vendor (job worker /
@@ -192,33 +195,57 @@ model PurchaseOrder {
   sgstAmount        Float    @default(0)
   igstAmount        Float    @default(0)
   totalGst          Float    @default(0)
-  totalAmount       Float    @default(0)  // taxableAmount + totalGst
+  totalAmount       Float    @default(0)  // taxableAmount + totalGst (grand total)
+  // Broker / commission (universal)
+  brokerName        String?
+  commissionPercent Float     @default(0)
+  commissionAmount  Float     @default(0)
+  netAmount         Float     @default(0)  // grand total - commission
   expectedDelivery  DateTime?
   status            String    @default("Pending")
   paymentStatus     String    @default("Unpaid")
   paidAmount        Float     @default(0)
   receivedQty       Float     @default(0)
-  // Multi-fabric line items (Sprint 1)
+  // Universal line items (each item can be Fabric / Goods / Accessory / Service)
   items             POItem[]
   grnNotes          GrnNote[]
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
 }
 
-// ─── PO Line Items (multi-fabric, multi-color per PO) ──────────────────────
+// ─── PO Line Items (universal — each item has its own type: FABRIC / GOODS /
+// ACCESSORY / SERVICE / OTHER. Supports color/size variants, mixed POs, and any
+// future item type without schema changes). ─────────────────────────────────
 model POItem {
   id                String   @id @default(cuid())
   purchaseOrderId   String
   purchaseOrder     PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+
+  // ─── UNIVERSAL ITEM TYPE (the key field) ───
+  // FABRIC | GOODS | ACCESSORY | SERVICE | OTHER
+  // Extensible enum — new types can be added without schema change.
+  itemType          String   @default("FABRIC")
+
+  // ─── PRODUCT LINKAGE (optional — for finished goods / linked styles) ───
   styleNo           String?
-  fabricName        String
-  color             String?
+  styleName         String?
+  costSheetId       String?
+
+  // ─── DESCRIPTION (universal) ───
+  name              String                  // fabric name, product name, service name
+  description       String?                // extra details (optional)
+  color             String?                // Pink, Maroon, Peach, Red (for fabric/goods)
+  size              String?                // S/M/L/XL/XXL (for goods only)
+
+  // ─── QUANTITY & PRICING ───
   quantity          Float
   unit              String   @default("meters")
+  // Meters | Pcs | Kg | Box | Roll | Set | Lot | Hour | Day
   ratePerUnit       Float
-  totalAmount       Float
+  totalAmount       Float                   // quantity × ratePerUnit (auto)
   receivedQty       Float    @default(0)
   status            String   @default("Pending")
+
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 }

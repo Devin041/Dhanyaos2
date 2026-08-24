@@ -59,9 +59,11 @@ import {
   CreditCard,
   Trash2,
   Shirt,
+  Layers,
   X,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { POLineItemBuilder, emptyItem, type LineItem } from '@/components/ui/po-line-item-builder'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -90,6 +92,7 @@ interface CounterpartyOption {
 interface PurchaseOrder {
   id: string
   poNumber: string
+  poType?: string         // universal PO classification
   supplierId: string | null
   supplier: { name: string; supplierType: string; rating: number; paymentTerms: number } | null
   // Vendor linkage (nullable — vendor-only POs have supplierId = null)
@@ -264,6 +267,20 @@ export function PurchaseOrders() {
   const [fabricItems, setFabricItems] = useState<Array<{ fabricName: string; color: string; quantity: string; unit: string; ratePerUnit: string }>>([
     { fabricName: '', color: '', quantity: '', unit: 'meters', ratePerUnit: '' },
   ])
+
+  // ── Universal PO mode (new) ────────────────────────────────────────────────
+  // When useUniversalPO is true, the form uses the POLineItemBuilder which
+  // supports mixed item types (Fabric + Goods + Accessory + Service) in one PO.
+  const [useUniversalPO, setUseUniversalPO] = useState(true)
+  const [universalItems, setUniversalItems] = useState<Array<any>>([])
+
+  // ── PO-level container fields (GST, broker, discount) ──
+  const [newPoType, setNewPoType] = useState('GENERAL')
+  const [newGstType, setNewGstType] = useState<'IntraState' | 'InterState'>('IntraState')
+  const [newGstPercent, setNewGstPercent] = useState('18')
+  const [newBrokerName, setNewBrokerName] = useState('')
+  const [newBrokerCommission, setNewBrokerCommission] = useState('0')
+  const [newDiscount, setNewDiscount] = useState('0')
 
   // Action state
   const [actionLoading, setActionLoading] = useState(false)
@@ -467,19 +484,79 @@ export function PurchaseOrders() {
     }
 
     // Determine whether the selected counterparty is a Supplier or a Vendor.
-    // The dropdown value is encoded as "kind:id" so we can split it here.
     const selected = counterparties.find(c => c.id === form.supplierId)
     const isVendor = selected?.kind === 'Vendor'
 
+    // ── Universal PO mode ──
+    if (useUniversalPO) {
+      const validItems = universalItems.filter(it => it.name && it.quantity > 0 && it.ratePerUnit > 0)
+      if (validItems.length === 0) {
+        toast.error('Add at least one line item with name, qty > 0, and rate > 0')
+        return
+      }
+      setCreating(true)
+      try {
+        const payload: any = {
+          ...(isVendor ? { vendorId: form.supplierId } : { supplierId: form.supplierId }),
+          poType: newPoType,
+          expectedDelivery: form.expectedDelivery || undefined,
+          notes: form.notes || undefined,
+          // Universal line items
+          items: validItems.map(it => ({
+            itemType: it.itemType,
+            styleNo: it.styleNo || undefined,
+            styleName: it.styleName || undefined,
+            costSheetId: it.costSheetId || undefined,
+            name: it.name,
+            description: it.description || undefined,
+            color: it.color || undefined,
+            size: it.size || undefined,
+            quantity: it.quantity,
+            unit: it.unit,
+            ratePerUnit: it.ratePerUnit,
+          })),
+          // GST + broker + discount
+          gstType: newGstType,
+          gstPercent: parseFloat(newGstPercent) || 0,
+          brokerName: newBrokerName || undefined,
+          brokerCommissionPercent: parseFloat(newBrokerCommission) || 0,
+          discountPercent: parseFloat(newDiscount) || 0,
+        }
+        const res = await fetch('/api/purchase-orders', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        })
+        const data = await res.json()
+        if (res.ok) {
+          toast.success(`Purchase Order ${data.poNumber} created successfully`)
+          setCreateOpen(false)
+          // Reset form
+          setForm({ supplierId: '', fabricName: '', quantity: '', unit: 'meters', ratePerUnit: '', expectedDelivery: '', notes: '' })
+          setUniversalItems([])
+          setNewPoType('GENERAL')
+          setNewGstType('IntraState'); setNewGstPercent('18')
+          setNewBrokerName(''); setNewBrokerCommission('0'); setNewDiscount('0')
+          fetchOrders()
+        } else {
+          toast.error(data.error || 'Failed to create purchase order')
+        }
+      } catch {
+        toast.error('Failed to create purchase order')
+      } finally {
+        setCreating(false)
+      }
+      return
+    }
+
+    // ── Legacy mode (single-fabric or multi-fabric) ──
     if (useMultiFabric) {
-      // Multi-fabric mode: validate fabric items
       const validItems = fabricItems.filter(it => it.fabricName && it.quantity && it.ratePerUnit)
       if (validItems.length === 0) {
         toast.error('Please add at least one fabric item with name, quantity, and rate')
         return
       }
     } else {
-      // Legacy single-fabric mode
       if (!form.fabricName || !form.quantity || !form.ratePerUnit) {
         toast.error('Please fill in all required fields')
         return
@@ -489,18 +566,14 @@ export function PurchaseOrders() {
     setCreating(true)
     try {
       const payload: any = {
-        // Send the right ID field based on whether it's a supplier or vendor.
-        // The backend accepts either; whichever is set determines the counterparty.
         ...(isVendor ? { vendorId: form.supplierId } : { supplierId: form.supplierId }),
         expectedDelivery: form.expectedDelivery || undefined,
         notes: form.notes || undefined,
-        // Product linkage
         styleNo: selectedStyleNo || undefined,
         styleName: selectedStyleName || undefined,
       }
 
       if (useMultiFabric) {
-        // Send multi-fabric items
         payload.items = fabricItems
           .filter(it => it.fabricName && it.quantity && it.ratePerUnit)
           .map(it => ({
@@ -511,7 +584,6 @@ export function PurchaseOrders() {
             ratePerUnit: parseFloat(it.ratePerUnit),
           }))
       } else {
-        // Legacy single-fabric mode
         payload.fabricName = form.fabricName
         payload.quantity = parseFloat(form.quantity)
         payload.unit = form.unit
@@ -527,7 +599,6 @@ export function PurchaseOrders() {
       if (res.ok) {
         toast.success(`Purchase Order ${data.poNumber} created successfully`)
         setCreateOpen(false)
-        // Reset form
         setForm({ supplierId: '', fabricName: '', quantity: '', unit: 'meters', ratePerUnit: '', expectedDelivery: '', notes: '' })
         setSelectedStyleNo('')
         setSelectedStyleName('')
@@ -814,7 +885,21 @@ export function PurchaseOrders() {
                       onClick={() => openDetail(po)}
                     >
                       <TableCell className="py-3">
-                        <span className="text-xs font-semibold text-primary">{po.poNumber}</span>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs font-semibold text-primary">{po.poNumber}</span>
+                          {po.poType && po.poType !== 'GENERAL' && (
+                            <span className={`text-[9px] px-1 py-0.5 rounded font-medium ${
+                              po.poType === 'FABRIC' ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400' :
+                              po.poType === 'GOODS' ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' :
+                              po.poType === 'ACCESSORY' ? 'bg-sky-500/15 text-sky-600 dark:text-sky-400' :
+                              po.poType === 'SERVICE' ? 'bg-violet-500/15 text-violet-600 dark:text-violet-400' :
+                              po.poType === 'MIXED' ? 'bg-gradient-to-r from-amber-500/20 to-violet-500/20 text-foreground' :
+                              'bg-slate-500/15 text-slate-600 dark:text-slate-400'
+                            }`}>
+                              {po.poType}
+                            </span>
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell className="py-3">
                         <div className="flex flex-col gap-0.5">
@@ -1047,24 +1132,146 @@ export function PurchaseOrders() {
               </p>
             </div>
 
-            {/* Mode Toggle: Single Fabric vs Multi-Fabric */}
-            <div className="flex items-center gap-2 rounded-lg border border-border/50 bg-muted/30 p-1">
+            {/* Mode Toggle: Universal PO (default) vs Legacy fabric-only modes */}
+            <div className="flex items-center gap-1 rounded-lg border border-border/50 bg-muted/30 p-1">
               <button
-                className={`flex-1 rounded-md px-3 py-1.5 text-xs font-semibold transition-all ${!useMultiFabric ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
-                onClick={() => setUseMultiFabric(false)}
+                className={`flex-1 rounded-md px-2 py-1.5 text-[11px] font-semibold transition-all ${useUniversalPO ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                onClick={() => { setUseUniversalPO(true); setUseMultiFabric(false) }}
+              >
+                ✦ Universal PO
+              </button>
+              <button
+                className={`flex-1 rounded-md px-2 py-1.5 text-[11px] font-semibold transition-all ${!useUniversalPO && !useMultiFabric ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                onClick={() => { setUseUniversalPO(false); setUseMultiFabric(false) }}
               >
                 Single Fabric
               </button>
               <button
-                className={`flex-1 rounded-md px-3 py-1.5 text-xs font-semibold transition-all ${useMultiFabric ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
-                onClick={() => setUseMultiFabric(true)}
+                className={`flex-1 rounded-md px-2 py-1.5 text-[11px] font-semibold transition-all ${!useUniversalPO && useMultiFabric ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                onClick={() => { setUseUniversalPO(false); setUseMultiFabric(true) }}
               >
-                Multi-Fabric / Colors
+                Multi-Fabric
               </button>
             </div>
+            <p className="text-[10px] text-muted-foreground -mt-1">
+              {useUniversalPO
+                ? '✦ Universal mode — add Fabric, Finished Goods, Accessories, Services, or any mix in one PO.'
+                : 'Legacy fabric-only mode (kept for backward compat).'}
+            </p>
 
-            {/* ─── Single Fabric Mode (legacy) ─── */}
-            {!useMultiFabric && (
+            {/* ─── Universal PO mode (line items + GST + broker) ─── */}
+            {useUniversalPO && (
+              <div className="space-y-3">
+                <POLineItemBuilder
+                  items={universalItems}
+                  onChange={setUniversalItems}
+                  catalogProducts={samples}
+                />
+
+                {/* GST + Broker section */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <div>
+                    <Label className="text-[10px] text-muted-foreground">PO Type</Label>
+                    <Select value={newPoType} onValueChange={setNewPoType}>
+                      <SelectTrigger className="h-8 text-xs bg-muted/50"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="GENERAL">General</SelectItem>
+                        <SelectItem value="FABRIC">Fabric</SelectItem>
+                        <SelectItem value="GOODS">Finished Goods</SelectItem>
+                        <SelectItem value="ACCESSORY">Accessory</SelectItem>
+                        <SelectItem value="SERVICE">Service</SelectItem>
+                        <SelectItem value="MIXED">Mixed</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label className="text-[10px] text-muted-foreground">GST Type</Label>
+                    <Select value={newGstType} onValueChange={(v) => setNewGstType(v as 'IntraState' | 'InterState')}>
+                      <SelectTrigger className="h-8 text-xs bg-muted/50"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="IntraState">IntraState (CGST+SGST)</SelectItem>
+                        <SelectItem value="InterState">InterState (IGST)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label className="text-[10px] text-muted-foreground">GST %</Label>
+                    <Input
+                      type="number"
+                      value={newGstPercent}
+                      onChange={(e) => setNewGstPercent(e.target.value)}
+                      className="h-8 text-xs bg-muted/50"
+                      min={0}
+                      step={0.5}
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-[10px] text-muted-foreground">Discount %</Label>
+                    <Input
+                      type="number"
+                      value={newDiscount}
+                      onChange={(e) => setNewDiscount(e.target.value)}
+                      className="h-8 text-xs bg-muted/50"
+                      min={0}
+                      max={100}
+                      step={0.5}
+                    />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <Label className="text-[10px] text-muted-foreground">Broker Name (optional)</Label>
+                    <Input
+                      value={newBrokerName}
+                      onChange={(e) => setNewBrokerName(e.target.value)}
+                      placeholder="—"
+                      className="h-8 text-xs bg-muted/50"
+                    />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <Label className="text-[10px] text-muted-foreground">Commission %</Label>
+                    <Input
+                      type="number"
+                      value={newBrokerCommission}
+                      onChange={(e) => setNewBrokerCommission(e.target.value)}
+                      className="h-8 text-xs bg-muted/50"
+                      min={0}
+                      max={100}
+                      step={0.5}
+                    />
+                  </div>
+                </div>
+
+                {/* Live summary */}
+                {(() => {
+                  const subtotal = universalItems.reduce((s, it) => s + (it.quantity || 0) * (it.ratePerUnit || 0), 0)
+                  const discountAmt = subtotal * (parseFloat(newDiscount) || 0) / 100
+                  const taxable = subtotal - discountAmt
+                  const gst = taxable * (parseFloat(newGstPercent) || 0) / 100
+                  const grand = taxable + gst
+                  const commission = grand * (parseFloat(newBrokerCommission) || 0) / 100
+                  const net = grand - commission
+                  return (
+                    <div className="glass-card rounded-lg p-3 space-y-1 text-xs">
+                      <div className="flex justify-between"><span className="text-muted-foreground">Subtotal ({universalItems.length} items)</span><span>₹{subtotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span></div>
+                      {parseFloat(newDiscount) > 0 && (
+                        <div className="flex justify-between"><span className="text-muted-foreground">Discount ({newDiscount}%)</span><span className="text-destructive">-₹{discountAmt.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span></div>
+                      )}
+                      <div className="flex justify-between"><span className="text-muted-foreground">Taxable</span><span>₹{taxable.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span></div>
+                      <div className="flex justify-between"><span className="text-muted-foreground">GST {newGstPercent}% ({newGstType})</span><span>₹{gst.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span></div>
+                      <div className="flex justify-between font-semibold border-t border-border/30 pt-1"><span>Grand Total</span><span className="text-primary">₹{grand.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span></div>
+                      {commission > 0 && (
+                        <>
+                          <div className="flex justify-between"><span className="text-muted-foreground">Broker Commission ({newBrokerCommission}%)</span><span className="text-destructive">-₹{commission.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span></div>
+                          <div className="flex justify-between font-semibold"><span>Net Payable</span><span className="text-primary">₹{net.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span></div>
+                        </>
+                      )}
+                    </div>
+                  )
+                })()}
+              </div>
+            )}
+
+            {/* ─── Legacy Single Fabric Mode ─── */}
+            {!useUniversalPO && !useMultiFabric && (
               <>
             {/* Fabric Name */}
             <div className="space-y-1.5">
@@ -1279,10 +1486,93 @@ export function PurchaseOrders() {
               {/* PO Info Grid */}
               <div className="grid grid-cols-2 gap-3">
                 <InfoBlock label="PO Number" value={selectedPO.poNumber} />
+                <InfoBlock label="PO Type" value={(selectedPO as any).poType || 'GENERAL'} />
                 <InfoBlock label="Created" value={formatDate(selectedPO.createdAt)} />
-                <InfoBlock label="Fabric" value={selectedPO.fabricName} />
-                <InfoBlock label="Unit" value={selectedPO.unit} />
+                <InfoBlock label="Fabric (legacy)" value={selectedPO.fabricName || '—'} />
               </div>
+
+              {/* Universal Line Items */}
+              {(selectedPO as any).items && (selectedPO as any).items.length > 0 && (
+                <Card className="glass-card border-border/40 p-4">
+                  <p className="text-xs font-semibold text-muted-foreground mb-2 flex items-center gap-1.5">
+                    <Layers className="h-3 w-3" /> Line Items ({(selectedPO as any).items.length})
+                  </p>
+                  <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                    {(selectedPO as any).items.map((it: any, i: number) => {
+                      const typeColor = it.itemType === 'FABRIC' ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400' :
+                                       it.itemType === 'GOODS' ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' :
+                                       it.itemType === 'ACCESSORY' ? 'bg-sky-500/15 text-sky-600 dark:text-sky-400' :
+                                       it.itemType === 'SERVICE' ? 'bg-violet-500/15 text-violet-600 dark:text-violet-400' :
+                                       'bg-slate-500/15 text-slate-600 dark:text-slate-400'
+                      return (
+                        <div key={it.id || i} className="rounded-md border border-border/30 bg-muted/20 p-2 text-xs">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                              <span className={`text-[8px] px-1 py-0.5 rounded font-medium shrink-0 ${typeColor}`}>
+                                {it.itemType || 'FABRIC'}
+                              </span>
+                              <span className="font-medium truncate">
+                                {it.name || it.fabricName || '—'}
+                              </span>
+                              {it.color && <span className="text-muted-foreground text-[10px]">· {it.color}</span>}
+                              {it.size && <span className="text-muted-foreground text-[10px]">· {it.size}</span>}
+                            </div>
+                            <span className="text-muted-foreground shrink-0">
+                              {it.quantity} {it.unit} × ₹{it.ratePerUnit} = <span className="font-semibold text-foreground">₹{it.totalAmount?.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
+                            </span>
+                          </div>
+                          {it.styleNo && (
+                            <p className="text-[10px] text-muted-foreground mt-0.5">Style: {it.styleNo} {it.styleName ? `· ${it.styleName}` : ''}</p>
+                          )}
+                          {it.description && (
+                            <p className="text-[10px] text-muted-foreground mt-0.5">{it.description}</p>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                  {/* Line totals summary */}
+                  <div className="mt-2 pt-2 border-t border-border/30 text-xs space-y-1">
+                    {(() => {
+                      const items = (selectedPO as any).items || []
+                      const byType: Record<string, number> = {}
+                      for (const it of items) {
+                        const t = it.itemType || 'FABRIC'
+                        byType[t] = (byType[t] || 0) + (it.totalAmount || 0)
+                      }
+                      return Object.entries(byType).map(([type, amt]) => (
+                        <div key={type} className="flex justify-between">
+                          <span className="text-muted-foreground">{type}</span>
+                          <span>₹{amt.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
+                        </div>
+                      ))
+                    })()}
+                  </div>
+                </Card>
+              )}
+
+              {/* GST / Broker summary if present */}
+              {((selectedPO as any).totalGst > 0 || (selectedPO as any).brokerName) && (
+                <Card className="glass-card border-border/40 p-4">
+                  <p className="text-xs font-semibold text-muted-foreground mb-2">GST & Broker</p>
+                  <div className="space-y-1 text-xs">
+                    {(selectedPO as any).taxableAmount > 0 && (
+                      <div className="flex justify-between"><span className="text-muted-foreground">Taxable</span><span>₹{(selectedPO as any).taxableAmount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span></div>
+                    )}
+                    {(selectedPO as any).totalGst > 0 && (
+                      <div className="flex justify-between"><span className="text-muted-foreground">GST {(selectedPO as any).gstPercent}% ({(selectedPO as any).gstType})</span><span>₹{(selectedPO as any).totalGst.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span></div>
+                    )}
+                    <div className="flex justify-between font-semibold border-t border-border/30 pt-1"><span>Grand Total</span><span className="text-primary">₹{(selectedPO as any).totalAmount?.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span></div>
+                    {(selectedPO as any).brokerName && (
+                      <>
+                        <div className="flex justify-between"><span className="text-muted-foreground">Broker</span><span>{(selectedPO as any).brokerName} ({(selectedPO as any).commissionPercent}%)</span></div>
+                        <div className="flex justify-between"><span className="text-muted-foreground">Commission</span><span className="text-destructive">-₹{(selectedPO as any).commissionAmount?.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span></div>
+                        <div className="flex justify-between font-semibold"><span>Net Payable</span><span className="text-primary">₹{(selectedPO as any).netAmount?.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span></div>
+                      </>
+                    )}
+                  </div>
+                </Card>
+              )}
 
               {/* Supplier Details */}
               <Card className="glass-card border-border/40 p-4">

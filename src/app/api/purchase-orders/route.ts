@@ -88,6 +88,23 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    // Fetch POItem line items for all orders (universal — each item has its own type)
+    const poIds = ordersRaw.map((o: any) => o.id)
+    let itemsByPo: Record<string, any[]> = {}
+    if (poIds.length > 0) {
+      const { data: items } = await supabase
+        .from('POItem')
+        .select('*')
+        .in('purchaseOrderId', poIds)
+        .order('createdAt', { ascending: true })
+      if (items) {
+        for (const it of items) {
+          if (!itemsByPo[it.purchaseOrderId]) itemsByPo[it.purchaseOrderId] = []
+          itemsByPo[it.purchaseOrderId].push(it)
+        }
+      }
+    }
+
     // Summary KPIs
     const now = new Date()
     const monthStart = startOfMonth(now).toISOString()
@@ -123,6 +140,8 @@ export async function GET(request: NextRequest) {
       orders: ordersRaw.map((o: any) => ({
         id: o.id,
         poNumber: o.poNumber,
+        // Universal PO type
+        poType: o.poType || 'GENERAL',
         supplierId: o.supplierId,
         supplier: o.supplierId ? supplierMap[o.supplierId] || null : null,
         // Vendor linkage (for vendor-only POs)
@@ -131,11 +150,24 @@ export async function GET(request: NextRequest) {
         styleNo: o.styleNo || null,
         styleName: o.styleName || null,
         costSheetId: o.costSheetId || null,
+        // Legacy single-fabric fields (kept for backward compat — old POs use these)
         fabricName: o.fabricName,
         quantity: o.quantity,
         unit: o.unit,
         ratePerUnit: o.ratePerUnit,
+        // GST fields
+        gstType: o.gstType || 'IntraState',
+        gstPercent: o.gstPercent || 18,
+        taxableAmount: o.taxableAmount || 0,
+        totalGst: o.totalGst || 0,
         totalAmount: o.totalAmount,
+        // Broker / commission
+        brokerName: o.brokerName || null,
+        commissionPercent: o.commissionPercent || 0,
+        commissionAmount: o.commissionAmount || 0,
+        netAmount: o.netAmount || 0,
+        // Universal line items (each item has its own type)
+        items: itemsByPo[o.id] || [],
         expectedDelivery: o.expectedDelivery ? format(new Date(o.expectedDelivery), 'yyyy-MM-dd') : null,
         status: o.status,
         paymentStatus: o.paymentStatus,
@@ -165,22 +197,33 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const {
       supplierId,
-      vendorId,           // NEW: a PO can be raised against a Vendor instead of a Supplier
+      vendorId,           // a PO can be raised against a Vendor instead of a Supplier
+      // PO Type (universal classification — auto-derived from items if not provided)
+      poType,
+      // Legacy single-fabric fields (kept for backward compat with old create form)
       fabricName,
       quantity,
       unit,
       ratePerUnit,
       expectedDelivery,
       notes,
-      // NEW: Product linkage fields
+      // Product linkage fields (PO-level)
       styleNo,
       styleName,
       costSheetId,
-      // NEW: Multi-fabric line items
+      // Universal line items (preferred — each item has its own type)
       items,
+      // GST fields
+      gstType,
+      gstPercent,
+      // Broker / commission
+      brokerName,
+      brokerCommissionPercent,
+      // Discount
+      discountPercent,
     } = body
 
-    // Support both legacy single-fabric and new multi-fabric mode
+    // Support both legacy single-fabric and new universal line items
     const hasItems = items && Array.isArray(items) && items.length > 0
     const hasLegacy = fabricName && quantity && ratePerUnit
 
@@ -208,36 +251,112 @@ export async function POST(request: NextRequest) {
     }
     const poNumber = `${todayPrefix}${String(seq).padStart(3, '0')}`
 
-    // Calculate total from items or legacy fields
-    let totalAmount = 0
-    let primaryFabric = fabricName || ''
-    let primaryQty = Number(quantity) || 0
-    let primaryRate = Number(ratePerUnit) || 0
-    let primaryUnit = unit || 'meters'
-
+    // ── Normalize universal line items ──
+    // Each item: { itemType, name, color?, size?, styleNo?, styleName?, costSheetId?,
+    //              description?, quantity, unit, ratePerUnit }
+    // For legacy mode, fabricName/qty/rate become a single FABRIC item.
+    let normalizedItems: any[] = []
     if (hasItems) {
-      totalAmount = items.reduce((s: number, it: any) => s + (Number(it.quantity) || 0) * (Number(it.ratePerUnit) || 0), 0)
-      // Use first item as primary (for legacy compat)
-      primaryFabric = items[0].fabricName || fabricName || ''
-      primaryQty = Number(items[0].quantity) || 0
-      primaryRate = Number(items[0].ratePerUnit) || 0
-      primaryUnit = items[0].unit || unit || 'meters'
-    } else {
-      totalAmount = Number(quantity) * Number(ratePerUnit)
+      normalizedItems = items.map((it: any) => ({
+        itemType: it.itemType || 'FABRIC',
+        styleNo: it.styleNo || null,
+        styleName: it.styleName || null,
+        costSheetId: it.costSheetId || null,
+        name: it.name || it.fabricName || '',
+        description: it.description || null,
+        color: it.color || null,
+        size: it.size || null,
+        quantity: Number(it.quantity) || 0,
+        unit: it.unit || 'meters',
+        ratePerUnit: Number(it.ratePerUnit) || 0,
+      }))
+    } else if (hasLegacy) {
+      normalizedItems = [{
+        itemType: 'FABRIC',
+        styleNo: styleNo || null,
+        styleName: styleName || null,
+        costSheetId: costSheetId || null,
+        name: fabricName,
+        description: null,
+        color: null,
+        size: null,
+        quantity: Number(quantity),
+        unit: unit || 'meters',
+        ratePerUnit: Number(ratePerUnit),
+      }]
     }
+
+    // Calculate subtotal from line items
+    const subtotal = normalizedItems.reduce((s: number, it: any) => s + it.quantity * it.ratePerUnit, 0)
+    const discount = Number(discountPercent) || 0
+    const taxableAmount = Math.round(subtotal * (1 - discount / 100) * 100) / 100
+
+    // GST calculation
+    const gstTypeVal = gstType === 'InterState' ? 'InterState' : 'IntraState'
+    const gstPercentVal = Number(gstPercent) || 18
+    let cgstAmount = 0, sgstAmount = 0, igstAmount = 0, totalGst = 0
+    if (gstTypeVal === 'IntraState') {
+      const halfRate = gstPercentVal / 2 / 100
+      const half = Math.round(taxableAmount * halfRate * 100) / 100
+      cgstAmount = half
+      sgstAmount = half
+      totalGst = Math.round((cgstAmount + sgstAmount) * 100) / 100
+    } else {
+      igstAmount = Math.round(taxableAmount * gstPercentVal / 100 * 100) / 100
+      totalGst = igstAmount
+    }
+    const grandTotal = Math.round((taxableAmount + totalGst) * 100) / 100
+
+    // Broker commission
+    const commissionPercent = Number(brokerCommissionPercent) || 0
+    const commissionAmount = Math.round(grandTotal * commissionPercent / 100 * 100) / 100
+    const netAmount = Math.round((grandTotal - commissionAmount) * 100) / 100
+
+    // Auto-derive poType if not provided
+    let poTypeVal = poType
+    if (!poTypeVal) {
+      const types = new Set(normalizedItems.map((it: any) => it.itemType))
+      if (types.size === 1) {
+        poTypeVal = Array.from(types)[0]
+      } else if (types.size > 1) {
+        poTypeVal = 'MIXED'
+      } else {
+        poTypeVal = 'GENERAL'
+      }
+    }
+
+    // Legacy primary fields (for backward compat with old PO code paths)
+    const firstItem = normalizedItems[0] || {}
+    const primaryFabric = firstItem.name || fabricName || ''
+    const primaryQty = firstItem.quantity || Number(quantity) || 0
+    const primaryRate = firstItem.ratePerUnit || Number(ratePerUnit) || 0
+    const primaryUnit = firstItem.unit || unit || 'meters'
 
     const now = new Date().toISOString()
 
-    // Insert PO. supplierId is now nullable (a vendor-only PO has supplierId=null).
-    // vendorId is a new column — try with it first; fall back without if column missing.
+    // Build PO insert payload (with all universal fields — defensive fallback
+    // if columns don't exist yet via migration)
     const insertBase: Record<string, any> = {
       poNumber,
       fabricName: primaryFabric,
       quantity: primaryQty,
       unit: primaryUnit,
       ratePerUnit: primaryRate,
-      taxableAmount: 0,
-      totalAmount,
+      // GST
+      gstType: gstTypeVal,
+      gstPercent: gstPercentVal,
+      taxableAmount,
+      cgstAmount,
+      sgstAmount,
+      igstAmount,
+      totalGst,
+      totalAmount: grandTotal,
+      // Broker / commission
+      brokerName: brokerName || null,
+      commissionPercent,
+      commissionAmount,
+      netAmount,
+      // Other
       expectedDelivery: expectedDelivery ? new Date(expectedDelivery).toISOString() : null,
       status: 'Pending',
       paymentStatus: 'Unpaid',
@@ -246,65 +365,89 @@ export async function POST(request: NextRequest) {
       createdAt: now,
       updatedAt: now,
     }
-    // Only set supplierId if provided (else it stays null for vendor-only POs)
+    // poType column may not exist yet (migration pending) — try with it, fall back without
+    if (poTypeVal) insertBase.poType = poTypeVal
     if (supplierId) insertBase.supplierId = supplierId
+    if (notes) insertBase.notes = notes
 
     let po: any = null
-    let error: any = null
-    // First attempt: WITH vendorId column (requires migration)
-    if (vendorId) {
-      const { data: po1, error: e1 } = await supabase
+    // Insert with retry-without-new-columns fallback
+    const tryInsert = async (payload: Record<string, any>) => {
+      const { data, error } = await supabase
         .from('PurchaseOrder')
-        .insert({ ...insertBase, vendorId })
+        .insert(payload)
         .select()
         .single()
-      if (e1) {
-        const msg = String(e1.message || '')
-        if (/vendorId|column .* does not exist/i.test(msg)) {
-          // Fallback: insert without vendorId (migration not yet applied)
-          const { data: po2, error: e2 } = await supabase
-            .from('PurchaseOrder')
-            .insert(insertBase)
-            .select()
-            .single()
-          if (e2) throw e2
-          po = po2
-        } else {
-          throw e1
-        }
+      return { data, error }
+    }
+    // Attempt 1: full payload (with vendorId + poType + broker fields)
+    if (vendorId) insertBase.vendorId = vendorId
+    const { data: po1, error: e1 } = await tryInsert(insertBase)
+    if (e1) {
+      const msg = String(e1.message || '')
+      // Identify which new column is missing and strip it; retry
+      if (/poType|vendorId|brokerName|commissionPercent|commissionAmount|netAmount|column .* does not exist/i.test(msg)) {
+        const stripped = { ...insertBase }
+        if (/poType/.test(msg)) delete stripped.poType
+        if (/vendorId/.test(msg)) delete stripped.vendorId
+        if (/brokerName/.test(msg)) delete stripped.brokerName
+        if (/commissionPercent/.test(msg)) delete stripped.commissionPercent
+        if (/commissionAmount/.test(msg)) delete stripped.commissionAmount
+        if (/netAmount/.test(msg)) delete stripped.netAmount
+        const { data: po2, error: e2 } = await tryInsert(stripped)
+        if (e2) throw e2
+        po = po2
       } else {
-        po = po1
+        throw e1
       }
     } else {
-      // No vendorId — plain insert (supplier-only or legacy PO)
-      const { data: po3, error: e3 } = await supabase
-        .from('PurchaseOrder')
-        .insert(insertBase)
-        .select()
-        .single()
-      if (e3) throw e3
-      po = po3
+      po = po1
     }
-    error = null
 
-    // Insert multi-fabric line items if provided
-    if (hasItems) {
-      const itemRows = items.map((it: any) => ({
+    // Insert universal line items into POItem
+    if (normalizedItems.length > 0) {
+      const itemRows = normalizedItems.map((it: any) => ({
         purchaseOrderId: po.id,
-        styleNo: styleNo || null,
-        fabricName: it.fabricName || '',
-        color: it.color || null,
-        quantity: Number(it.quantity) || 0,
-        unit: it.unit || 'meters',
-        ratePerUnit: Number(it.ratePerUnit) || 0,
-        totalAmount: (Number(it.quantity) || 0) * (Number(it.ratePerUnit) || 0),
+        itemType: it.itemType,
+        styleNo: it.styleNo,
+        styleName: it.styleName,
+        costSheetId: it.costSheetId,
+        name: it.name,
+        description: it.description,
+        color: it.color,
+        size: it.size,
+        quantity: it.quantity,
+        unit: it.unit,
+        ratePerUnit: it.ratePerUnit,
+        totalAmount: Math.round(it.quantity * it.ratePerUnit * 100) / 100,
         receivedQty: 0,
         status: 'Pending',
+        // Legacy fabricName (kept populated for old code paths)
+        fabricName: it.name || '',
         createdAt: now,
         updatedAt: now,
       }))
-      const { error: itemsErr } = await supabase.from('POItem').insert(itemRows)
-      if (itemsErr) console.error('POItem insert error:', itemsErr)
+      // Try with universal columns; fall back to fabricName-only schema
+      const { error: itemsErr1 } = await supabase.from('POItem').insert(itemRows)
+      if (itemsErr1) {
+        const msg = String(itemsErr1.message || '')
+        if (/itemType|name|size|description|costSheetId|column .* does not exist/i.test(msg)) {
+          // Strip new columns and retry
+          const strippedRows = itemRows.map((r: any) => {
+            const s = { ...r }
+            if (/itemType/.test(msg)) delete s.itemType
+            if (/\bname\b/.test(msg)) delete s.name
+            if (/size/.test(msg)) delete s.size
+            if (/description/.test(msg)) delete s.description
+            if (/costSheetId/.test(msg)) delete s.costSheetId
+            return s
+          })
+          const { error: itemsErr2 } = await supabase.from('POItem').insert(strippedRows)
+          if (itemsErr2) console.error('POItem insert error (fallback):', itemsErr2.message)
+        } else {
+          console.error('POItem insert error:', itemsErr1.message)
+        }
+      }
     }
 
     // Fetch supplier for response (if a supplier was set)
@@ -329,10 +472,23 @@ export async function POST(request: NextRequest) {
       vendor = ven || null
     }
 
+    // Fetch created line items for response (so frontend has the persisted rows
+    // with their IDs and universal fields)
+    let createdItems: any[] = []
+    try {
+      const { data: itemsData } = await supabase
+        .from('POItem')
+        .select('*')
+        .eq('purchaseOrderId', po.id)
+        .order('createdAt', { ascending: true })
+      createdItems = itemsData || []
+    } catch { /* ignore — items fetch is best-effort */ }
+
     return NextResponse.json(
       {
         id: po.id,
         poNumber: po.poNumber,
+        poType: po.poType || poTypeVal || 'GENERAL',
         supplierId: po.supplierId,
         supplier: supplier || null,
         vendorId: po.vendorId || null,
@@ -344,7 +500,17 @@ export async function POST(request: NextRequest) {
         quantity: po.quantity,
         unit: po.unit,
         ratePerUnit: po.ratePerUnit,
-        totalAmount: po.totalAmount,
+        // GST
+        gstType: gstTypeVal,
+        gstPercent: gstPercentVal,
+        taxableAmount,
+        totalGst,
+        totalAmount: grandTotal,
+        // Broker / commission
+        brokerName: brokerName || null,
+        commissionPercent,
+        commissionAmount,
+        netAmount,
         expectedDelivery: po.expectedDelivery
           ? format(new Date(po.expectedDelivery), 'yyyy-MM-dd')
           : null,
@@ -352,7 +518,8 @@ export async function POST(request: NextRequest) {
         paymentStatus: po.paymentStatus,
         paidAmount: po.paidAmount,
         receivedQty: po.receivedQty,
-        items: hasItems ? items : undefined,
+        // Universal line items (with their itemType, name, color, size, etc.)
+        items: createdItems,
         createdAt: po.createdAt,
         updatedAt: po.updatedAt,
       },
