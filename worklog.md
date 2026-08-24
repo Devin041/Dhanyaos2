@@ -1823,3 +1823,31 @@ Stage Summary:
 - User can now answer: "yeh 40m Pink Silk kis PO se aaya?" → "PO-20260824-009 via GRN-20260824-002 from FineWear on 24 Aug"
 - This was the user's exact requirement — fully delivered.
 - Cleaned up test data (cancelled test PO).
+
+---
+Task ID: GRN-NULL-CRASH-FIX
+Agent: Main Agent (Z.ai Code)
+Task: Fix "Cannot read properties of null (reading 'name')" crash on GRN module page (same null-reference class of bug as PO page crash).
+
+Work Log:
+- User reported GRN page crash via screenshot (error: "Cannot read properties of null (reading 'name')").
+- Root cause: Same root cause as the earlier PO page crash. When I made `PurchaseOrder.supplierId` nullable (for vendor-only POs), some POs in the DB have `supplier = null`. The GRN module's PO dropdown at line 983 accessed `po.supplier.name` directly without a null check → JavaScript threw "Cannot read properties of null" → React Error Boundary caught it → showed "Something went wrong".
+- Verified by checking GRN API GET response — GRN entries had `supplier: null` because the GRN form sets `supplierId` from `po.supplierId` which is nullable for vendor-only POs.
+- Fix Applied:
+  - Updated PurchaseOrder interface in grn.tsx: `supplier` is now nullable, added `vendor?`, `vendorId?`, `supplierName?`, `items?` fields
+  - Fixed line 983 — PO dropdown now uses null-safe access:
+    `(po.supplier?.name) || (po.vendor?.vendorName) || po.supplierName || '—'`
+    This gracefully handles: supplier-only POs, vendor-only POs, and POs with neither set.
+  - Lines 1204-1208 and 1239-1241 were already properly guarded with `selectedGRN.purchaseOrder &&` checks — no fix needed there.
+
+Verification (browser test):
+- Before fix: GRN page showed "Something went wrong — Cannot read properties of null (reading 'name')"
+- After fix: GRN page loads successfully — 2 GRN entries visible (GRN-20260824-002, GRN-20260824-001), no error.
+- New GRN dialog also opens correctly (Create GRN form renders without crash).
+- Lint clean, no TypeScript errors.
+
+Stage Summary:
+- The "Something went wrong" crash on the GRN module is fully resolved.
+- Root cause was the same class of bug as the PO page crash — missing null check after I made supplierId nullable (necessary for vendor-only POs per the user's request).
+- The fix is comprehensive: the null-safe access pattern handles POs with supplier=null, vendor=null, or both null without crashing.
+- Screenshot saved at /tmp/grn-page-fixed.png

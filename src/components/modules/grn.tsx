@@ -103,13 +103,17 @@ interface Supplier {
 interface PurchaseOrder {
   id: string
   poNumber: string
-  supplierId: string
-  supplier: { name: string }
+  supplierId: string | null
+  supplier: { name: string } | null
+  vendor?: { vendorName: string } | null     // vendor-only POs have supplier=null
+  vendorId?: string | null
+  supplierName?: string                       // denormalized fallback
   fabricName: string
   quantity: number
   unit: string
   ratePerUnit: number
   status: string
+  items?: any[]                                // universal PO line items
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -980,7 +984,7 @@ export function GrnModule() {
                 <SelectContent>
                   {purchaseOrders.map((po) => (
                     <SelectItem key={po.id} value={po.id} className="text-xs">
-                      {po.poNumber} — {po.supplier.name} — {po.fabricName} ({po.quantity} {po.unit})
+                      {po.poNumber} — {(po.supplier?.name) || (po.vendor?.vendorName) || po.supplierName || '—'} — {po.fabricName} ({po.quantity} {po.unit})
                     </SelectItem>
                   ))}
                 </SelectContent>
