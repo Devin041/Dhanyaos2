@@ -307,11 +307,16 @@ export function ProductionModule() {
     styleName: '',
     targetQty: '',
     endDate: '',
+    fabricStockId: '',        // NEW — link to FabricStock row (auto-suggest)
+    plannedFabricMeters: '',  // NEW — how much fabric will be consumed
   })
 
   // Product catalog (for manual job product selector — merged from Sample
   // Catalog + Cost Sheets so ALL costed products appear, not just samples)
   const [catalogProducts, setCatalogProducts] = useState<Array<{ id: string; styleNo: string; styleName: string }>>([])
+
+  // Fabric stock list (for fabric auto-suggest in manual job form)
+  const [fabricStocks, setFabricStocks] = useState<Array<{ id: string; fabricName: string; color: string | null; lotNumber: string | null; availableMeters: number; averageCost: number }>>([])
 
   // Fetch product catalog once on mount
   useEffect(() => {
@@ -341,6 +346,28 @@ export function ProductionModule() {
       setCatalogProducts(list)
     }
     loadCatalog()
+  }, [])
+
+  // Fetch available fabric stocks (for auto-suggest in manual job creation)
+  useEffect(() => {
+    async function loadFabricStocks() {
+      try {
+        const res = await fetch('/api/fabric-stock')
+        if (res.ok) {
+          const data = await res.json()
+          const arr = (data.stocks || []).filter((s: any) => (s.availableMeters || 0) > 0)
+          setFabricStocks(arr.map((s: any) => ({
+            id: s.id,
+            fabricName: s.fabricName,
+            color: s.color || null,
+            lotNumber: s.lotNumber || null,
+            availableMeters: s.availableMeters,
+            averageCost: s.averageCost,
+          })))
+        }
+      } catch { /* silent */ }
+    }
+    loadFabricStocks()
   }, [])
 
   // Edit completed qty
@@ -597,11 +624,16 @@ export function ProductionModule() {
           targetQty: Number(manualJob.targetQty),
           startDate: jobStartDate,
           endDate: manualJob.endDate || undefined,
+          // NEW — fabric stock linkage (auto-suggest from available stock)
+          fabricStockId: manualJob.fabricStockId || undefined,
+          plannedFabricMeters: manualJob.plannedFabricMeters ? Number(manualJob.plannedFabricMeters) : undefined,
         }),
       })
       if (res.ok) {
         toast.success('Production job created successfully')
         setNewJobOpen(false)
+        // Reset fabric-related fields too
+        setManualJob({ styleNo: '', styleName: '', targetQty: '', endDate: '', fabricStockId: '', plannedFabricMeters: '' })
         fetchData()
       } else {
         const err = await res.json().catch(() => ({}))
@@ -1034,6 +1066,67 @@ export function ProductionModule() {
                         onChange={(e) => setManualJob({ ...manualJob, endDate: e.target.value })}
                         className="bg-muted/50 border-border"
                       />
+                    </div>
+                  </div>
+
+                  {/* Fabric auto-suggest from available stock (NEW) */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label className="text-xs text-muted-foreground">
+                        Fabric (from stock) <span className="text-[10px] text-muted-foreground/70">— auto-suggest</span>
+                      </Label>
+                      <Select
+                        value={manualJob.fabricStockId}
+                        onValueChange={(v) => setManualJob({ ...manualJob, fabricStockId: v })}
+                      >
+                        <SelectTrigger className="bg-muted/50 border-border">
+                          <SelectValue placeholder={fabricStocks.length > 0 ? 'Select fabric from stock...' : 'No fabric in stock'} />
+                        </SelectTrigger>
+                        <SelectContent className="max-h-72">
+                          {fabricStocks.map((f) => (
+                            <SelectItem key={f.id} value={f.id}>
+                              <span className="flex flex-col">
+                                <span className="font-medium text-xs">
+                                  {f.fabricName}
+                                  {f.color && <span className="text-muted-foreground"> · {f.color}</span>}
+                                  {f.lotNumber && <span className="text-muted-foreground/70 text-[10px]"> · Lot {f.lotNumber}</span>}
+                                </span>
+                                <span className="text-[10px] text-emerald-500">
+                                  {f.availableMeters}m available · ₹{f.averageCost}/m
+                                </span>
+                              </span>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs text-muted-foreground">Planned Fabric (meters)</Label>
+                      <Input
+                        type="number"
+                        placeholder="e.g. 50"
+                        value={manualJob.plannedFabricMeters}
+                        onChange={(e) => setManualJob({ ...manualJob, plannedFabricMeters: e.target.value })}
+                        className="bg-muted/50 border-border"
+                        min={0}
+                      />
+                      {(() => {
+                        const selected = fabricStocks.find((f) => f.id === manualJob.fabricStockId)
+                        if (!selected) return null
+                        const planned = parseFloat(manualJob.plannedFabricMeters) || 0
+                        if (planned > selected.availableMeters) {
+                          return (
+                            <p className="text-[10px] text-amber-500">
+                              ⚠ Planned ({planned}m) exceeds available ({selected.availableMeters}m)
+                            </p>
+                          )
+                        }
+                        return (
+                          <p className="text-[10px] text-muted-foreground">
+                            Will reserve {planned || 0}m of {selected.availableMeters}m available
+                          </p>
+                        )
+                      })()}
                     </div>
                   </div>
                 </div>

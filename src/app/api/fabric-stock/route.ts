@@ -63,6 +63,7 @@ export async function GET(request: NextRequest) {
         supplierId: s.supplierId,
         supplier: s.supplierId ? supplierMap[s.supplierId] || null : null,
         fabricName: s.fabricName,
+        color: s.color || null,                    // NEW — color-wise tracking
         gsm: s.gsm,
         width: s.width,
         lotNumber: s.lotNumber,

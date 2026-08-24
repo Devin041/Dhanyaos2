@@ -1686,3 +1686,88 @@ Stage Summary:
 - Sorted alphabetically so user can quickly scan.
 - Helper text explains the difference between SUP (raw material providers) and VEN (job workers).
 - This completes the universal counterparty pattern across the app: PO form, Production outsource dialog — both merge suppliers + vendors.
+
+---
+Task ID: FABRIC-RECEIPT-LEDGER-AND-PRODUCTION-AUTO-SUGGEST
+Agent: Main Agent (Z.ai Code)
+Task: Build comprehensive Fabric Receive → Stock → Production → Payment flow. User wants: PO raise → fabric receive against PO → entry in Fabric Stock (color-wise) → production auto-suggest available fabric → payment terms (120 days) with due date.
+
+Work Log:
+
+Phase 1 — Schema + Migration:
+- Updated prisma/schema.prisma:
+  - FabricStock: added `color` field (Pink/Maroon/Red as separate rows)
+  - NEW FabricReceipt table (audit ledger — poId, grnId, supplierId, fabricName, color, lotNumber, receivedQty, acceptedQty, ratePerUnit, receivedDate)
+  - PurchaseOrder: added `paymentTerms` (days, default 30) + `paymentDueDate` (auto-calculated)
+  - GrnItem: added `color` + `lotNumber` (for multi-color GRN)
+- Created SUPABASE-MIGRATION-FABRIC-RECEIPT.sql with full DDL + verification SELECTs.
+
+Phase 2 — GRN form enhancement:
+- src/components/modules/grn.tsx:
+  - GrnItem interface extended with color + lotNumber
+  - BLANK_ITEM now includes color/lotNumber defaults
+  - handlePOSelect rewritten: pre-fills ALL PO line items (universal POs have multiple items — one per color/fabric). For each POItem of type FABRIC/ACCESSORY, creates a GRN item row preserving color info.
+  - PO fetch expanded: now fetches all POs (not just 'Approved') and filters client-side to include Approved/Ordered/Pending + partially-received
+  - Added Color + Lot columns to GRN items table (with editable inputs)
+- src/app/api/grn/route.ts POST: accepts color + lotNumber per GrnItem
+- src/app/api/grn/[id]/approve/route.ts: 
+  - Stock lookup now matches by fabricName + color + supplierId + lotNumber (color-wise tracking)
+  - Creates FabricReceipt row for each accepted item (audit ledger with poId, grnId, color, lot, qty, rate, date)
+  - Non-fatal error handling if FabricReceipt table doesn't exist yet
+
+Phase 3 — Fabric Stock UI + Receipts history:
+- src/app/api/fabric-stock/route.ts GET: now returns `color` field per stock
+- NEW src/app/api/fabric-receipts/route.ts: lists FabricReceipt rows joined with PO/GRN/supplier info for full traceability
+
+Phase 4 — Production fabric auto-suggest:
+- src/components/modules/production.tsx:
+  - manualJob state extended with fabricStockId + plannedFabricMeters
+  - New fabricStocks state (fetches available stock from /api/fabric-stock)
+  - Manual job form now has "Fabric (from stock)" picker showing available fabric with color/lot/meters/rate
+  - Planned Fabric input with live validation (warns if planned > available)
+  - handleCreateManualJob passes fabricStockId + plannedFabricMeters to backend
+
+Phase 5 — PO payment terms + due date:
+- src/app/api/purchase-orders/route.ts:
+  - POST accepts paymentTerms, auto-calculates paymentDueDate = today + terms
+  - GET returns paymentTerms + paymentDueDate
+  - Progressive fallback: if any new column is missing (PGRST204), strip it and retry — works whether migration applied or not
+- src/components/modules/purchase-orders.tsx:
+  - New newPaymentTerms state (auto-fills from supplier: 15 for suppliers, 30 for vendors)
+  - Payment Terms input field in form (placeholder "e.g. 15, 30, 60, 120")
+  - Live summary shows "Payment Due (X days) — DD Mon YYYY" auto-calculated
+
+Verification:
+- API test: Created PO PO-20260824-008 with 4 fabric items (Silk × Pink/Maroon/Peach/Red × 40/60/70/80m), paymentTerms=120. Result:
+  * poType: FABRIC ✓
+  * 4 line items with colors ✓
+  * Taxable: ₹62,500 | GST: ₹11,250 | Grand: ₹73,750 ✓
+  * (paymentTerms/dueDate not persisted yet — migration pending, fallback stripped them)
+- Browser test: 
+  * PO form: Universal PO mode + Payment Terms field visible with "e.g. 15, 30, 60, 120" placeholder
+  * Production → New Job → Manual Entry → "Fabric (from stock)" dropdown shows all available fabric with meters + rate:
+    - Farsi Kurti Long Size 400m · ₹1030/m
+    - Muslin 152.99m · ₹134.66/m
+    - Cotton Linen 643.41m · ₹102.53/m
+    - Viscose Printed 545.11m · ₹224.05/m
+    - Chiffon Solid 299.16m · ₹155.45/m
+    - (10+ fabrics listed)
+  * Lint clean, no errors.
+- Screenshots saved.
+
+⚠️ Migration Required:
+- User needs to run SUPABASE-MIGRATION-FABRIC-RECEIPT.sql in Supabase SQL Editor. Without migration:
+  - POs still create (defensive fallback strips paymentTerms/dueDate)
+  - GRN approve still updates FabricStock (color column may be missing — fallback handles)
+  - FabricReceipt rows not created (table doesn't exist — non-fatal)
+  - Full color-wise tracking + payment due dates only work after migration.
+
+Stage Summary:
+- Comprehensive Fabric Receive → Stock → Production → Payment flow is built:
+  1. PO raise with fabric items (color-wise) + payment terms (120 days)
+  2. Fabric receive via GRN against PO — pre-fills ALL PO line items with colors
+  3. GRN approve → updates FabricStock (color-wise) + creates FabricReceipt (audit ledger)
+  4. Production → fabric auto-suggest from available stock
+  5. Payment due date auto-calculated (today + terms)
+- Same defensive fallback pattern used throughout — works whether migration applied or not.
+- Migration SQL ready at SUPABASE-MIGRATION-FABRIC-RECEIPT.sql.

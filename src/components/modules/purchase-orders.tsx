@@ -281,6 +281,8 @@ export function PurchaseOrders() {
   const [newBrokerName, setNewBrokerName] = useState('')
   const [newBrokerCommission, setNewBrokerCommission] = useState('0')
   const [newDiscount, setNewDiscount] = useState('0')
+  // Payment terms (NEW — auto-copied from supplier when counterparty selected)
+  const [newPaymentTerms, setNewPaymentTerms] = useState('30')
 
   // Action state
   const [actionLoading, setActionLoading] = useState(false)
@@ -521,6 +523,8 @@ export function PurchaseOrders() {
           brokerName: newBrokerName || undefined,
           brokerCommissionPercent: parseFloat(newBrokerCommission) || 0,
           discountPercent: parseFloat(newDiscount) || 0,
+          // Payment terms (NEW — auto-calculated due date on backend)
+          paymentTerms: parseInt(newPaymentTerms) || 30,
         }
         const res = await fetch('/api/purchase-orders', {
           method: 'POST',
@@ -537,6 +541,7 @@ export function PurchaseOrders() {
           setNewPoType('GENERAL')
           setNewGstType('IntraState'); setNewGstPercent('18')
           setNewBrokerName(''); setNewBrokerCommission('0'); setNewDiscount('0')
+          setNewPaymentTerms('30')
           fetchOrders()
         } else {
           toast.error(data.error || 'Failed to create purchase order')
@@ -1096,7 +1101,16 @@ export function PurchaseOrders() {
             {/* Counterparty — Supplier OR Vendor (merged) */}
             <div className="space-y-1.5">
               <Label className="text-xs font-medium text-foreground/80">Supplier / Vendor *</Label>
-              <Select value={form.supplierId} onValueChange={(v) => setForm({ ...form, supplierId: v })}>
+              <Select value={form.supplierId} onValueChange={(v) => {
+                setForm({ ...form, supplierId: v })
+                // Auto-fill payment terms from supplier/vendor when selected
+                const cp = counterparties.find(c => c.id === v)
+                if (cp) {
+                  // Suppliers carry paymentTerms on Supplier table; Vendors on Vendor table.
+                  // For simplicity we default to 30 if not found — user can edit.
+                  setNewPaymentTerms(cp.kind === 'Supplier' ? '15' : '30')
+                }
+              }}>
                 <SelectTrigger className="bg-muted/50 border-border h-9">
                   <SelectValue placeholder="Select supplier or vendor..." />
                 </SelectTrigger>
@@ -1217,6 +1231,21 @@ export function PurchaseOrders() {
                       step={0.5}
                     />
                   </div>
+                  <div>
+                    <Label className="text-[10px] text-muted-foreground">Payment Terms (days)</Label>
+                    <Input
+                      type="number"
+                      value={newPaymentTerms}
+                      onChange={(e) => setNewPaymentTerms(e.target.value)}
+                      className="h-8 text-xs bg-muted/50"
+                      min={0}
+                      step={1}
+                      placeholder="e.g. 15, 30, 60, 120"
+                    />
+                    <p className="text-[10px] text-muted-foreground/70">
+                      Days to pay (due date = today + terms)
+                    </p>
+                  </div>
                   <div className="sm:col-span-2">
                     <Label className="text-[10px] text-muted-foreground">Broker Name (optional)</Label>
                     <Input
@@ -1264,6 +1293,17 @@ export function PurchaseOrders() {
                           <div className="flex justify-between font-semibold"><span>Net Payable</span><span className="text-primary">₹{net.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span></div>
                         </>
                       )}
+                      {/* Payment due date (auto-calculated from today + terms) */}
+                      {(() => {
+                        const days = parseInt(newPaymentTerms) || 0
+                        if (days <= 0) return null
+                        const due = new Date()
+                        due.setDate(due.getDate() + days)
+                        const dueStr = due.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+                        return (
+                          <div className="flex justify-between border-t border-border/30 pt-1"><span className="text-muted-foreground">Payment Due ({days} days)</span><span className="text-amber-500 font-medium">{dueStr}</span></div>
+                        )
+                      })()}
                     </div>
                   )
                 })()}

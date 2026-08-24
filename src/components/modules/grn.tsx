@@ -63,6 +63,8 @@ import { toast } from 'sonner'
 interface GrnItem {
   id?: string
   fabricName: string
+  color?: string         // NEW — Pink / Maroon / Red
+  lotNumber?: string     // NEW — lot/batch number
   orderedQty: number
   receivedQty: number
   acceptedQty: number
@@ -159,6 +161,8 @@ const STATUS_TABS = ['All', 'Draft', 'Inspected', 'Approved', 'Rejected']
 
 const BLANK_ITEM = (): GrnItem => ({
   fabricName: '',
+  color: '',
+  lotNumber: '',
   orderedQty: 0,
   receivedQty: 0,
   acceptedQty: 0,
@@ -244,11 +248,19 @@ export function GrnModule() {
 
   useEffect(() => {
     Promise.all([
-      fetch('/api/suppliers?limit=200').then((r) => r.json()).catch(() => ({ suppliers: [] })),
-      fetch('/api/purchase-orders?limit=200&status=Approved').then((r) => r.json()).catch(() => ({ orders: [] })),
+      fetch('/api/suppliers?limit=500').then((r) => r.json()).catch(() => ({ suppliers: [] })),
+      // Fetch POs in statuses that are eligible for fabric receipt:
+      // Approved (ready to receive) + Ordered (PO placed, can receive) + Pending (allow early receive)
+      fetch('/api/purchase-orders?limit=500').then((r) => r.json()).catch(() => ({ orders: [] })),
     ]).then(([sData, pData]) => {
       if (sData.suppliers) setSuppliers(sData.suppliers)
-      if (pData.orders) setPurchaseOrders(pData.orders)
+      // Filter client-side to exclude fully-received/cancelled POs
+      const allOrders = pData.orders || []
+      const eligible = allOrders.filter((po: any) =>
+        ['Approved', 'Ordered', 'Pending'].includes(po.status) ||
+        (po.receivedQty || 0) < (po.quantity || 0)
+      )
+      setPurchaseOrders(eligible)
     })
   }, [])
 
@@ -329,26 +341,50 @@ export function GrnModule() {
   }
 
   // ─── PO select handler ──────────────────────────────────────────────────
-
+  // Pre-fills ALL line items from the PO (universal POs have multiple items
+  // — one per color/fabric/product). Each becomes a GrnItem row so the user
+  // can record received/accepted qty per color/lot.
   const handlePOSelect = (poId: string) => {
-    const po = purchaseOrders.find((p) => p.id === poId)
-    if (po) {
-      setForm((prev) => ({
-        ...prev,
-        poId: po.id,
-        supplierId: po.supplierId,
-        supplierName: po.supplier.name,
-      }))
-      // Pre-fill item with PO data
-      setItems([
-        {
-          fabricName: po.fabricName,
-          orderedQty: po.quantity,
+    const po = purchaseOrders.find((p) => p.id === poId) as any
+    if (!po) return
+    setForm((prev) => ({
+      ...prev,
+      poId: po.id,
+      supplierId: po.supplierId || po.vendorId || '',
+      supplierName: po.supplier?.name || po.vendor?.vendorName || po.supplierName || '—',
+    }))
+    // Universal POs have `items` array (POItem rows). Use them if available.
+    const poItems: any[] = po.items || []
+    if (poItems.length > 0) {
+      // Build one GRN item per PO line item, preserving color/size/lot info
+      const newItems: GrnItem[] = poItems
+        .filter((it: any) => (it.itemType || 'FABRIC') === 'FABRIC' || (it.itemType || '') === 'ACCESSORY')
+        .map((it: any) => ({
+          fabricName: it.name || it.fabricName || '',
+          color: it.color || '',
+          lotNumber: '',
+          orderedQty: it.quantity || 0,
           receivedQty: 0,
           acceptedQty: 0,
           rejectedQty: 0,
           defectNotes: '',
-          ratePerUnit: po.ratePerUnit,
+          ratePerUnit: it.ratePerUnit || 0,
+          totalValue: 0,
+        }))
+      setItems(newItems.length > 0 ? newItems : [BLANK_ITEM()])
+    } else {
+      // Legacy PO (single-fabric mode) — pre-fill primary fabric only
+      setItems([
+        {
+          fabricName: po.fabricName || '',
+          color: '',
+          lotNumber: '',
+          orderedQty: po.quantity || 0,
+          receivedQty: 0,
+          acceptedQty: 0,
+          rejectedQty: 0,
+          defectNotes: '',
+          ratePerUnit: po.ratePerUnit || 0,
           totalValue: 0,
         },
       ])
@@ -555,6 +591,8 @@ export function GrnModule() {
         <TableHeader>
           <TableRow className="border-border/50 hover:bg-transparent">
             <TableHead className="text-[11px] font-semibold text-muted-foreground min-w-[140px]">Fabric</TableHead>
+            <TableHead className="text-[11px] font-semibold text-muted-foreground w-[90px]">Color</TableHead>
+            <TableHead className="text-[11px] font-semibold text-muted-foreground w-[80px]">Lot</TableHead>
             <TableHead className="text-[11px] font-semibold text-muted-foreground text-right w-[80px]">Ordered</TableHead>
             <TableHead className="text-[11px] font-semibold text-muted-foreground text-right w-[80px]">Received</TableHead>
             <TableHead className="text-[11px] font-semibold text-muted-foreground text-right w-[80px]">Accepted</TableHead>
@@ -578,6 +616,30 @@ export function GrnModule() {
                   />
                 ) : (
                   <span className="text-xs font-medium">{item.fabricName || '—'}</span>
+                )}
+              </TableCell>
+              <TableCell className="py-1.5">
+                {editable ? (
+                  <Input
+                    className="h-7 text-xs"
+                    placeholder="Color"
+                    value={item.color || ''}
+                    onChange={(e) => updateItem(idx, 'color', e.target.value)}
+                  />
+                ) : (
+                  <span className="text-xs">{item.color || '—'}</span>
+                )}
+              </TableCell>
+              <TableCell className="py-1.5">
+                {editable ? (
+                  <Input
+                    className="h-7 text-xs"
+                    placeholder="Lot"
+                    value={item.lotNumber || ''}
+                    onChange={(e) => updateItem(idx, 'lotNumber', e.target.value)}
+                  />
+                ) : (
+                  <span className="text-xs">{item.lotNumber || '—'}</span>
                 )}
               </TableCell>
               {(['orderedQty', 'receivedQty', 'acceptedQty', 'rejectedQty', 'ratePerUnit'] as const).map((field) => (

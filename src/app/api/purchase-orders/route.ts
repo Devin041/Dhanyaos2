@@ -166,6 +166,9 @@ export async function GET(request: NextRequest) {
         commissionPercent: o.commissionPercent || 0,
         commissionAmount: o.commissionAmount || 0,
         netAmount: o.netAmount || 0,
+        // Payment terms (NEW)
+        paymentTerms: o.paymentTerms || 30,
+        paymentDueDate: o.paymentDueDate ? format(new Date(o.paymentDueDate), 'yyyy-MM-dd') : null,
         // Universal line items (each item has its own type)
         items: itemsByPo[o.id] || [],
         expectedDelivery: o.expectedDelivery ? format(new Date(o.expectedDelivery), 'yyyy-MM-dd') : null,
@@ -221,6 +224,8 @@ export async function POST(request: NextRequest) {
       brokerCommissionPercent,
       // Discount
       discountPercent,
+      // Payment terms (NEW — copied from supplier, editable)
+      paymentTerms,
     } = body
 
     // Support both legacy single-fabric and new universal line items
@@ -356,6 +361,14 @@ export async function POST(request: NextRequest) {
       commissionPercent,
       commissionAmount,
       netAmount,
+      // Payment terms + due date (NEW)
+      paymentTerms: Number(paymentTerms) || 30,
+      paymentDueDate: (() => {
+        const days = Number(paymentTerms) || 30
+        const due = new Date(now)
+        due.setDate(due.getDate() + days)
+        return due.toISOString()
+      })(),
       // Other
       expectedDelivery: expectedDelivery ? new Date(expectedDelivery).toISOString() : null,
       status: 'Pending',
@@ -380,30 +393,33 @@ export async function POST(request: NextRequest) {
         .single()
       return { data, error }
     }
-    // Attempt 1: full payload (with vendorId + poType + broker fields)
+    // Strip fields not yet present in DB. We try the FULL payload first; if
+    // PostgREST complains about a missing column (PGRST204 / "Could not find
+    // the 'X' column"), we progressively strip the offending columns and retry.
+    // This makes the API resilient to migrations not being applied yet.
+    const NEW_COLUMNS = ['poType', 'vendorId', 'brokerName', 'commissionPercent', 'commissionAmount', 'netAmount', 'notes', 'paymentTerms', 'paymentDueDate']
+
     if (vendorId) insertBase.vendorId = vendorId
-    const { data: po1, error: e1 } = await tryInsert(insertBase)
-    if (e1) {
-      const msg = String(e1.message || '')
-      // Identify which new column is missing and strip it; retry
-      if (/poType|vendorId|brokerName|commissionPercent|commissionAmount|netAmount|notes|column .* does not exist/i.test(msg)) {
-        const stripped = { ...insertBase }
-        if (/poType/.test(msg)) delete stripped.poType
-        if (/vendorId/.test(msg)) delete stripped.vendorId
-        if (/brokerName/.test(msg)) delete stripped.brokerName
-        if (/commissionPercent/.test(msg)) delete stripped.commissionPercent
-        if (/commissionAmount/.test(msg)) delete stripped.commissionAmount
-        if (/netAmount/.test(msg)) delete stripped.netAmount
-        if (/notes/.test(msg)) delete stripped.notes
-        const { data: po2, error: e2 } = await tryInsert(stripped)
-        if (e2) throw e2
-        po = po2
-      } else {
-        throw e1
+    let currentPayload = { ...insertBase }
+    let lastError: any = null
+    for (let attempt = 0; attempt < NEW_COLUMNS.length + 1; attempt++) {
+      const { data, error } = await tryInsert(currentPayload)
+      if (!error) {
+        po = data
+        break
       }
-    } else {
-      po = po1
+      lastError = error
+      const msg = String(error.message || '')
+      // Find which column is missing and strip it
+      const missingCol = NEW_COLUMNS.find(col => msg.includes(`'${col}'`))
+      if (missingCol) {
+        delete currentPayload[missingCol]
+        continue
+      }
+      // If we can't identify a specific column, throw
+      throw error
     }
+    if (!po) throw lastError
 
     // Insert universal line items into POItem
     if (normalizedItems.length > 0) {

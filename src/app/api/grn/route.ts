@@ -175,6 +175,8 @@ export async function POST(req: NextRequest) {
 
       return {
         fabricName: String(item.fabricName || ''),
+        color: item.color ? String(item.color) : null,
+        lotNumber: item.lotNumber ? String(item.lotNumber) : null,
         orderedQty: Number(item.orderedQty) || 0,
         receivedQty,
         acceptedQty,

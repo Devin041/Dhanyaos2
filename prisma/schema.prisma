@@ -201,6 +201,9 @@ model PurchaseOrder {
   commissionPercent Float     @default(0)
   commissionAmount  Float     @default(0)
   netAmount         Float     @default(0)  // grand total - commission
+  // Payment terms (NEW — copied from supplier at PO creation, editable)
+  paymentTerms      Int      @default(30)  // days: 15/30/60/90/120
+  paymentDueDate    DateTime?               // PO date + paymentTerms (auto-calculated)
   expectedDelivery  DateTime?
   status            String    @default("Pending")
   paymentStatus     String    @default("Unpaid")
@@ -210,6 +213,7 @@ model PurchaseOrder {
   // Universal line items (each item can be Fabric / Goods / Accessory / Service)
   items             POItem[]
   grnNotes          GrnNote[]
+  fabricReceipts    FabricReceipt[]        // receipts against this PO (NEW)
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
 }
@@ -305,6 +309,7 @@ model FabricStock {
   supplierId    String?
   supplier      Supplier? @relation(fields: [supplierId], references: [id])
   fabricName    String
+  color         String?                 // Pink / Maroon / Red (NEW — for color-wise tracking)
   gsm           Int?
   width         Float?
   lotNumber     String?
@@ -315,8 +320,39 @@ model FabricStock {
   productionJobs   ProductionJob[]
   fabricConsumptions FabricConsumption[]
   stockReservations  StockReservation[]
+  receipts      FabricReceipt[]        // history of all receipts (NEW)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+}
+
+// ─── Fabric Receipt Ledger ──────────────────────────────────────────────────
+// One row PER receipt (not per stock). When fabric is received against a PO
+// via a GRN, a FabricReceipt row is created. This gives full traceability:
+// "this 40m Pink Silk came from PO-001 via GRN-001 on 22 Aug".
+// FabricStock.availableMeters is the live balance (sum of all receipts minus
+// consumption); FabricReceipt is the immutable audit trail.
+model FabricReceipt {
+  id              String   @id @default(cuid())
+  fabricStockId   String
+  fabricStock     FabricStock @relation(fields: [fabricStockId], references: [id], onDelete: Cascade)
+  poId            String?                 // link to PurchaseOrder (nullable for direct receipts)
+  grnId           String?                 // link to GrnNote (nullable for manual receipts)
+  supplierId      String?                 // supplier/vendor this came from
+  fabricName      String                  // denormalized for easy display
+  color           String?                 // Pink / Maroon / Red
+  lotNumber       String?                 // lot/batch number
+  receivedQty     Float    @default(0)    // kitna receive hua
+  acceptedQty     Float    @default(0)    // QC ke baad kitna accept (usually = received)
+  ratePerUnit     Float    @default(0)    // rate at which received
+  totalValue      Float    @default(0)    // acceptedQty × ratePerUnit
+  receivedDate    DateTime @default(now())
+  notes           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([fabricStockId])
+  @@index([poId])
+  @@index([grnId])
 }
 
 // ============ FINISHED GOODS INVENTORY ============
@@ -723,6 +759,7 @@ model GrnNote {
   qualityRemarks  String?
   notes           String?
   grnItems        GrnItem[]
+  fabricReceipts  FabricReceipt[]        // receipts created from this GRN (NEW)
   createdAt       DateTime   @default(now())
   updatedAt       DateTime   @updatedAt
 
@@ -735,6 +772,8 @@ model GrnItem {
   grnId           String
   grnNote         GrnNote  @relation(fields: [grnId], references: [id], onDelete: Cascade)
   fabricName      String
+  color           String?                 // NEW — Pink / Maroon / Red (for color-wise GRN)
+  lotNumber       String?                 // NEW — lot/batch number
   orderedQty      Float
   receivedQty     Float
   acceptedQty     Float

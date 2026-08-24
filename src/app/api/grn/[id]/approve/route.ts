@@ -42,21 +42,31 @@ export async function POST(
       .eq('id', id)
     if (updErr) throw updErr
 
-    // Update fabric stock for each accepted item
+    // Update fabric stock for each accepted item AND create a FabricReceipt
+    // row (audit ledger) so we can trace "this fabric came from PO-X via GRN-Y"
     for (const item of grnItems || []) {
       if (item.acceptedQty > 0) {
-        // Find existing stock by fabricName (+ supplierId if available)
+        // Find existing stock by fabricName + color + supplierId (color-wise
+        // tracking — Pink Silk and Maroon Silk are separate stock rows)
         let stockQuery = supabase
           .from('FabricStock')
           .select('*')
           .eq('fabricName', item.fabricName)
 
+        if (item.color) {
+          stockQuery = stockQuery.eq('color', item.color)
+        }
         if (grn.supplierId) {
           stockQuery = stockQuery.eq('supplierId', grn.supplierId)
+        }
+        if (item.lotNumber) {
+          stockQuery = stockQuery.eq('lotNumber', item.lotNumber)
         }
 
         const { data: existingStocks } = await stockQuery.limit(1)
         const existingStock = existingStocks && existingStocks.length > 0 ? existingStocks[0] : null
+
+        let fabricStockId: string
 
         if (existingStock) {
           const newMeters = existingStock.availableMeters + item.acceptedQty
@@ -70,17 +80,22 @@ export async function POST(
               totalValue: newValue,
               averageCost: newAvg,
               supplierId: grn.supplierId || existingStock.supplierId,
+              color: item.color || existingStock.color,
+              lotNumber: item.lotNumber || existingStock.lotNumber,
               updatedAt: new Date().toISOString(),
             })
             .eq('id', existingStock.id)
 
           if (stockUpdErr) throw stockUpdErr
+          fabricStockId = existingStock.id
         } else {
           const now = new Date().toISOString()
-          const { error: stockInsErr } = await supabase
+          const { data: newStock, error: stockInsErr } = await supabase
             .from('FabricStock')
             .insert({
               fabricName: item.fabricName,
+              color: item.color || null,
+              lotNumber: item.lotNumber || null,
               supplierId: grn.supplierId,
               availableMeters: item.acceptedQty,
               reservedMeters: 0,
@@ -89,8 +104,36 @@ export async function POST(
               createdAt: now,
               updatedAt: now,
             })
+            .select('id')
+            .single()
 
           if (stockInsErr) throw stockInsErr
+          fabricStockId = newStock.id
+        }
+
+        // Create a FabricReceipt row (audit ledger — traceable to PO + GRN)
+        try {
+          await supabase.from('FabricReceipt').insert({
+            fabricStockId,
+            poId: grn.poId || null,
+            grnId: grn.id,
+            supplierId: grn.supplierId || null,
+            fabricName: item.fabricName,
+            color: item.color || null,
+            lotNumber: item.lotNumber || null,
+            receivedQty: item.receivedQty || 0,
+            acceptedQty: item.acceptedQty,
+            ratePerUnit: item.ratePerUnit,
+            totalValue: item.acceptedQty * item.ratePerUnit,
+            receivedDate: grn.receivedDate || new Date().toISOString(),
+            notes: item.defectNotes || null,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          })
+        } catch (receiptErr: any) {
+          // FabricReceipt table may not exist yet (migration pending) —
+          // log but don't fail the approval (stock update already succeeded)
+          console.error('FabricReceipt insert (non-fatal):', receiptErr?.message)
         }
       }
     }
