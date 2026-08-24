@@ -66,7 +66,9 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
-    const { salesOrderId, styleNo, styleName, targetQty, endDate, startDate, costSheetId } = body
+    const { salesOrderId, styleNo, styleName, targetQty, endDate, startDate, costSheetId,
+            // NEW: fabric consumption automation
+            fabricStockId, plannedFabricMeters } = body
     if (!styleNo || !styleName || !targetQty) return NextResponse.json({ error: 'styleNo, styleName, and targetQty are required' }, { status: 400 })
 
     // If linked to sales order, fetch order to verify and get items
@@ -125,6 +127,7 @@ export async function POST(req: NextRequest) {
     const jobNo = `${prefix}${String(nextSeq).padStart(3, '0')}`
     const ts = new Date().toISOString()
 
+    const plannedMeters = Number(plannedFabricMeters) || 0
     const { data: job, error } = await supabase.from('ProductionJob').insert({
       jobNo,
       salesOrderId: salesOrderId || null,
@@ -133,6 +136,10 @@ export async function POST(req: NextRequest) {
       completedQty: 0,
       stage: 'Fabric Issue',
       status: 'In Progress',
+      // NEW: fabric linkage + planned consumption
+      fabricStockId: fabricStockId || null,
+      plannedFabricMeters: plannedMeters,
+      actualFabricConsumed: 0,
       startDate: startDate ? new Date(startDate).toISOString() : today.toISOString(),
       endDate: endDate ? new Date(endDate).toISOString() : null,
       createdAt: ts, updatedAt: ts,
@@ -146,6 +153,35 @@ export async function POST(req: NextRequest) {
         await supabase.from('ProductionJob').update({ costSheetId: resolvedCostSheetId }).eq('id', job.id)
       } catch {
         // Column may not exist in Supabase yet — ignore
+      }
+    }
+
+    // NEW: Fabric reservation automation — when a production job is created with
+    // a linked fabricStockId + plannedFabricMeters, immediately reserve that
+    // much fabric in FabricStock. The fabric stays "available" but is marked as
+    // reserved so other jobs don't try to use the same stock.
+    if (fabricStockId && plannedMeters > 0) {
+      try {
+        const { data: fabricStock } = await supabase
+          .from('FabricStock')
+          .select('id, availableMeters, reservedMeters')
+          .eq('id', fabricStockId)
+          .single()
+        if (fabricStock) {
+          const newReserved = (fabricStock.reservedMeters || 0) + plannedMeters
+          // Sanity check: can't reserve more than available
+          if (newReserved > (fabricStock.availableMeters || 0)) {
+            // Still reserve (production will catch the shortfall) but warn in logs
+            console.warn(`Production ${job.jobNo}: reserving ${plannedMeters}m but only ${fabricStock.availableMeters}m available`)
+          }
+          await supabase
+            .from('FabricStock')
+            .update({ reservedMeters: newReserved, updatedAt: ts })
+            .eq('id', fabricStockId)
+        }
+      } catch (fabricErr) {
+        // Fabric reservation failure shouldn't fail the production job creation
+        console.error('Fabric reservation (non-fatal):', fabricErr)
       }
     }
 

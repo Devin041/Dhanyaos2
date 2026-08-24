@@ -258,11 +258,12 @@ export function GrnModule() {
       fetch('/api/purchase-orders?limit=500').then((r) => r.json()).catch(() => ({ orders: [] })),
     ]).then(([sData, pData]) => {
       if (sData.suppliers) setSuppliers(sData.suppliers)
-      // Filter client-side to exclude fully-received/cancelled POs
+      // Filter client-side to exclude cancelled POs — include all others
+      // (Pending, Approved, Ordered, Received — Received is included for partial
+      // receipt scenarios where the user wants to receive more against the same PO)
       const allOrders = pData.orders || []
       const eligible = allOrders.filter((po: any) =>
-        ['Approved', 'Ordered', 'Pending'].includes(po.status) ||
-        (po.receivedQty || 0) < (po.quantity || 0)
+        po.status !== 'Cancelled'
       )
       setPurchaseOrders(eligible)
     })

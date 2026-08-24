@@ -309,7 +309,20 @@ export function ProductionModule() {
     endDate: '',
     fabricStockId: '',        // NEW — link to FabricStock row (auto-suggest)
     plannedFabricMeters: '',  // NEW — how much fabric will be consumed
+    consumptionPerPiece: '2.5', // NEW — meters of fabric per garment (auto-calc)
   })
+
+  // When product or targetQty or consumptionPerPiece changes, auto-calculate plannedFabricMeters
+  useEffect(() => {
+    const qty = parseFloat(manualJob.targetQty) || 0
+    const perPiece = parseFloat(manualJob.consumptionPerPiece) || 0
+    if (qty > 0 && perPiece > 0) {
+      setManualJob(prev => ({
+        ...prev,
+        plannedFabricMeters: String(Math.round(qty * perPiece * 100) / 100),
+      }))
+    }
+  }, [manualJob.targetQty, manualJob.consumptionPerPiece])
 
   // Product catalog (for manual job product selector — merged from Sample
   // Catalog + Cost Sheets so ALL costed products appear, not just samples)
@@ -633,7 +646,7 @@ export function ProductionModule() {
         toast.success('Production job created successfully')
         setNewJobOpen(false)
         // Reset fabric-related fields too
-        setManualJob({ styleNo: '', styleName: '', targetQty: '', endDate: '', fabricStockId: '', plannedFabricMeters: '' })
+        setManualJob({ styleNo: '', styleName: '', targetQty: '', endDate: '', fabricStockId: '', plannedFabricMeters: '', consumptionPerPiece: '2.5' })
         fetchData()
       } else {
         const err = await res.json().catch(() => ({}))
@@ -1104,7 +1117,7 @@ export function ProductionModule() {
                       <Label className="text-xs text-muted-foreground">Planned Fabric (meters)</Label>
                       <Input
                         type="number"
-                        placeholder="e.g. 50"
+                        placeholder="auto-calculated"
                         value={manualJob.plannedFabricMeters}
                         onChange={(e) => setManualJob({ ...manualJob, plannedFabricMeters: e.target.value })}
                         className="bg-muted/50 border-border"
@@ -1127,6 +1140,38 @@ export function ProductionModule() {
                           </p>
                         )
                       })()}
+                    </div>
+                  </div>
+
+                  {/* Consumption per piece + auto-calc helper (NEW) */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label className="text-xs text-muted-foreground">Fabric / Piece (m)</Label>
+                      <Input
+                        type="number"
+                        placeholder="e.g. 2.5"
+                        value={manualJob.consumptionPerPiece}
+                        onChange={(e) => setManualJob({ ...manualJob, consumptionPerPiece: e.target.value })}
+                        className="bg-muted/50 border-border"
+                        min={0}
+                        step={0.1}
+                      />
+                      <p className="text-[10px] text-muted-foreground/70">
+                        Meters of fabric needed per garment (auto-calculates planned fabric)
+                      </p>
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs text-muted-foreground">Auto-Calc</Label>
+                      <div className="h-9 flex items-center px-3 rounded-md bg-amber-500/5 border border-amber-500/20 text-xs text-amber-600 dark:text-amber-400">
+                        {(() => {
+                          const qty = parseFloat(manualJob.targetQty) || 0
+                          const perPiece = parseFloat(manualJob.consumptionPerPiece) || 0
+                          if (qty > 0 && perPiece > 0) {
+                            return `${qty} pcs × ${perPiece}m = ${Math.round(qty * perPiece * 100) / 100}m`
+                          }
+                          return 'Enter qty + fabric/piece'
+                        })()}
+                      </div>
                     </div>
                   </div>
                 </div>
