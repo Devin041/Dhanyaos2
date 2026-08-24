@@ -1440,3 +1440,40 @@ Stage Summary:
   - Purchase Order form: All 32 products visible (Sample Catalog + Cost Sheets merged)
   - Production module: Product catalog dropdown shows all 32 products
 - The screenshot user shared showed a stale Supabase SQL Editor result (it cached the pre-migration schema). The actual DB has the new columns — confirmed via direct REST API inserts.
+
+---
+Task ID: PO-VENDOR-MIGRATION-VERIFICATION
+Agent: Main Agent (Z.ai Code)
+Task: Verify PO-VENDOR-TYPE migration applied successfully and everything works end-to-end.
+
+Work Log:
+- User confirmed they ran SUPABASE-MIGRATION-PO-VENDOR-TYPE.sql in Supabase SQL Editor.
+- Verified via direct REST API probes (insert with new columns → check if accepted):
+  1. PurchaseOrder with vendorId → ACCEPTED (vendorId column EXISTS, supplierId is now nullable)
+  2. Vendor with vendorType="Dyeing" → ACCEPTED (vendorType column EXISTS)
+- Found one response bug: the POST /api/purchase-orders handler was not returning vendorId/vendor in the response (only supplierId/supplier). Fixed by:
+  - Made supplier fetch conditional on po.supplierId being set
+  - Added vendor fetch (vendorName, vendorType, contactPerson, phone, paymentTerms) when po.vendorId is set
+  - Added vendorId + vendor fields to the JSON response
+- Full end-to-end test (vendor-only PO):
+  - Created vendor "Surat Dyeing Works" with vendorType="Dyeing", GST, state → 201, vendorType persisted ✓
+  - Created PO PO-20260824-004 with vendorId only (no supplierId):
+    * vendorId: 466e7332... ← persisted ✓
+    * vendor: {vendorName: "Surat Dyeing Works", vendorType: "Dyeing", contactPerson: "Ramesh Bhai", ...} ← fetched ✓
+    * supplierId: null (vendor-only PO works — supplierId is now nullable) ✓
+    * totalAmount: ₹1125 (15 × ₹75) ✓
+- Cleaned up test data.
+
+Stage Summary:
+- Migration is fully applied. Three schema changes now live in Supabase:
+  1. PurchaseOrder.supplierId is nullable (vendor-only POs possible) ✓
+  2. PurchaseOrder.vendorId column added (FK to Vendor) ✓
+  3. Vendor.vendorType column added (default "Job Worker") ✓
+- Everything now fully works end-to-end:
+  - Vendor form: Type field (TypeCombo with custom add) saves vendorType correctly
+  - PO form: Merged Supplier + Vendor dropdown (tagged SUP/VEN) — selecting a vendor creates a vendor-only PO
+  - PO response now includes vendorId + vendor info (not just supplier)
+- All 3 user-reported issues are resolved:
+  1. PO form shows both suppliers AND vendors ✓
+  2. Vendor form has Type field (customizable) ✓
+  3. Supplier form Type field now supports custom types via + Custom button ✓

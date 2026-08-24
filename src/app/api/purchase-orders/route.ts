@@ -291,12 +291,27 @@ export async function POST(request: NextRequest) {
       if (itemsErr) console.error('POItem insert error:', itemsErr)
     }
 
-    // Fetch supplier for response
-    const { data: supplier } = await supabase
-      .from('Supplier')
-      .select('name, supplierType, rating, paymentTerms')
-      .eq('id', supplierId)
-      .single()
+    // Fetch supplier for response (if a supplier was set)
+    let supplier: any = null
+    if (po.supplierId) {
+      const { data: sup } = await supabase
+        .from('Supplier')
+        .select('name, supplierType, rating, paymentTerms')
+        .eq('id', po.supplierId)
+        .single()
+      supplier = sup || null
+    }
+
+    // Fetch vendor for response (if a vendor was set — PO can be vendor-only)
+    let vendor: any = null
+    if (po.vendorId) {
+      const { data: ven } = await supabase
+        .from('Vendor')
+        .select('vendorName, vendorType, contactPerson, phone, paymentTerms')
+        .eq('id', po.vendorId)
+        .single()
+      vendor = ven || null
+    }
 
     return NextResponse.json(
       {
@@ -304,6 +319,8 @@ export async function POST(request: NextRequest) {
         poNumber: po.poNumber,
         supplierId: po.supplierId,
         supplier: supplier || null,
+        vendorId: po.vendorId || null,
+        vendor: vendor || null,
         styleNo: styleNo || null,
         styleName: styleName || null,
         costSheetId: costSheetId || null,
