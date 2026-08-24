@@ -1636,3 +1636,53 @@ Stage Summary:
 - All eligible sales orders now appear in the Production module's "From Sales Order" picker.
 - Root cause was a classic "wrong table name" bug (SalesOrderItem vs OrderItem) silently returning empty results, combined with a too-narrow status filter that excluded "In Production" and "In Progress" orders.
 - Same pattern (silent failure on wrong table name) might affect other API routes that reference relation tables. Recommend auditing other endpoints that query child tables via wrong names.
+
+---
+Task ID: PRODUCTION-OUTSOURCE-COUNTERPARTY-FIX
+Agent: Main Agent (Z.ai Code)
+Task: Fix Production → Outsource stage tracking vendor dropdown — only showed vendors, missing suppliers. User wants both (since PO/stage can be outsourced to either).
+
+Work Log:
+- User reported: Production module → outsource tab → vendor dropdown doesn't fetch all + suppliers missing.
+- Found root cause in src/components/modules/production.tsx fetchVendors():
+  - Only fetched /api/vendors (5 vendors) — did NOT fetch /api/suppliers
+  - VendorOption interface had only {id, vendorName, phone} — no `kind` field to distinguish vendor vs supplier
+  - Dropdown label was just "Vendor" — misleading now that both kinds appear
+- Fix Applied:
+  - Extended VendorOption interface to include `kind: 'Vendor' | 'Supplier'` and `type` (vendorType or supplierType)
+  - Rewrote fetchVendors() to merge two sources:
+    * /api/vendors → all 5 vendors tagged with kind='Vendor'
+    * /api/suppliers?limit=500 → all 8 suppliers tagged with kind='Supplier'
+  - Sort merged list alphabetically by name
+  - Updated dropdown rendering:
+    * Label changed "Vendor" → "Vendor / Supplier"
+    * Each option shows colored badge (amber SUP / violet VEN)
+    * Name + (type) + phone visible per option
+    * max-h-72 for scrollable list
+    * Added helper text: "Includes both Vendors (job workers) and Suppliers (raw material providers). Tagged VEN / SUP for clarity."
+
+Verification (browser test):
+- Opened Production → clicked on production job PJ-20260824-001 → Cutting stage → toggled "Outsourced" → opened vendor dropdown.
+- Result: 13 counterparties shown (8 SUP + 5 VEN), sorted alphabetically:
+  * SUP Ahmedabad Textile Mills (Fabric) · 9988776602
+  * SUP Delhi Embroidery House (Embroidery) · 9988776605
+  * SUP FineWear (Fabric) · 9429446660
+  * VEN Finewear Lifestyle (Kurti Manufacturer) · 09106096745
+  * VEN GST Test Vendor (Job Worker) · 9876543210
+  * SUP Kolkata Silk Traders (Fabric) · 9988776603
+  * SUP Mumbai Accessories Ltd (Accessories) · 9988776606
+  * SUP Rajasthan Print Works (Print) · 9988776604
+  * VEN Surat Dyeing Works (Dyeing) · 9876543210
+  * SUP Surat Fabric House (Fabric) · 9988776601
+  * SUP Test Supplier Fix (Fabric)
+  * VEN Test Vendor Type (Job Worker) · 9876543210
+  * VEN The Finewear (Job Worker) · 9429666990
+- Lint clean, no errors.
+- Screenshot saved at /tmp/production-vendor-dropdown.png
+
+Stage Summary:
+- Production outsource stage tracking dropdown now shows ALL counterparties (vendors + suppliers).
+- Same SUP/VEN badge pattern used as in Purchase Order form for consistency.
+- Sorted alphabetically so user can quickly scan.
+- Helper text explains the difference between SUP (raw material providers) and VEN (job workers).
+- This completes the universal counterparty pattern across the app: PO form, Production outsource dialog — both merge suppliers + vendors.

@@ -155,8 +155,10 @@ interface StageTracking {
 
 interface VendorOption {
   id: string
-  vendorName: string
+  vendorName: string           // display name (vendorName for vendors, name for suppliers)
   phone: string | null
+  kind: 'Vendor' | 'Supplier'  // tag so the user can tell them apart
+  type: string                 // vendorType or supplierType
 }
 
 interface ProductionData {
@@ -386,18 +388,48 @@ export function ProductionModule() {
   }, [])
 
   // Fetch vendors for dropdowns
+  // Fetch counterparties — both Vendors AND Suppliers, since a stage can be
+  // outsourced to either. Merging them here matches the universal PO behavior
+  // (a PO can be raised against either kind).
   const fetchVendors = useCallback(async () => {
+    const merged: VendorOption[] = []
+    // Source 1: All Vendors
     try {
       const res = await fetch('/api/vendors')
       if (res.ok) {
         const data = await res.json()
-        setVendors(data.vendors.map((v: { id: string; vendorName: string; phone: string | null }) => ({
-          id: v.id,
-          vendorName: v.vendorName,
-          phone: v.phone,
-        })))
+        const arr = data.vendors || data || []
+        for (const v of arr) {
+          merged.push({
+            id: v.id,
+            vendorName: v.vendorName,
+            phone: v.phone || null,
+            kind: 'Vendor',
+            type: v.vendorType || v.specialization || '—',
+          })
+        }
       }
     } catch { /* silent */ }
+    // Source 2: All Suppliers (also valid outsourcing counterparties)
+    try {
+      const res = await fetch('/api/suppliers?limit=500')
+      if (res.ok) {
+        const data = await res.json()
+        const arr = data.suppliers || data || []
+        for (const s of arr) {
+          merged.push({
+            id: s.id,
+            vendorName: s.name,
+            phone: s.phone || null,
+            kind: 'Supplier',
+            type: s.supplierType || '—',
+          })
+        }
+      }
+    } catch { /* silent */ }
+    // Sort alphabetically by name
+    merged.sort((a, b) => (a.vendorName || '').localeCompare(b.vendorName || ''))
+    setVendors(merged)
   }, [])
 
   // Fetch stage tracking for a job
@@ -1932,28 +1964,44 @@ export function ProductionModule() {
                   </div>
                 </div>
 
-                {/* Vendor (only if Outsourced) */}
+                {/* Counterparty (Vendor OR Supplier — only if Outsourced) */}
                 {stageForm.locationType === 'Outsourced' && (
                   <div className="space-y-2">
-                    <Label className="text-xs text-muted-foreground">Vendor</Label>
+                    <Label className="text-xs text-muted-foreground">Vendor / Supplier</Label>
                     {vendors.length > 0 ? (
                       <Select value={stageForm.vendorId} onValueChange={(v) => setStageForm({ ...stageForm, vendorId: v })}>
                         <SelectTrigger className="bg-muted/50 border-border text-xs h-9">
-                          <SelectValue placeholder="Select vendor..." />
+                          <SelectValue placeholder="Select vendor or supplier..." />
                         </SelectTrigger>
-                        <SelectContent>
+                        <SelectContent className="max-h-72">
                           {vendors.map((v) => (
-                            <SelectItem key={v.id} value={v.id} className="text-xs">
-                              {v.vendorName} {v.phone ? `· ${v.phone}` : ''}
+                            <SelectItem key={`${v.kind}-${v.id}`} value={v.id} className="text-xs">
+                              <span className="flex items-center gap-1.5">
+                                <span className={`text-[8px] px-1 py-0.5 rounded font-medium ${
+                                  v.kind === 'Supplier'
+                                    ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+                                    : 'bg-violet-500/15 text-violet-600 dark:text-violet-400'
+                                }`}>
+                                  {v.kind === 'Supplier' ? 'SUP' : 'VEN'}
+                                </span>
+                                <span className="font-medium">{v.vendorName}</span>
+                                <span className="text-muted-foreground text-[10px]">({v.type})</span>
+                                {v.phone && (
+                                  <span className="text-muted-foreground/70 text-[10px]">· {v.phone}</span>
+                                )}
+                              </span>
                             </SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
                     ) : (
                       <p className="text-xs text-muted-foreground bg-muted/50 rounded-md p-2 border border-border">
-                        No vendors added yet. Go to <span className="text-primary font-medium">Vendors</span> section to add outsourcing partners.
+                        No vendors or suppliers added yet. Go to <span className="text-primary font-medium">Vendors</span> or <span className="text-primary font-medium">Suppliers</span> section to add outsourcing partners.
                       </p>
                     )}
+                    <p className="text-[10px] text-muted-foreground">
+                      Includes both Vendors (job workers) and Suppliers (raw material providers). Tagged VEN / SUP for clarity.
+                    </p>
                   </div>
                 )}
 
