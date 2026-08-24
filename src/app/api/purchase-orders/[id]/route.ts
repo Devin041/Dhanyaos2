@@ -2,7 +2,7 @@ import { supabase } from '@/lib/supabase-db'
 import { NextRequest, NextResponse } from 'next/server'
 import { format } from 'date-fns'
 
-// ─── GET: Single PO with supplier details ────────────────────────────────
+// ─── GET: Single PO with supplier/vendor details + universal line items ────
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -19,7 +19,7 @@ export async function GET(
       return NextResponse.json({ error: 'Purchase order not found' }, { status: 404 })
     }
 
-    // Fetch supplier
+    // Fetch supplier (if set)
     let supplier = null
     if (po.supplierId) {
       const { data: s } = await supabase
@@ -30,16 +30,54 @@ export async function GET(
       supplier = s || null
     }
 
+    // Fetch vendor (if set — for vendor-only POs)
+    let vendor = null
+    if (po.vendorId) {
+      const { data: v } = await supabase
+        .from('Vendor')
+        .select('id, vendorName, vendorType, contactPerson, phone, email, paymentTerms, status, gstNumber, state')
+        .eq('id', po.vendorId)
+        .single()
+      vendor = v || null
+    }
+
+    // Fetch universal line items (POItem rows for this PO)
+    const { data: items } = await supabase
+      .from('POItem')
+      .select('*')
+      .eq('purchaseOrderId', id)
+      .order('createdAt', { ascending: true })
+
     return NextResponse.json({
       id: po.id,
       poNumber: po.poNumber,
+      // Universal PO type
+      poType: po.poType || 'GENERAL',
       supplierId: po.supplierId,
       supplier,
+      vendorId: po.vendorId || null,
+      vendor,
+      // Legacy single-fabric fields
       fabricName: po.fabricName,
       quantity: po.quantity,
       unit: po.unit,
       ratePerUnit: po.ratePerUnit,
+      // GST fields
+      gstType: po.gstType || 'IntraState',
+      gstPercent: po.gstPercent || 18,
+      taxableAmount: po.taxableAmount || 0,
+      cgstAmount: po.cgstAmount || 0,
+      sgstAmount: po.sgstAmount || 0,
+      igstAmount: po.igstAmount || 0,
+      totalGst: po.totalGst || 0,
       totalAmount: po.totalAmount,
+      // Broker / commission
+      brokerName: po.brokerName || null,
+      commissionPercent: po.commissionPercent || 0,
+      commissionAmount: po.commissionAmount || 0,
+      netAmount: po.netAmount || 0,
+      // Universal line items (each item has its own type)
+      items: items || [],
       expectedDelivery: po.expectedDelivery
         ? format(new Date(po.expectedDelivery), 'yyyy-MM-dd')
         : null,
@@ -47,6 +85,7 @@ export async function GET(
       paymentStatus: po.paymentStatus,
       paidAmount: po.paidAmount,
       receivedQty: po.receivedQty,
+      notes: po.notes || null,
       createdAt: po.createdAt,
       updatedAt: po.updatedAt,
     })

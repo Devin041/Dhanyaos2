@@ -386,7 +386,7 @@ export async function POST(request: NextRequest) {
     if (e1) {
       const msg = String(e1.message || '')
       // Identify which new column is missing and strip it; retry
-      if (/poType|vendorId|brokerName|commissionPercent|commissionAmount|netAmount|column .* does not exist/i.test(msg)) {
+      if (/poType|vendorId|brokerName|commissionPercent|commissionAmount|netAmount|notes|column .* does not exist/i.test(msg)) {
         const stripped = { ...insertBase }
         if (/poType/.test(msg)) delete stripped.poType
         if (/vendorId/.test(msg)) delete stripped.vendorId
@@ -394,6 +394,7 @@ export async function POST(request: NextRequest) {
         if (/commissionPercent/.test(msg)) delete stripped.commissionPercent
         if (/commissionAmount/.test(msg)) delete stripped.commissionAmount
         if (/netAmount/.test(msg)) delete stripped.netAmount
+        if (/notes/.test(msg)) delete stripped.notes
         const { data: po2, error: e2 } = await tryInsert(stripped)
         if (e2) throw e2
         po = po2
@@ -431,7 +432,7 @@ export async function POST(request: NextRequest) {
       const { error: itemsErr1 } = await supabase.from('POItem').insert(itemRows)
       if (itemsErr1) {
         const msg = String(itemsErr1.message || '')
-        if (/itemType|name|size|description|costSheetId|column .* does not exist/i.test(msg)) {
+        if (/itemType|name|size|description|costSheetId|styleName|column .* does not exist/i.test(msg)) {
           // Strip new columns and retry
           const strippedRows = itemRows.map((r: any) => {
             const s = { ...r }
@@ -440,6 +441,7 @@ export async function POST(request: NextRequest) {
             if (/size/.test(msg)) delete s.size
             if (/description/.test(msg)) delete s.description
             if (/costSheetId/.test(msg)) delete s.costSheetId
+            if (/styleName/.test(msg)) delete s.styleName
             return s
           })
           const { error: itemsErr2 } = await supabase.from('POItem').insert(strippedRows)
