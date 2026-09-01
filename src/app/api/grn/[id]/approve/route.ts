@@ -44,6 +44,34 @@ export async function POST(
 
     // Update fabric stock for each accepted item AND create a FabricReceipt
     // row (audit ledger) so we can trace "this fabric came from PO-X via GRN-Y"
+    // Stamp the PO's product (styleNo) onto the stock so Fabric Stock shows
+    // which product the material arrived for.
+    let poStyleNo: string | null = null
+    if (grn.poId) {
+      try {
+        const { data: poRow } = await supabase
+          .from('PurchaseOrder')
+          .select('styleNo')
+          .eq('id', grn.poId)
+          .single()
+        poStyleNo = poRow?.styleNo || null
+        // Older POs never had header styleNo persisted — fall back to the
+        // first line item that carries a styleNo
+        if (!poStyleNo) {
+          const { data: firstItem } = await supabase
+            .from('POItem')
+            .select('styleNo')
+            .eq('purchaseOrderId', grn.poId)
+            .not('styleNo', 'is', null)
+            .order('createdAt', { ascending: true })
+            .limit(1)
+          poStyleNo = firstItem && firstItem.length > 0 ? firstItem[0].styleNo : null
+        }
+      } catch {
+        poStyleNo = null
+      }
+    }
+
     for (const item of grnItems || []) {
       if (item.acceptedQty > 0) {
         // Find existing stock by fabricName + color + supplierId (color-wise
@@ -73,7 +101,7 @@ export async function POST(
           const newValue = existingStock.totalValue + (item.acceptedQty * item.ratePerUnit)
           const newAvg = newMeters > 0 ? newValue / newMeters : item.ratePerUnit
 
-          const { error: stockUpdErr } = await supabase
+          let { error: stockUpdErr } = await supabase
             .from('FabricStock')
             .update({
               availableMeters: newMeters,
@@ -82,15 +110,34 @@ export async function POST(
               supplierId: grn.supplierId || existingStock.supplierId,
               color: item.color || existingStock.color,
               lotNumber: item.lotNumber || existingStock.lotNumber,
+              styleNo: poStyleNo || (existingStock as any).styleNo || null,
               updatedAt: new Date().toISOString(),
             })
             .eq('id', existingStock.id)
 
+          // styleNo column may not exist yet (migration pending) — retry without it
+          if (stockUpdErr && String(stockUpdErr.message || '').includes('styleNo')) {
+            const r = await supabase
+              .from('FabricStock')
+              .update({
+                availableMeters: newMeters,
+                totalValue: newValue,
+                averageCost: newAvg,
+                supplierId: grn.supplierId || existingStock.supplierId,
+                color: item.color || existingStock.color,
+                lotNumber: item.lotNumber || existingStock.lotNumber,
+                updatedAt: new Date().toISOString(),
+              })
+              .eq('id', existingStock.id)
+            stockUpdErr = r.error
+          }
           if (stockUpdErr) throw stockUpdErr
           fabricStockId = existingStock.id
         } else {
           const now = new Date().toISOString()
-          const { data: newStock, error: stockInsErr } = await supabase
+          let newStock: any = null
+          let stockInsErr: any = null
+          const full = await supabase
             .from('FabricStock')
             .insert({
               fabricName: item.fabricName,
@@ -101,12 +148,35 @@ export async function POST(
               reservedMeters: 0,
               averageCost: item.ratePerUnit,
               totalValue: item.acceptedQty * item.ratePerUnit,
+              styleNo: poStyleNo || null,
               createdAt: now,
               updatedAt: now,
             })
             .select('id')
             .single()
-
+          newStock = full.data
+          stockInsErr = full.error
+          // styleNo column may not exist yet (migration pending) — retry without it
+          if (stockInsErr && String(stockInsErr.message || '').includes('styleNo')) {
+            const r = await supabase
+              .from('FabricStock')
+              .insert({
+                fabricName: item.fabricName,
+                color: item.color || null,
+                lotNumber: item.lotNumber || null,
+                supplierId: grn.supplierId,
+                availableMeters: item.acceptedQty,
+                reservedMeters: 0,
+                averageCost: item.ratePerUnit,
+                totalValue: item.acceptedQty * item.ratePerUnit,
+                createdAt: now,
+                updatedAt: now,
+              })
+              .select('id')
+              .single()
+            newStock = r.data
+            stockInsErr = r.error
+          }
           if (stockInsErr) throw stockInsErr
           fabricStockId = newStock.id
         }
@@ -138,20 +208,60 @@ export async function POST(
       }
     }
 
-    // Update PO received qty if linked
+    // Update PO received quantities if linked.
+    // Line-level first (GrnItem.poItemId → POItem.receivedQty), then recompute
+    // the PO header status from its lines: all lines fully received → Received,
+    // any partial progress → Partial.
     if (grn.poId) {
-      const totalAccepted = (grnItems || []).reduce((sum: number, i: any) => sum + (i.acceptedQty || 0), 0)
-      const { data: po } = await supabase
-        .from('PurchaseOrder')
-        .select('receivedQty')
-        .eq('id', grn.poId)
-        .single()
-      if (po) {
-        const newReceivedQty = (po.receivedQty || 0) + totalAccepted
-        await supabase
+      try {
+        const linkedItems = (grnItems || []).filter((i: any) => i.poItemId && (i.acceptedQty || 0) > 0)
+        for (const item of linkedItems) {
+          try {
+            const { data: poItem } = await supabase
+              .from('POItem')
+              .select('id, quantity, receivedQty, status')
+              .eq('id', item.poItemId)
+              .single()
+            if (!poItem) continue
+            const newReceived = (poItem.receivedQty || 0) + (item.acceptedQty || 0)
+            const newLineStatus = poItem.quantity > 0 && newReceived >= poItem.quantity ? 'Received' : 'Partial'
+            await supabase
+              .from('POItem')
+              .update({ receivedQty: newReceived, status: newLineStatus, updatedAt: new Date().toISOString() })
+              .eq('id', item.poItemId)
+          } catch (lineErr: any) {
+            console.error('POItem receivedQty update (non-fatal):', lineErr?.message)
+          }
+        }
+
+        // Recompute PO header from its line items
+        const { data: poItems } = await supabase
+          .from('POItem')
+          .select('quantity, receivedQty')
+          .eq('purchaseOrderId', grn.poId)
+        const { data: currentPo } = await supabase
           .from('PurchaseOrder')
-          .update({ receivedQty: newReceivedQty, updatedAt: new Date().toISOString() })
+          .select('status, receivedQty')
           .eq('id', grn.poId)
+          .single()
+        if (currentPo && currentPo.status !== 'Cancelled') {
+          const updatePayload: Record<string, any> = { updatedAt: new Date().toISOString() }
+          if (poItems && poItems.length > 0) {
+            const totalOrdered = poItems.reduce((s: number, i: any) => s + (i.quantity || 0), 0)
+            const totalReceived = poItems.reduce((s: number, i: any) => s + (i.receivedQty || 0), 0)
+            updatePayload.receivedQty = totalReceived
+            const allLinesDone = poItems.every((i: any) => i.quantity > 0 && (i.receivedQty || 0) >= i.quantity)
+            const anyProgress = poItems.some((i: any) => (i.receivedQty || 0) > 0)
+            if (allLinesDone || (totalOrdered > 0 && totalReceived >= totalOrdered)) updatePayload.status = 'Received'
+            else if (anyProgress) updatePayload.status = 'Partial'
+          } else {
+            const totalAccepted = (grnItems || []).reduce((sum: number, i: any) => sum + (i.acceptedQty || 0), 0)
+            updatePayload.receivedQty = (currentPo.receivedQty || 0) + totalAccepted
+          }
+          await supabase.from('PurchaseOrder').update(updatePayload).eq('id', grn.poId)
+        }
+      } catch (poErr: any) {
+        console.error('PO receive-status recompute (non-fatal):', poErr?.message)
       }
     }
 

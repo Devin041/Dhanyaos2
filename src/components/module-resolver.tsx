@@ -52,6 +52,7 @@ export const viewLabels: Record<DashboardView, string> = {
   'job-costing': 'Job Costing — Actual vs Estimated',
   'banking': 'Banking & Cash Management',
   'gst-returns': 'GST Returns',
+  'bom': 'Bill of Materials (BOM)',
 }
 
 // ─── Module loader registry (import functions only, NOT evaluated at compile time) ──
@@ -105,6 +106,7 @@ const moduleLoaders: Record<DashboardView, ModuleLoaderFn> = {
   'job-costing': () => import('@/components/modules/job-costing').then(m => m.JobCostingModule),
   'banking': () => import('@/components/modules/banking').then(m => m.BankingModule),
   'gst-returns': () => import('@/components/modules/gst-returns').then(m => m.GSTReturnsModule),
+  'bom': () => import('@/components/modules/bom').then(m => m.BomModule),
 }
 
 // ─── In-memory cache for loaded modules ───────────────────────────────────

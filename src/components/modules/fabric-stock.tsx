@@ -55,6 +55,7 @@ import {
   SortDesc,
   Lock,
   ExternalLink,
+  Shirt,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { format } from 'date-fns'
@@ -72,6 +73,9 @@ interface FabricStockItem {
   supplierId: string | null
   supplier: { id: string; name: string; supplierType: string; contactPerson: string | null; phone: string | null } | null
   fabricName: string
+  color: string | null
+  styleNo: string | null
+  _image?: string | null
   gsm: number | null
   width: number | null
   lotNumber: string | null
@@ -558,14 +562,18 @@ export function FabricStock() {
             <TableHeader>
               <TableRow className="hover:bg-transparent border-border/50">
                 <TableHead className="text-xs font-semibold">Fabric Name</TableHead>
+                <TableHead className="text-xs font-semibold hidden lg:table-cell">Product</TableHead>
                 <TableHead className="text-xs font-semibold hidden md:table-cell">Supplier</TableHead>
                 <TableHead className="text-xs font-semibold hidden lg:table-cell">Lot No</TableHead>
                 <TableHead className="text-xs font-semibold hidden lg:table-cell">GSM</TableHead>
                 <TableHead className="text-xs font-semibold hidden xl:table-cell">Width</TableHead>
                 <TableHead className="text-xs font-semibold text-right">Available (m)</TableHead>
-                <TableHead className="text-xs font-semibold text-right hidden sm:table-cell">Reserved (m)</TableHead>
-                <TableHead className="text-xs font-semibold text-right hidden md:table-cell">Avg Cost/m</TableHead>
+                <TableHead className="text-xs font-semibold text-right hidden sm:table-cell">Reserved
+(m)</TableHead>
+                <TableHead className="text-xs font-semibold text-right hidden md:table-cell">Avg
+Cost/m</TableHead>
                 <TableHead className="text-xs font-semibold text-right">Total Value</TableHead>
+                <TableHead className="text-xs font-semibold text-right hidden xl:table-cell">Last Received</TableHead>
                 <TableHead className="text-xs font-semibold text-right w-12">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -582,7 +590,8 @@ export function FabricStock() {
                 ))
               ) : sortedStocks.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={10} className="h-40 text-center">
+                  <TableCell colSpan={11} 
+className="h-40 text-center">
                     <div className="flex flex-col items-center gap-2 text-muted-foreground">
                       <Layers className="h-8 w-8" />
                       <p className="text-sm">No fabric stock found</p>
@@ -604,15 +613,44 @@ export function FabricStock() {
                       }`}
                     >
                       <TableCell>
-                        <div className="flex flex-col">
-                          <span className="font-medium text-foreground text-sm">{item.fabricName}</span>
-                          {isLow && (
-                            <span className="flex items-center gap-1 text-[10px] text-amber-500 font-medium">
-                              <AlertTriangle className="h-2.5 w-2.5" />
-                              Low Stock
-                            </span>
+                        <div className="flex items-center gap-2">
+                          {item._image ? (
+                            <img src={item._image} alt={item.fabricName} className="h-9 w-9 rounded-md object-cover border border-border/50 shrink-0" />
+                          ) : (
+                            <div className="h-9 w-9 rounded-md bg-muted flex items-center justify-center shrink-0">
+                              <Layers className="h-4 w-4 text-muted-foreground/50" />
+                            </div>
                           )}
+                          <div className="flex flex-col min-w-0">
+                            <span className="font-medium text-foreground text-sm">{item.fabricName}</span>
+                            {item.color && (
+                              <span className="text-[10px] text-muted-foreground">
+                                Color: <span className="font-medium text-foreground/80">{item.color}</span>
+                              </span>
+                            )}
+                            {isLow && (
+                              <span className="flex items-center gap-1 text-[10px] text-amber-500 font-medium">
+                                <AlertTriangle className="h-2.5 w-2.5" />
+                                Low Stock
+                              </span>
+                            )}
+                          </div>
                         </div>
+                      </TableCell>
+                      <TableCell className="hidden lg:table-cell">
+                        {item.styleNo ? (
+                          <div className="flex items-center gap-2">
+                            {item._image && (
+                              <img src={item._image} alt={item.styleNo} className="h-8 w-8 rounded object-cover border border-border/50" />
+                            )}
+                            <div className="min-w-0">
+                              <span className="text-xs font-medium text-primary block truncate">{item.styleNo}</span>
+                              <span className="text-[10px] text-muted-foreground">ka is product ke liye</span>
+                            </div>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        )}
                       </TableCell>
                       <TableCell className="hidden md:table-cell text-xs text-muted-foreground">
                         {item.supplier?.name || '—'}
@@ -654,6 +692,9 @@ export function FabricStock() {
                       </TableCell>
                       <TableCell className="text-right text-sm font-semibold tabular-nums text-primary">
                         {inr(item.totalValue)}
+                      </TableCell>
+                      <TableCell className="text-right hidden xl:table-cell text-xs text-muted-foreground whitespace-nowrap">
+                        {new Date(item.updatedAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
                       </TableCell>
                       <TableCell className="text-right">
                         <DropdownMenu>

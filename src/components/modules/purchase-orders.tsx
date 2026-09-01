@@ -285,7 +285,9 @@ export function PurchaseOrders() {
   const [newPaymentTerms, setNewPaymentTerms] = useState('30')
   // Sales Order linkage (NEW — PO can be linked to a SO for product-wise tracking)
   const [newSalesOrderId, setNewSalesOrderId] = useState('')
-  const [salesOrders, setSalesOrders] = useState<Array<{ id: string; orderNo: string; customerName: string; styleNo: string | null; styleName: string | null; status: string }>>([])
+  const [soProducts, setSoProducts] = useState<Array<{ styleNo: string; styleName: string | null; _image: string | null }>>([])
+  const [selectedSoStyleNo, setSelectedSoStyleNo] = useState('')
+  const [salesOrders, setSalesOrders] = useState<Array<{ id: string; orderNo: string; customerName: string; styleNo: string | null; styleName: string | null; status: string; products: Array<{ styleNo: string; styleName: string | null; _image: string | null }> }>>([])
 
   // Action state
   const [actionLoading, setActionLoading] = useState(false)
@@ -407,14 +409,27 @@ export function PurchaseOrders() {
           const orders = (data.orders || []).filter((o: any) =>
             !['Cancelled', 'Completed', 'Dispatched'].includes(o.status)
           )
-          setSalesOrders(orders.map((o: any) => ({
-            id: o.id,
-            orderNo: o.orderNo,
-            customerName: o.customer?.companyName || o.customer?.buyerName || '—',
-            styleNo: o.items?.[0]?.styleNo || o.items?.[0]?.styleName || null,
-            styleName: o.items?.[0]?.styleName || null,
-            status: o.status,
-          })))
+          setSalesOrders(orders.map((o: any) => {
+            // Distinct products in this order (with resolved images) so the user
+            // can pick WHICH product this PO is for when an SO has A/B/C pieces
+            const seen = new Set<string>()
+            const products: Array<{ styleNo: string; styleName: string | null; _image: string | null }> = []
+            for (const it of o.items || []) {
+              const sn = it.style?.styleNo || it.styleNo
+              if (!sn || seen.has(sn)) continue
+              seen.add(sn)
+              products.push({ styleNo: sn, styleName: it.styleName || it.style?.collectionName || null, _image: it._image || null })
+            }
+            return {
+              id: o.id,
+              orderNo: o.orderNo,
+              customerName: o.customer?.companyName || o.customer?.buyerName || '—',
+              styleNo: products[0]?.styleNo || null,
+              styleName: products[0]?.styleName || null,
+              status: o.status,
+              products,
+            }
+          }))
         }
       } catch { /* ignore */ }
     }
@@ -571,6 +586,8 @@ export function PurchaseOrders() {
           setNewBrokerName(''); setNewBrokerCommission('0'); setNewDiscount('0')
           setNewPaymentTerms('30')
           setNewSalesOrderId('')
+          setSoProducts([])
+          setSelectedSoStyleNo('')
           fetchOrders()
         } else {
           toast.error(data.error || 'Failed to create purchase order')
@@ -1216,11 +1233,38 @@ export function PurchaseOrders() {
                       value={newSalesOrderId}
                       onValueChange={(v) => {
                         setNewSalesOrderId(v)
-                        // Auto-fill product info from the selected SO
                         const so = salesOrders.find(s => s.id === v)
-                        if (so) {
+                        if (so && so.products.length > 0) {
+                          setSoProducts(so.products)
+                          if (so.products.length === 1) {
+                            // Single product — auto-fill directly (image already
+                            // resolved server-side by /api/orders)
+                            const p = so.products[0]
+                            setSelectedStyleNo(p.styleNo)
+                            setSelectedStyleName(p.styleName || '')
+                            setSelectedProductImage(p._image || null)
+                            setSelectedSoStyleNo(p.styleNo)
+                          } else {
+                            // Multiple products (A/B/C) — user must pick which
+                            // product this PO is for, so tracking stays exact
+                            setSelectedStyleNo('')
+                            setSelectedStyleName('')
+                            setSelectedProductImage(null)
+                            setSelectedSoStyleNo('')
+                          }
+                        } else if (so) {
+                          setSoProducts([])
+                          setSelectedSoStyleNo('')
                           setSelectedStyleNo(so.styleNo || '')
                           setSelectedStyleName(so.styleName || '')
+                          if (so.styleNo) {
+                            fetch(`/api/style-image?styleNo=${encodeURIComponent(so.styleNo)}`)
+                              .then(r => r.json())
+                              .then(d => setSelectedProductImage(d.imageUrl || null))
+                              .catch(() => setSelectedProductImage(null))
+                          } else {
+                            setSelectedProductImage(null)
+                          }
                         }
                       }}
                     >
@@ -1252,6 +1296,47 @@ export function PurchaseOrders() {
                       <p className="text-[10px] text-emerald-500">
                         ✓ Linked to SO — procurement cost will be tracked against this order
                       </p>
+                    )}
+                    {soProducts.length > 1 && (
+                      <div className="mt-2 space-y-1.5">
+                        <Label className="text-[10px] font-medium text-muted-foreground">
+                          Is order mein {soProducts.length} products hain — ye PO kis product ke liye hai?
+                        </Label>
+                        <div className="grid grid-cols-2 gap-2">
+                          {soProducts.map((p) => (
+                            <button
+                              key={p.styleNo}
+                              type="button"
+                              onClick={() => {
+                                setSelectedSoStyleNo(p.styleNo)
+                                setSelectedStyleNo(p.styleNo)
+                                setSelectedStyleName(p.styleName || '')
+                                setSelectedProductImage(p._image || null)
+                              }}
+                              className={`flex items-center gap-2 rounded-lg border p-2 text-left transition-colors ${
+                                selectedSoStyleNo === p.styleNo
+                                  ? 'border-primary bg-primary/10'
+                                  : 'border-border/50 bg-muted/30 hover:border-primary/40'
+                              }`}
+                            >
+                              {p._image ? (
+                                <img src={p._image} alt={p.styleNo} className="h-10 w-10 rounded object-cover border shrink-0" />
+                              ) : (
+                                <div className="h-10 w-10 rounded bg-muted flex items-center justify-center shrink-0">
+                                  <Shirt className="h-4 w-4 text-muted-foreground/50" />
+                                </div>
+                              )}
+                              <div className="min-w-0">
+                                <p className="text-xs font-semibold truncate">{p.styleNo}</p>
+                                {p.styleName && <p className="text-[10px] text-muted-foreground truncate">{p.styleName}</p>}
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                        {!selectedSoStyleNo && (
+                          <p className="text-[10px] text-amber-500">↑ Product select karo — exact tracking ke liye zaroori</p>
+                        )}
+                      </div>
                     )}
                   </div>
                 )}
@@ -1647,6 +1732,23 @@ export function PurchaseOrders() {
                           {it.description && (
                             <p className="text-[10px] text-muted-foreground mt-0.5">{it.description}</p>
                           )}
+                          {(() => {
+                            const rq = Number(it.receivedQty || 0)
+                            const q = Number(it.quantity || 0)
+                            if (rq <= 0) return null
+                            const pct = q > 0 ? Math.min(100, Math.round((rq / q) * 100)) : 0
+                            const done = q > 0 && rq >= q
+                            return (
+                              <div className="mt-1.5 flex items-center gap-2">
+                                <div className="h-1.5 flex-1 rounded-full bg-muted overflow-hidden">
+                                  <div className={`h-full rounded-full ${done ? 'bg-emerald-500' : 'bg-blue-500'}`} style={{ width: `${pct}%` }} />
+                                </div>
+                                <span className={`text-[10px] tabular-nums shrink-0 font-medium ${done ? 'text-emerald-500' : 'text-blue-400'}`}>
+                                  Received {rq}/{q} {it.unit} ({pct}%){done ? ' ✓' : ''}
+                                </span>
+                              </div>
+                            )
+                          })()}
                         </div>
                       )
                     })}

@@ -178,6 +178,37 @@ export async function POST(req: NextRequest) {
             .from('FabricStock')
             .update({ reservedMeters: newReserved, updatedAt: ts })
             .eq('id', fabricStockId)
+
+          // StockReservation ledger row so reservations are auditable and
+          // consumable via the standard reservation lifecycle (not just a
+          // silent column bump on FabricStock).
+          try {
+            const todayPrefix = `SR-${dateStr}-`
+            const { data: lastRes } = await supabase
+              .from('StockReservation')
+              .select('reservationNo')
+              .ilike('reservationNo', `${todayPrefix}%`)
+              .order('reservationNo', { ascending: false })
+              .limit(1)
+            let resSeq = 1
+            if (lastRes && lastRes.length > 0) {
+              const parsed = parseInt(lastRes[0].reservationNo.slice(todayPrefix.length), 10)
+              if (!isNaN(parsed)) resSeq = parsed + 1
+            }
+            await supabase.from('StockReservation').insert({
+              reservationNo: `${todayPrefix}${String(resSeq).padStart(3, '0')}`,
+              fabricStockId,
+              referenceType: 'ProductionJob',
+              referenceId: job.id,
+              referenceNo: job.jobNo,
+              reservedQty: plannedMeters,
+              consumedQty: 0,
+              status: 'Active',
+              notes: `Auto-reserved for production job ${job.jobNo}`,
+            })
+          } catch (resErr: any) {
+            console.error('StockReservation insert (non-fatal):', resErr?.message)
+          }
         }
       } catch (fabricErr) {
         // Fabric reservation failure shouldn't fail the production job creation

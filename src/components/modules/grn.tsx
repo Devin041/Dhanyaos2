@@ -57,6 +57,7 @@ import {
   Ruler,
   TrendingUp,
   Clock,
+  Shirt,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -64,10 +65,12 @@ import { toast } from 'sonner'
 
 interface GrnItem {
   id?: string
+  poItemId?: string | null
   fabricName: string
   color?: string         // NEW — Pink / Maroon / Red
   lotNumber?: string     // NEW — lot/batch number
   orderedQty: number
+  prevReceived?: number  // already received via prior approved GRNs (cumulative)
   receivedQty: number
   acceptedQty: number
   rejectedQty: number
@@ -80,7 +83,8 @@ interface GrnNote {
   id: string
   grnNo: string
   poId: string | null
-  purchaseOrder: { poNumber: string; fabricName: string } | null
+  purchaseOrder: { poNumber: string; fabricName: string; styleNo?: string | null } | null
+  _image?: string | null
   supplierId: string | null
   supplierName: string
   receivedDate: string
@@ -110,6 +114,7 @@ interface PurchaseOrder {
   vendor?: { vendorName: string } | null     // vendor-only POs have supplier=null
   vendorId?: string | null
   supplierName?: string                       // denormalized fallback
+  styleNo?: string | null
   fabricName: string
   quantity: number
   unit: string
@@ -213,6 +218,7 @@ export function GrnModule() {
     status: 'Draft',
   })
   const [items, setItems] = useState<GrnItem[]>([BLANK_ITEM()])
+  const [poImage, setPoImage] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [actionLoading, setActionLoading] = useState(false)
 
@@ -351,7 +357,7 @@ export function GrnModule() {
   // Pre-fills ALL line items from the PO (universal POs have multiple items
   // — one per color/fabric/product). Each becomes a GrnItem row so the user
   // can record received/accepted qty per color/lot.
-  const handlePOSelect = (poId: string) => {
+  const handlePOSelect = async (poId: string) => {
     const po = purchaseOrders.find((p) => p.id === poId) as any
     if (!po) return
     setForm((prev) => ({
@@ -360,33 +366,67 @@ export function GrnModule() {
       supplierId: po.supplierId || po.vendorId || '',
       supplierName: po.supplier?.name || po.vendor?.vendorName || po.supplierName || '—',
     }))
+
+    // Product photo for visual identification of what's arriving
+    setPoImage(null)
+    if (po.styleNo) {
+      fetch(`/api/style-image?styleNo=${encodeURIComponent(po.styleNo)}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => setPoImage(d?.imageUrl || null))
+        .catch(() => setPoImage(null))
+    }
+
+    // Cumulative receipts from prior approved GRNs against this PO — so the
+    // receive screen shows ordered vs already-received vs pending per line
+    let priorByLine: Record<string, number> = {}
+    try {
+      const priorRes = await fetch(`/api/grn?limit=100&status=Approved`)
+      const priorData = await priorRes.json()
+      for (const g of priorData.grns || []) {
+        if (g.poId !== po.id) continue
+        for (const gi of g.grnItems || []) {
+          const key = gi.poItemId || `${(gi.fabricName || '').trim()}|${(gi.color || '').trim()}`
+          priorByLine[key] = (priorByLine[key] || 0) + (gi.acceptedQty || 0)
+        }
+      }
+    } catch {
+      priorByLine = {}
+    }
+
     // Universal POs have `items` array (POItem rows). Use them if available.
     const poItems: any[] = po.items || []
     if (poItems.length > 0) {
       // Build one GRN item per PO line item, preserving color/size/lot info
       const newItems: GrnItem[] = poItems
         .filter((it: any) => (it.itemType || 'FABRIC') === 'FABRIC' || (it.itemType || '') === 'ACCESSORY')
-        .map((it: any) => ({
-          fabricName: it.name || it.fabricName || '',
-          color: it.color || '',
-          lotNumber: '',
-          orderedQty: it.quantity || 0,
-          receivedQty: 0,
-          acceptedQty: 0,
-          rejectedQty: 0,
-          defectNotes: '',
-          ratePerUnit: it.ratePerUnit || 0,
-          totalValue: 0,
-        }))
+        .map((it: any) => {
+          const prevKey = it.id ? String(it.id) : `${(it.name || it.fabricName || '').trim()}|${(it.color || '').trim()}`
+          return {
+            poItemId: it.id ? String(it.id) : null,
+            fabricName: it.name || it.fabricName || '',
+            color: it.color || '',
+            lotNumber: '',
+            orderedQty: it.quantity || 0,
+            prevReceived: priorByLine[prevKey] || 0,
+            receivedQty: 0,
+            acceptedQty: 0,
+            rejectedQty: 0,
+            defectNotes: '',
+            ratePerUnit: it.ratePerUnit || 0,
+            totalValue: 0,
+          }
+        })
       setItems(newItems.length > 0 ? newItems : [BLANK_ITEM()])
     } else {
       // Legacy PO (single-fabric mode) — pre-fill primary fabric only
+      const legacyPrev = Object.values(priorByLine).reduce((s: number, v) => s + v, 0)
       setItems([
         {
           fabricName: po.fabricName || '',
           color: '',
           lotNumber: '',
           orderedQty: po.quantity || 0,
+          prevReceived: legacyPrev,
           receivedQty: 0,
           acceptedQty: 0,
           rejectedQty: 0,
@@ -432,6 +472,7 @@ export function GrnModule() {
           notes: form.notes || undefined,
           qualityRemarks: form.qualityRemarks || undefined,
           items: validItems.map((i) => ({
+            poItemId: i.poItemId || undefined,
             fabricName: i.fabricName,
             orderedQty: i.orderedQty,
             receivedQty: i.receivedQty,
@@ -615,12 +656,23 @@ export function GrnModule() {
             <TableRow key={idx} className="border-border/30">
               <TableCell className="py-1.5">
                 {editable ? (
-                  <Input
-                    className="h-7 text-xs"
-                    placeholder="Fabric name"
-                    value={item.fabricName}
-                    onChange={(e) => updateItem(idx, 'fabricName', e.target.value)}
-                  />
+                  <div>
+                    <Input
+                      className="h-7 text-xs"
+                      placeholder="Fabric name"
+                      value={item.fabricName}
+                      onChange={(e) => updateItem(idx, 'fabricName', e.target.value)}
+                    />
+                    {(item.prevReceived || 0) > 0 && (
+                      <p className="text-[10px] mt-0.5">
+                        <span className="text-emerald-500">✓ Pehle mile: {formatNumber(item.prevReceived || 0)}</span>
+                        {' · '}
+                        <span className={item.orderedQty - (item.prevReceived || 0) > 0 ? 'text-amber-500' : 'text-muted-foreground'}>
+                          Baaki: {formatNumber(Math.max(0, item.orderedQty - (item.prevReceived || 0)))}
+                        </span>
+                      </p>
+                    )}
+                  </div>
                 ) : (
                   <span className="text-xs font-medium">{item.fabricName || '—'}</span>
                 )}
@@ -867,7 +919,21 @@ export function GrnModule() {
                       onClick={() => openDetail(grn)}
                     >
                       <TableCell className="py-3">
-                        <span className="text-xs font-semibold text-primary">{grn.grnNo}</span>
+                        <div className="flex items-center gap-2">
+                          {grn._image ? (
+                            <img src={grn._image} alt="product" className="h-9 w-9 rounded-md object-cover border border-border/50 shrink-0" />
+                          ) : (
+                            <div className="h-9 w-9 rounded-md bg-muted flex items-center justify-center shrink-0">
+                              <Shirt className="h-4 w-4 text-muted-foreground/50" />
+                            </div>
+                          )}
+                          <div className="min-w-0">
+                            <span className="text-xs font-semibold text-primary block">{grn.grnNo}</span>
+                            {grn.purchaseOrder?.styleNo && (
+                              <span className="text-[10px] text-muted-foreground">{grn.purchaseOrder.styleNo}</span>
+                            )}
+                          </div>
+                        </div>
                       </TableCell>
                       <TableCell className="py-3 hidden md:table-cell">
                         <span className="text-xs text-foreground/70">
@@ -992,13 +1058,27 @@ export function GrnModule() {
                   <SelectContent>
                     {purchaseOrders.map((po) => (
                       <SelectItem key={po.id} value={po.id} className="text-xs">
-                        {po.poNumber} — {(po.supplier?.name) || (po.vendor?.vendorName) || po.supplierName || '—'} — {po.fabricName}
+                        {po.poNumber} - {(po.supplier?.name) || (po.vendor?.vendorName) || po.supplierName || '-'} - {po.fabricName}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
                 {form.poId && (
                   <p className="text-[10px] text-emerald-500">✓ PO selected — items auto-filled below</p>
+                )}
+                {poImage && (
+                  <div className="flex items-center gap-2 rounded-lg border border-border/50 bg-muted/30 p-2">
+                    <img src={poImage} alt="product" className="h-14 w-14 rounded-md object-cover border" />
+                    <div className="min-w-0">
+                      <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Receiving for</p>
+                      <p className="text-xs font-bold truncate">
+                        {(() => {
+                          const po = purchaseOrders.find((p) => p.id === form.poId) as any
+                          return po?.styleNo || 'General material'
+                        })()}
+                      </p>
+                    </div>
+                  </div>
                 )}
               </div>
 
@@ -1233,6 +1313,24 @@ export function GrnModule() {
               </SheetHeader>
 
               <div className="mt-5 space-y-5">
+                {/* Product identity banner — which product's material this is */}
+                <div className="flex items-center gap-3 rounded-xl border border-border/50 bg-muted/30 p-3">
+                  {selectedGRN._image ? (
+                    <img src={selectedGRN._image} alt="product" className="h-16 w-16 rounded-lg object-cover border" />
+                  ) : (
+                    <div className="h-16 w-16 rounded-lg bg-muted flex items-center justify-center border">
+                      <Shirt className="h-7 w-7 text-muted-foreground/50" />
+                    </div>
+                  )}
+                  <div>
+                    <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Product</p>
+                    <p className="text-sm font-bold">{selectedGRN.purchaseOrder?.styleNo || 'General Material'}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {selectedGRN.purchaseOrder?.poNumber ? `Against ${selectedGRN.purchaseOrder.poNumber}` : 'Direct receipt'}
+                    </p>
+                  </div>
+                </div>
+
                 {/* Summary cards */}
                 <div className="grid grid-cols-3 gap-2">
                   <Card className="glass-card border-border/40 p-3 text-center">

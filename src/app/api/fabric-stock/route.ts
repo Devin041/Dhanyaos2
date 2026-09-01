@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabase-db'
 import { NextRequest, NextResponse } from 'next/server'
+import { batchResolveStyleImages } from '@/lib/style-image'
 
 // ─── GET: List fabric stock with filtering, search, and aggregate stats ──
 export async function GET(request: NextRequest) {
@@ -57,6 +58,10 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    // Resolve product images for stock rows that carry a styleNo stamp
+    const styleNos = [...new Set((stocks || []).map((s: any) => s.styleNo).filter(Boolean))] as string[]
+    const imageMap = styleNos.length > 0 ? await batchResolveStyleImages(styleNos) : {}
+
     return NextResponse.json({
       stocks: (stocks || []).map((s: any) => ({
         id: s.id,
@@ -64,6 +69,8 @@ export async function GET(request: NextRequest) {
         supplier: s.supplierId ? supplierMap[s.supplierId] || null : null,
         fabricName: s.fabricName,
         color: s.color || null,                    // NEW — color-wise tracking
+        styleNo: s.styleNo || null,                // product this stock arrived for
+        _image: s.styleNo ? imageMap[s.styleNo] || null : null,
         gsm: s.gsm,
         width: s.width,
         lotNumber: s.lotNumber,

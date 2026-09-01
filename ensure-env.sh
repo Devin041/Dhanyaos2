@@ -1,20 +1,23 @@
 #!/bin/bash
 # ensure-env.sh — Ensures Supabase credentials are always present in .env
 # This script runs BEFORE the dev server starts to prevent .env overwrite issues.
+#
+# ⚠️ SECURITY: Real credentials are NOT stored in this file.
+# Copy .env.example to .env and fill in your own values.
 
-cd /home/z/my-project
+cd "$(dirname "$0")"
 
 ENV_FILE=".env"
 
-# Required Supabase vars
-SUPABASE_URL="NEXT_PUBLIC_SUPABASE_URL=https://uvlamiwykxekblposogn.supabase.co"
-SUPABASE_ANON="NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV2bGFtaXd5a3hla2JscG9zb2duIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODUyMjc5NDEsImV4cCI6MjEwMDgwMzk0MX0.TC44jpWGHMyZ5pmiO5qr6iCNO4mij0md9qcrjPI7rIY"
-SUPABASE_SERVICE="SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV2bGFtaXd5a3hla2JscG9zb2duIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NTIyNzk0MSwiZXhwIjoyMTAwODAzOTQxfQ.DufcoCMfO-XmhU6NUsUOa-J9D_iL2nSkoZUWyHrQGaE"
+# Required Supabase vars (placeholders — set real values in .env)
+SUPABASE_URL="NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co"
+SUPABASE_ANON="NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key-here"
+SUPABASE_SERVICE="SUPABASE_SERVICE_ROLE_KEY=your-service-role-key-here"
 
 # Required Cloudinary vars
-CLOUDINARY_NAME="CLOUDINARY_CLOUD_NAME=dt3sqo86m"
-CLOUDINARY_API="CLOUDINARY_API_KEY=UoJ3ACFWxlg2wicw_X9p8-e3Lpg"
-CLOUDINARY_PUBLIC="NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME=dt3sqo86m"
+CLOUDINARY_NAME="CLOUDINARY_CLOUD_NAME=your-cloud-name"
+CLOUDINARY_API="CLOUDINARY_API_KEY=your-api-key"
+CLOUDINARY_PUBLIC="NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME=your-cloud-name"
 
 # Check if .env exists, create if not
 if [ ! -f "$ENV_FILE" ]; then
@@ -28,13 +31,8 @@ ensure_line() {
   local key=$(echo "$line" | cut -d'=' -f1)
 
   if grep -q "^${key}=" "$ENV_FILE"; then
-    # Key exists — check if value is empty or different
-    local current=$(grep "^${key}=" "$ENV_FILE" | head -1)
-    if [ "$current" != "$line" ]; then
-      # Update the line
-      sed -i "s|^${key}=.*|$line|" "$ENV_FILE"
-      echo "Updated: $key"
-    fi
+    # Key exists — skip (never overwrite real values with placeholders)
+    echo "Kept existing: $key"
   else
     # Key doesn't exist — append
     echo "$line" >> "$ENV_FILE"
@@ -53,7 +51,7 @@ ensure_line "$CLOUDINARY_PUBLIC"
 
 # Ensure DATABASE_URL exists
 if ! grep -q "^DATABASE_URL=" "$ENV_FILE"; then
-  echo "DATABASE_URL=file:/home/z/my-project/db/custom.db" >> "$ENV_FILE"
+  echo "DATABASE_URL=file:../db/custom.db" >> "$ENV_FILE"
   echo "Added: DATABASE_URL"
 fi
 

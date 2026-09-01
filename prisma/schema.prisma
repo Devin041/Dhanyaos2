@@ -10,41 +10,41 @@ datasource db {
 // ============ MASTER DATA ============
 
 model Customer {
-  id              String   @id @default(cuid())
+  id              String          @id @default(cuid())
   companyName     String
   buyerName       String?
   gstNumber       String?
   billingAddress  String?
   shippingAddress String?
-  paymentTerms    Int      @default(30)
-  creditLimit     Float    @default(0)
-  status          String   @default("Active")
+  paymentTerms    Int             @default(30)
+  creditLimit     Float           @default(0)
+  status          String          @default("Active")
   phone           String?
   email           String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
   orders          SalesOrder[]
-  quotations      Quotation[] @relation("CustomerQuotations")
+  quotations      Quotation[]     @relation("CustomerQuotations")
   samples         Sample[]
   costSheets      CostSheet[]
   dispatches      Dispatch[]      @relation("CustomerDispatches")
   catalogs        ClientCatalog[] @relation("CustomerCatalogs")
-  sampleCatalogs SampleCatalog[] @relation("CustomerSampleCatalogs")
+  sampleCatalogs  SampleCatalog[] @relation("CustomerSampleCatalogs")
   invoices        Invoice[]       @relation("CustomerInvoices")
 }
 
 model Supplier {
-  id            String   @id @default(cuid())
-  name          String
-  supplierType  String   @default("Fabric")
-  contactPerson String?
-  phone         String?
-  email         String?
-  paymentTerms  Int      @default(15)
-  rating        Int      @default(3)
-  status        String   @default("Active")
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id             String          @id @default(cuid())
+  name           String
+  supplierType   String          @default("Fabric")
+  contactPerson  String?
+  phone          String?
+  email          String?
+  paymentTerms   Int             @default(15)
+  rating         Int             @default(3)
+  status         String          @default("Active")
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
   purchaseOrders PurchaseOrder[]
   fabricStock    FabricStock[]
   grnNotes       GrnNote[]
@@ -68,8 +68,8 @@ model Employee {
 // ============ PRODUCT MANAGEMENT ============
 
 model Style {
-  id             String   @id @default(cuid())
-  styleNo        String   @unique
+  id             String      @id @default(cuid())
+  styleNo        String      @unique
   collectionName String?
   season         String?
   category       String?
@@ -78,107 +78,107 @@ model Style {
   embroideryType String?
   neckDesign     String?
   sleeveType     String?
-  brand          String   @default("Elysé by Dhanya")
-  status         String   @default("Active")
-  costPrice      Float    @default(0)
-  sellPrice      Float    @default(0)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  brand          String      @default("Elysé by Dhanya")
+  status         String      @default("Active")
+  costPrice      Float       @default(0)
+  sellPrice      Float       @default(0)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
   orderItems     OrderItem[]
 }
 
 // ============ SALES MODULE ============
 
 model SalesOrder {
-  id              String           @id @default(cuid())
-  orderNo         String           @unique
-  customerId      String
-  customer        Customer         @relation(fields: [customerId], references: [id])
-  orderDate       DateTime         @default(now())
-  deliveryDate    DateTime?
-  shippingAddress String?
-  status          String           @default("Pending")
+  id                String          @id @default(cuid())
+  orderNo           String          @unique
+  customerId        String
+  customer          Customer        @relation(fields: [customerId], references: [id])
+  orderDate         DateTime        @default(now())
+  deliveryDate      DateTime?
+  shippingAddress   String?
+  status            String          @default("Pending")
   // GST fields
-  gstType         String           @default("IntraState") // IntraState (CGST+SGST) or InterState (IGST)
-  gstPercent      Float            @default(18)
-  taxableAmount   Float            @default(0)
-  cgstAmount      Float            @default(0)
-  sgstAmount      Float            @default(0)
-  igstAmount      Float            @default(0)
-  totalGst        Float            @default(0)
+  gstType           String          @default("IntraState") // IntraState (CGST+SGST) or InterState (IGST)
+  gstPercent        Float           @default(18)
+  taxableAmount     Float           @default(0)
+  cgstAmount        Float           @default(0)
+  sgstAmount        Float           @default(0)
+  igstAmount        Float           @default(0)
+  totalGst          Float           @default(0)
   // Broker / Commission
-  brokerName      String?
-  commissionPercent Float           @default(0)  // e.g. 2, 5 — percentage of totalAmount
-  commissionAmount Float            @default(0)  // auto-calculated: totalAmount × commissionPercent / 100
-  netAmount       Float            @default(0)  // totalAmount - commissionAmount (what you actually keep)
+  brokerName        String?
+  commissionPercent Float           @default(0) // e.g. 2, 5 — percentage of totalAmount
+  commissionAmount  Float           @default(0) // auto-calculated: totalAmount × commissionPercent / 100
+  netAmount         Float           @default(0) // totalAmount - commissionAmount (what you actually keep)
   // Totals
-  totalAmount     Float            @default(0)  // taxableAmount + totalGst - discount
-  totalCost       Float            @default(0)
-  grossProfit     Float            @default(0)
-  grossMargin     Float            @default(0)
-  netProfit       Float            @default(0)  // grossProfit - commissionAmount (profit after broker cut)
-  netMargin       Float            @default(0)  // netProfit / netAmount × 100
-  paymentStatus   String           @default("Unpaid")
-  paidAmount      Float            @default(0)
-  discountPercent Float            @default(0)
-  notes           String?
-  quotationId     String?
-  items           OrderItem[]
-  productionJobs  ProductionJob[]
-  dispatches      Dispatch[]
-  purchaseOrders  PurchaseOrder[]          // POs raised against this SO (NEW)
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
+  totalAmount       Float           @default(0) // taxableAmount + totalGst - discount
+  totalCost         Float           @default(0)
+  grossProfit       Float           @default(0)
+  grossMargin       Float           @default(0)
+  netProfit         Float           @default(0) // grossProfit - commissionAmount (profit after broker cut)
+  netMargin         Float           @default(0) // netProfit / netAmount × 100
+  paymentStatus     String          @default("Unpaid")
+  paidAmount        Float           @default(0)
+  discountPercent   Float           @default(0)
+  notes             String?
+  quotationId       String?
+  items             OrderItem[]
+  productionJobs    ProductionJob[]
+  dispatches        Dispatch[]
+  purchaseOrders    PurchaseOrder[] // POs raised against this SO (NEW)
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
 }
 
 model OrderItem {
-  id           String     @id @default(cuid())
-  salesOrderId String
-  salesOrder   SalesOrder @relation(fields: [salesOrderId], references: [id], onDelete: Cascade)
-  styleId      String?
-  style        Style?     @relation(fields: [styleId], references: [id])
-  styleName    String
-  quantity     Int                 // client order quantity (what customer wants)
-  unitPrice    Float
-  unitCost     Float
-  totalAmount  Float
-  totalCost    Float
-  profit       Float
+  id             String           @id @default(cuid())
+  salesOrderId   String
+  salesOrder     SalesOrder       @relation(fields: [salesOrderId], references: [id], onDelete: Cascade)
+  styleId        String?
+  style          Style?           @relation(fields: [styleId], references: [id])
+  styleName      String
+  quantity       Int // client order quantity (what customer wants)
+  unitPrice      Float
+  unitCost       Float
+  totalAmount    Float
+  totalCost      Float
+  profit         Float
   // Production planning (overproduction scenario)
   // e.g. client orders 80 pcs but production runs 120 pcs → surplus 40 goes to FG inventory
-  productionQty Int        @default(0)  // what will actually be manufactured
-  surplusQty    Int        @default(0)  // productionQty - quantity (auto, goes to FG stock)
+  productionQty  Int              @default(0) // what will actually be manufactured
+  surplusQty     Int              @default(0) // productionQty - quantity (auto, goes to FG stock)
   colorBreakdown OrderItemColor[]
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
 }
 
 model OrderItemColor {
-  id           String     @id @default(cuid())
-  orderItemId  String
-  orderItem    OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
-  color        String
-  size         String    @default("-")  // size label (S/M/L/XL/XXL or Free)
-  quantity     Int
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
+  id          String    @id @default(cuid())
+  orderItemId String
+  orderItem   OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  color       String
+  size        String    @default("-") // size label (S/M/L/XL/XXL or Free)
+  quantity    Int
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 }
 
 // ============ PURCHASE MODULE ============
 
 model PurchaseOrder {
-  id                String    @id @default(cuid())
-  poNumber          String    @unique
+  id                String      @id @default(cuid())
+  poNumber          String      @unique
   // PO Type — universal classification (user-selectable, auto-derived from items if not set)
   // GENERAL | FABRIC | GOODS | ACCESSORY | SERVICE | MIXED
-  poType            String    @default("GENERAL")
+  poType            String      @default("GENERAL")
   supplierId        String?
-  supplier          Supplier? @relation(fields: [supplierId], references: [id])
+  supplier          Supplier?   @relation(fields: [supplierId], references: [id])
   // Vendor linkage — a PO can be raised against a Vendor (job worker /
   // outsourcer) instead of a Supplier (raw material provider). Either
   // supplierId or vendorId should be set, but not both.
   vendorId          String?
-  vendor            Vendor?   @relation(fields: [vendorId], references: [id])
+  vendor            Vendor?     @relation(fields: [vendorId], references: [id])
   // Product linkage (Sprint 1 — product lifecycle)
   styleNo           String?
   styleName         String?
@@ -186,30 +186,30 @@ model PurchaseOrder {
   // Legacy single-fabric fields (kept for backward compat)
   fabricName        String
   quantity          Float
-  unit              String    @default("meters")
+  unit              String      @default("meters")
   ratePerUnit       Float
   // GST fields
-  gstType           String    @default("IntraState")
-  gstPercent        Float    @default(18)
-  taxableAmount     Float    @default(0)
-  cgstAmount        Float    @default(0)
-  sgstAmount        Float    @default(0)
-  igstAmount        Float    @default(0)
-  totalGst          Float    @default(0)
-  totalAmount       Float    @default(0)  // taxableAmount + totalGst (grand total)
+  gstType           String      @default("IntraState")
+  gstPercent        Float       @default(18)
+  taxableAmount     Float       @default(0)
+  cgstAmount        Float       @default(0)
+  sgstAmount        Float       @default(0)
+  igstAmount        Float       @default(0)
+  totalGst          Float       @default(0)
+  totalAmount       Float       @default(0) // taxableAmount + totalGst (grand total)
   // Broker / commission (universal)
   brokerName        String?
-  commissionPercent Float     @default(0)
-  commissionAmount  Float     @default(0)
-  netAmount         Float     @default(0)  // grand total - commission
+  commissionPercent Float       @default(0)
+  commissionAmount  Float       @default(0)
+  netAmount         Float       @default(0) // grand total - commission
   // Payment terms (NEW — copied from supplier at PO creation, editable)
-  paymentTerms      Int      @default(30)  // days: 15/30/60/90/120
-  paymentDueDate    DateTime?               // PO date + paymentTerms (auto-calculated)
+  paymentTerms      Int         @default(30) // days: 15/30/60/90/120
+  paymentDueDate    DateTime? // PO date + paymentTerms (auto-calculated)
   expectedDelivery  DateTime?
-  status            String    @default("Pending")
-  paymentStatus     String    @default("Unpaid")
-  paidAmount        Float     @default(0)
-  receivedQty       Float     @default(0)
+  status            String      @default("Pending")
+  paymentStatus     String      @default("Unpaid")
+  paidAmount        Float       @default(0)
+  receivedQty       Float       @default(0)
   notes             String?
   // Sales Order linkage — a PO can be raised against a specific Sales Order
   // so that all procurement (fabric + accessories + services) for that order
@@ -219,95 +219,140 @@ model PurchaseOrder {
   // Universal line items (each item can be Fabric / Goods / Accessory / Service)
   items             POItem[]
   grnNotes          GrnNote[]
-  fabricReceipts    FabricReceipt[]        // receipts against this PO (NEW)
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
 }
 
 // ─── PO Line Items (universal — each item has its own type: FABRIC / GOODS /
 // ACCESSORY / SERVICE / OTHER. Supports color/size variants, mixed POs, and any
 // future item type without schema changes). ─────────────────────────────────
 model POItem {
-  id                String   @id @default(cuid())
-  purchaseOrderId   String
-  purchaseOrder     PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  id              String        @id @default(cuid())
+  purchaseOrderId String
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
 
   // ─── UNIVERSAL ITEM TYPE (the key field) ───
   // FABRIC | GOODS | ACCESSORY | SERVICE | OTHER
   // Extensible enum — new types can be added without schema change.
-  itemType          String   @default("FABRIC")
+  itemType String @default("FABRIC")
 
   // ─── PRODUCT LINKAGE (optional — for finished goods / linked styles) ───
-  styleNo           String?
-  styleName         String?
-  costSheetId       String?
+  styleNo     String?
+  styleName   String?
+  costSheetId String?
 
   // ─── DESCRIPTION (universal) ───
-  name              String                  // fabric name, product name, service name
-  description       String?                // extra details (optional)
-  color             String?                // Pink, Maroon, Peach, Red (for fabric/goods)
-  size              String?                // S/M/L/XL/XXL (for goods only)
+  name        String // fabric name, product name, service name
+  description String? // extra details (optional)
+  color       String? // Pink, Maroon, Peach, Red (for fabric/goods)
+  size        String? // S/M/L/XL/XXL (for goods only)
 
   // ─── QUANTITY & PRICING ───
-  quantity          Float
-  unit              String   @default("meters")
+  quantity    Float
+  unit        String @default("meters")
   // Meters | Pcs | Kg | Box | Roll | Set | Lot | Hour | Day
-  ratePerUnit       Float
-  totalAmount       Float                   // quantity × ratePerUnit (auto)
-  receivedQty       Float    @default(0)
-  status            String   @default("Pending")
+  ratePerUnit Float
+  totalAmount Float // quantity × ratePerUnit (auto)
+  receivedQty Float  @default(0)
+  status      String @default("Pending")
 
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 // ============ INVENTORY ============
 
 model FabricConsumption {
-  id                 String   @id @default(cuid())
-  consumptionNo      String   @unique
-  productionJobId    String
-  productionJob      ProductionJob @relation(fields: [productionJobId], references: [id])
-  fabricStockId      String
-  fabricStock        FabricStock   @relation(fields: [fabricStockId], references: [id])
-  fabricName         String
-  issuedQty          Float    @default(0)
-  consumedQty        Float    @default(0)
-  wastageQty         Float    @default(0)
-  wastagePercent     Float    @default(0)
-  plannedQty         Float    @default(0)
-  varianceVsPlan     Float    @default(0)
-  outputQty          Int      @default(0)
-  consumptionPerPc   Float    @default(0)
-  wastageReason      String?
-  wastageRemarks     String?
-  recordedBy         String?
-  consumptionDate    DateTime @default(now())
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  id               String        @id @default(cuid())
+  consumptionNo    String        @unique
+  productionJobId  String
+  productionJob    ProductionJob @relation(fields: [productionJobId], references: [id])
+  fabricStockId    String
+  fabricStock      FabricStock   @relation(fields: [fabricStockId], references: [id])
+  fabricName       String
+  issuedQty        Float         @default(0)
+  consumedQty      Float         @default(0)
+  wastageQty       Float         @default(0)
+  wastagePercent   Float         @default(0)
+  plannedQty       Float         @default(0)
+  varianceVsPlan   Float         @default(0)
+  outputQty        Int           @default(0)
+  consumptionPerPc Float         @default(0)
+  wastageReason    String?
+  wastageRemarks   String?
+  recordedBy       String?
+  consumptionDate  DateTime      @default(now())
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
 
   @@index([productionJobId])
   @@index([fabricStockId])
 }
 
 model StockReservation {
-  id               String    @id @default(cuid())
-  reservationNo    String    @unique
-  fabricStockId    String
-  fabricStock      FabricStock @relation(fields: [fabricStockId], references: [id])
-  referenceType    String    // SalesOrder, ProductionJob
-  referenceId      String
-  referenceNo      String
-  reservedQty      Float     @default(0)
-  consumedQty      Float     @default(0)
-  status           String    @default("Active") // Active, Partially Consumed, Fully Consumed, Released, Expired
-  expiryDate       DateTime?
-  notes            String?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  id            String      @id @default(cuid())
+  reservationNo String      @unique
+  fabricStockId String
+  fabricStock   FabricStock @relation(fields: [fabricStockId], references: [id])
+  referenceType String // SalesOrder, ProductionJob
+  referenceId   String
+  referenceNo   String
+  reservedQty   Float       @default(0)
+  consumedQty   Float       @default(0)
+  status        String      @default("Active") // Active, Partially Consumed, Fully Consumed, Released, Expired
+  expiryDate    DateTime?
+  notes         String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
 
   @@index([fabricStockId])
   @@index([status])
+}
+
+model LaborTimesheet {
+  id              String    @id @default(cuid())
+  productionJobId String
+  workerId        String?
+  workerName      String?
+  date            DateTime?
+  hoursWorked     Float     @default(0)
+  wagePerHour     Float     @default(0)
+  totalCost       Float     @default(0)
+  stage           String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([productionJobId])
+}
+
+// ============ BILL OF MATERIALS (BOM) ============
+
+model BOM {
+  id        String    @id @default(cuid())
+  styleNo   String
+  version   Int       @default(1)
+  isActive  Boolean   @default(true)
+  notes     String?
+  lines     BOMLine[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@unique([styleNo, version])
+  @@index([styleNo])
+}
+
+model BOMLine {
+  id               String  @id @default(cuid())
+  bomId            String
+  bom              BOM     @relation(fields: [bomId], references: [id], onDelete: Cascade)
+  materialType     String  @default("FABRIC") // FABRIC, ACCESSORY, TRIM, SERVICE, OTHER
+  materialName     String
+  color            String? // specific material color variant (e.g. fabric color)
+  unit             String  @default("meters")
+  qtyPerPiece      Float   @default(0) // consumption per garment piece
+  applicableColors String? // JSON array string — empty/null = applies to ALL colors
+
+  @@index([bomId])
 }
 
 model FabricStock {
@@ -316,19 +361,20 @@ model FabricStock {
   supplier      Supplier? @relation(fields: [supplierId], references: [id])
   fabricName    String
   color         String?                 // Pink / Maroon / Red (NEW — for color-wise tracking)
-  gsm           Int?
-  width         Float?
-  lotNumber     String?
-  availableMeters Float   @default(0)
-  reservedMeters Float   @default(0)
-  averageCost   Float    @default(0)
-  totalValue    Float    @default(0)
-  productionJobs   ProductionJob[]
+  styleNo       String?                 // product this stock arrived for (stamped from PO at GRN approval)
+  gsm                Int?
+  width              Float?
+  lotNumber          String?
+  availableMeters    Float               @default(0)
+  reservedMeters     Float               @default(0)
+  averageCost        Float               @default(0)
+  totalValue         Float               @default(0)
+  productionJobs     ProductionJob[]
   fabricConsumptions FabricConsumption[]
   stockReservations  StockReservation[]
-  receipts      FabricReceipt[]        // history of all receipts (NEW)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  receipts           FabricReceipt[] // history of all receipts (NEW)
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
 }
 
 // ─── Fabric Receipt Ledger ──────────────────────────────────────────────────
@@ -338,23 +384,23 @@ model FabricStock {
 // FabricStock.availableMeters is the live balance (sum of all receipts minus
 // consumption); FabricReceipt is the immutable audit trail.
 model FabricReceipt {
-  id              String   @id @default(cuid())
-  fabricStockId   String
-  fabricStock     FabricStock @relation(fields: [fabricStockId], references: [id], onDelete: Cascade)
-  poId            String?                 // link to PurchaseOrder (nullable for direct receipts)
-  grnId           String?                 // link to GrnNote (nullable for manual receipts)
-  supplierId      String?                 // supplier/vendor this came from
-  fabricName      String                  // denormalized for easy display
-  color           String?                 // Pink / Maroon / Red
-  lotNumber       String?                 // lot/batch number
-  receivedQty     Float    @default(0)    // kitna receive hua
-  acceptedQty     Float    @default(0)    // QC ke baad kitna accept (usually = received)
-  ratePerUnit     Float    @default(0)    // rate at which received
-  totalValue      Float    @default(0)    // acceptedQty × ratePerUnit
-  receivedDate    DateTime @default(now())
-  notes           String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id            String      @id @default(cuid())
+  fabricStockId String
+  fabricStock   FabricStock @relation(fields: [fabricStockId], references: [id], onDelete: Cascade)
+  poId          String? // link to PurchaseOrder (nullable for direct receipts)
+  grnId         String? // link to GrnNote (nullable for manual receipts)
+  supplierId    String? // supplier/vendor this came from
+  fabricName    String // denormalized for easy display
+  color         String? // Pink / Maroon / Red
+  lotNumber     String? // lot/batch number
+  receivedQty   Float       @default(0) // kitna receive hua
+  acceptedQty   Float       @default(0) // QC ke baad kitna accept (usually = received)
+  ratePerUnit   Float       @default(0) // rate at which received
+  totalValue    Float       @default(0) // acceptedQty × ratePerUnit
+  receivedDate  DateTime    @default(now())
+  notes         String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
 
   @@index([fabricStockId])
   @@index([poId])
@@ -368,41 +414,41 @@ model FabricReceipt {
 // One row per Style × Color × Size combination.
 
 model FGStockBin {
-  id              String   @id @default(cuid())
-  styleNo         String                        // Main style ID (from Sample) — e.g., "DH-01"
-  styleName       String                        // Denormalized — e.g., "Cotton Print Kurti"
-  colorCode       String                        // Auto-generated sub-ID — e.g., "DH-01-PK01"
-  color           String                        // Human-readable — e.g., "Pink"
-  size            String                        // e.g., "XS", "S", "M", "L", "XL", "Free"
+  id        String @id @default(cuid())
+  styleNo   String // Main style ID (from Sample) — e.g., "DH-01"
+  styleName String // Denormalized — e.g., "Cotton Print Kurti"
+  colorCode String // Auto-generated sub-ID — e.g., "DH-01-PK01"
+  color     String // Human-readable — e.g., "Pink"
+  size      String // e.g., "XS", "S", "M", "L", "XL", "Free"
 
   // ── Quantity Buckets ──
-  availableQty    Int      @default(0)          // Ready to sell
-  reservedQty     Int      @default(0)          // Locked against orders
-  qcPendingQty    Int      @default(0)          // Awaiting quality check
-  underRepairQty  Int      @default(0)          // Being repaired
-  defectiveQty    Int      @default(0)          // Failed QC
-  scrappedQty     Int      @default(0)          // Written off permanently
-  exhibitionQty   Int      @default(0)          // At exhibition/event
+  availableQty   Int @default(0) // Ready to sell
+  reservedQty    Int @default(0) // Locked against orders
+  qcPendingQty   Int @default(0) // Awaiting quality check
+  underRepairQty Int @default(0) // Being repaired
+  defectiveQty   Int @default(0) // Failed QC
+  scrappedQty    Int @default(0) // Written off permanently
+  exhibitionQty  Int @default(0) // At exhibition/event
 
   // ── Pricing ──
-  unitCost        Float    @default(0)          // From CostSheet or GRN
-  unitSellPrice   Float    @default(0)          // From Style.sellPrice or CostSheet.sellingPrice
+  unitCost      Float @default(0) // From CostSheet or GRN
+  unitSellPrice Float @default(0) // From Style.sellPrice or CostSheet.sellingPrice
 
   // ── Metadata ──
-  image           String?                       // Cloudinary URL from Sample/CostSheet
-  firstInDate     DateTime?                     // First stock inward date
-  lastMovementDate DateTime?                    // Last stock movement date
-  location        String   @default("Warehouse") // Warehouse, Exhibition, Vendor
-  notes           String?
+  image            String? // Cloudinary URL from Sample/CostSheet
+  firstInDate      DateTime? // First stock inward date
+  lastMovementDate DateTime? // Last stock movement date
+  location         String    @default("Warehouse") // Warehouse, Exhibition, Vendor
+  notes            String?
 
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // ── Relations ──
-  stockMovements  FGStockMovement[]
-  fgReservations   FGReservation[]
+  stockMovements FGStockMovement[]
+  fgReservations FGReservation[]
 
-  @@unique([styleNo, color, size])             // One bin per Style×Color×Size
+  @@unique([styleNo, color, size]) // One bin per Style×Color×Size
   @@index([styleNo])
   @@index([colorCode])
   @@index([color])
@@ -412,49 +458,49 @@ model FGStockBin {
 // Immutable append-only transaction log.
 
 model FGStockMovement {
-  id              String   @id @default(cuid())
-  movementNo      String   @unique             // FGM-YYYYMMDD-XXX
-  movementType    String                        // See 12 types
+  id           String @id @default(cuid())
+  movementNo   String @unique // FGM-YYYYMMDD-XXX
+  movementType String // See 12 types
 
   // ── Stock Bin Reference ──
-  fgStockBinId    String
-  fgStockBin      FGStockBin @relation(fields: [fgStockBinId], references: [id])
+  fgStockBinId String
+  fgStockBin   FGStockBin @relation(fields: [fgStockBinId], references: [id])
 
   // ── Denormalized for fast query ──
-  styleNo         String
-  styleName       String
-  colorCode       String
-  color           String
-  size            String
+  styleNo   String
+  styleName String
+  colorCode String
+  color     String
+  size      String
 
   // ── Quantities ──
-  quantity        Int                           // Positive for inward, negative for outward
-  previousQty     Int                           // availableQty BEFORE this movement
-  newQty          Int                           // availableQty AFTER this movement
-  unitCost        Float    @default(0)
+  quantity    Int // Positive for inward, negative for outward
+  previousQty Int // availableQty BEFORE this movement
+  newQty      Int // availableQty AFTER this movement
+  unitCost    Float @default(0)
 
   // ── Source Document ──
-  referenceType   String?                       // SalesOrder, Dispatch, Return, FGGrnNote, FGReservation, Adjustment, QC
-  referenceId     String?
-  referenceNo     String?                       // Human-readable (SO-xxx, DSP-xxx, FGRN-xxx)
+  referenceType String? // SalesOrder, Dispatch, Return, FGGrnNote, FGReservation, Adjustment, QC
+  referenceId   String?
+  referenceNo   String? // Human-readable (SO-xxx, DSP-xxx, FGRN-xxx)
 
   // ── Status Transition (for QC changes, exchanges) ──
-  fromStatus      String?
-  toStatus        String?
+  fromStatus String?
+  toStatus   String?
 
   // ── Location Transition (for exhibition) ──
-  fromLocation    String?
-  toLocation      String?
+  fromLocation String?
+  toLocation   String?
 
   // ── Party ──
-  partyId         String?
-  partyName       String?
+  partyId   String?
+  partyName String?
 
   // ── Context ──
-  reason          String?                       // Free-text (adjustments, scrapping)
-  movedBy         String?                       // "System" or user name
-  movedAt         DateTime @default(now())
-  createdAt       DateTime @default(now())
+  reason    String? // Free-text (adjustments, scrapping)
+  movedBy   String? // "System" or user name
+  movedAt   DateTime @default(now())
+  createdAt DateTime @default(now())
 
   @@index([fgStockBinId])
   @@index([movementType])
@@ -467,26 +513,26 @@ model FGStockMovement {
 // ── 3. FGReservation ──────────────────────────────────────────
 
 model FGReservation {
-  id              String     @id @default(cuid())
-  reservationNo   String     @unique             // FGRV-YYYYMMDD-XXX
-  salesOrderId    String
-  salesOrderNo    String
-  customerId      String?
-  customerName    String?
-  fgStockBinId    String
-  fgStockBin      FGStockBin @relation(fields: [fgStockBinId], references: [id])
-  styleNo         String
-  colorCode       String
-  color           String
-  size            String
-  reservedQty     Int        @default(0)
-  dispatchedQty   Int        @default(0)
-  status          String     @default("Active") // Active, PartiallyDispatched, FullyDispatched, Released, Expired
-  reservedDate    DateTime   @default(now())
-  expiryDate      DateTime?
-  notes           String?
-  createdAt       DateTime   @default(now())
-  updatedAt       DateTime   @updatedAt
+  id            String     @id @default(cuid())
+  reservationNo String     @unique // FGRV-YYYYMMDD-XXX
+  salesOrderId  String
+  salesOrderNo  String
+  customerId    String?
+  customerName  String?
+  fgStockBinId  String
+  fgStockBin    FGStockBin @relation(fields: [fgStockBinId], references: [id])
+  styleNo       String
+  colorCode     String
+  color         String
+  size          String
+  reservedQty   Int        @default(0)
+  dispatchedQty Int        @default(0)
+  status        String     @default("Active") // Active, PartiallyDispatched, FullyDispatched, Released, Expired
+  reservedDate  DateTime   @default(now())
+  expiryDate    DateTime?
+  notes         String?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
 
   @@index([salesOrderId])
   @@index([fgStockBinId])
@@ -496,26 +542,26 @@ model FGReservation {
 // ── 4. FGGrnNote ───────────────────────────────────────────────
 
 model FGGrnNote {
-  id              String      @id @default(cuid())
-  grnNo           String      @unique             // FGRN-YYYYMMDD-XXX
-  sourceType      String                          // "Vendor" or "Production"
-  sourceId        String?
-  sourceNo        String?
-  sourceName      String
-  styleNo         String
-  styleName       String
-  image           String?
-  receivedDate    DateTime    @default(now())
-  status          String      @default("Draft")  // Draft, Pending QC, Approved, Rejected
-  totalReceivedQty Int       @default(0)
-  totalAcceptedQty Int       @default(0)
-  totalRejectedQty Int       @default(0)
-  unitCost        Float      @default(0)
-  unitSellPrice   Float      @default(0)
-  notes           String?
-  items           FGGrnItem[]
-  createdAt       DateTime    @default(now())
-  updatedAt       DateTime    @updatedAt
+  id               String      @id @default(cuid())
+  grnNo            String      @unique // FGRN-YYYYMMDD-XXX
+  sourceType       String // "Vendor" or "Production"
+  sourceId         String?
+  sourceNo         String?
+  sourceName       String
+  styleNo          String
+  styleName        String
+  image            String?
+  receivedDate     DateTime    @default(now())
+  status           String      @default("Draft") // Draft, Pending QC, Approved, Rejected
+  totalReceivedQty Int         @default(0)
+  totalAcceptedQty Int         @default(0)
+  totalRejectedQty Int         @default(0)
+  unitCost         Float       @default(0)
+  unitSellPrice    Float       @default(0)
+  notes            String?
+  items            FGGrnItem[]
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
 
   @@index([styleNo])
   @@index([status])
@@ -525,20 +571,20 @@ model FGGrnNote {
 // ── 5. FGGrnItem ──────────────────────────────────────────────
 
 model FGGrnItem {
-  id              String     @id @default(cuid())
-  fgGrnNoteId     String
-  fgGrnNote       FGGrnNote @relation(fields: [fgGrnNoteId], references: [id], onDelete: Cascade)
-  color           String
-  size            String
-  colorCode       String                         // Auto-generated at GRN creation
-  receivedQty     Int        @default(0)
-  acceptedQty     Int        @default(0)
-  rejectedQty     Int        @default(0)
-  defectNotes     String?
-  unitCost        Float      @default(0)
-  totalValue      Float      @default(0)
-  createdAt       DateTime   @default(now())
-  updatedAt       DateTime   @updatedAt
+  id          String    @id @default(cuid())
+  fgGrnNoteId String
+  fgGrnNote   FGGrnNote @relation(fields: [fgGrnNoteId], references: [id], onDelete: Cascade)
+  color       String
+  size        String
+  colorCode   String // Auto-generated at GRN creation
+  receivedQty Int       @default(0)
+  acceptedQty Int       @default(0)
+  rejectedQty Int       @default(0)
+  defectNotes String?
+  unitCost    Float     @default(0)
+  totalValue  Float     @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   @@index([fgGrnNoteId])
 }
@@ -546,75 +592,75 @@ model FGGrnItem {
 // ── 6. FGPromotionalIssue ─────────────────────────────────────
 
 model FGPromotionalIssue {
-  id              String     @id @default(cuid())
-  issueNo         String     @unique             // FPI-YYYYMMDD-XXX
-  customerId      String?
-  customerName    String?
-  purpose         String?
-  referenceNo     String?
-  totalQty        Int        @default(0)
-  totalCostValue  Float      @default(0)
-  status          String     @default("Issued")  // Issued, PartiallyReturned, Returned
-  issuedDate      DateTime   @default(now())
-  notes           String?
-  items           FGPromotionalItem[]
-  createdAt       DateTime   @default(now())
-  updatedAt       DateTime   @updatedAt
+  id             String              @id @default(cuid())
+  issueNo        String              @unique // FPI-YYYYMMDD-XXX
+  customerId     String?
+  customerName   String?
+  purpose        String?
+  referenceNo    String?
+  totalQty       Int                 @default(0)
+  totalCostValue Float               @default(0)
+  status         String              @default("Issued") // Issued, PartiallyReturned, Returned
+  issuedDate     DateTime            @default(now())
+  notes          String?
+  items          FGPromotionalItem[]
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
 
   @@index([customerId])
   @@index([status])
 }
 
 model FGPromotionalItem {
-  id                String   @id @default(cuid())
+  id                 String             @id @default(cuid())
   promotionalIssueId String
-  promotionalIssue  FGPromotionalIssue @relation(fields: [promotionalIssueId], references: [id], onDelete: Cascade)
-  fgStockBinId      String
-  styleNo           String
-  colorCode         String
-  color             String
-  size              String
-  quantity          Int     @default(0)
-  unitCost          Float   @default(0)
-  totalValue        Float   @default(0)
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  promotionalIssue   FGPromotionalIssue @relation(fields: [promotionalIssueId], references: [id], onDelete: Cascade)
+  fgStockBinId       String
+  styleNo            String
+  colorCode          String
+  color              String
+  size               String
+  quantity           Int                @default(0)
+  unitCost           Float              @default(0)
+  totalValue         Float              @default(0)
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
 }
 
 // ── 7. FGExhibition ──────────────────────────────────────────
 
 model FGExhibition {
-  id              String     @id @default(cuid())
-  exhibitionNo    String     @unique             // FEX-YYYYMMDD-XXX
-  exhibitionName  String
-  location        String?
-  startDate       DateTime
-  expectedReturn  DateTime?
-  actualReturn    DateTime?
-  totalPieces     Int        @default(0)
-  totalValue      Float      @default(0)
-  status          String     @default("Active") // Active, Returned, Overdue
-  notes           String?
-  items           FGExhibitionItem[]
-  createdAt       DateTime   @default(now())
-  updatedAt       DateTime   @updatedAt
+  id             String             @id @default(cuid())
+  exhibitionNo   String             @unique // FEX-YYYYMMDD-XXX
+  exhibitionName String
+  location       String?
+  startDate      DateTime
+  expectedReturn DateTime?
+  actualReturn   DateTime?
+  totalPieces    Int                @default(0)
+  totalValue     Float              @default(0)
+  status         String             @default("Active") // Active, Returned, Overdue
+  notes          String?
+  items          FGExhibitionItem[]
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
 
   @@index([status])
 }
 
 model FGExhibitionItem {
-  id              String     @id @default(cuid())
-  exhibitionId    String
-  exhibition      FGExhibition @relation(fields: [exhibitionId], references: [id], onDelete: Cascade)
-  fgStockBinId    String
-  styleNo         String
-  colorCode       String
-  color           String
-  size            String
-  quantity        Int        @default(0)
-  returnedQty     Int        @default(0)
-  createdAt       DateTime   @default(now())
-  updatedAt       DateTime   @updatedAt
+  id           String       @id @default(cuid())
+  exhibitionId String
+  exhibition   FGExhibition @relation(fields: [exhibitionId], references: [id], onDelete: Cascade)
+  fgStockBinId String
+  styleNo      String
+  colorCode    String
+  color        String
+  size         String
+  quantity     Int          @default(0)
+  returnedQty  Int          @default(0)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
 
   @@index([exhibitionId])
   @@index([fgStockBinId])
@@ -623,80 +669,80 @@ model FGExhibitionItem {
 // ============ PRODUCTION ============
 
 model ProductionJob {
-  id            String          @id @default(cuid())
-  jobNo         String          @unique
-  salesOrderId  String?
-  salesOrder    SalesOrder?     @relation(fields: [salesOrderId], references: [id])
-  styleNo       String
-  styleName     String
-  targetQty     Int
-  completedQty  Int             @default(0)
-  stage         String          @default("Fabric Issue")
-  startDate     DateTime        @default(now())
-  endDate       DateTime?
-  status        String          @default("In Progress")
+  id                   String              @id @default(cuid())
+  jobNo                String              @unique
+  salesOrderId         String?
+  salesOrder           SalesOrder?         @relation(fields: [salesOrderId], references: [id])
+  styleNo              String
+  styleName            String
+  targetQty            Int
+  completedQty         Int                 @default(0)
+  stage                String              @default("Fabric Issue")
+  startDate            DateTime            @default(now())
+  endDate              DateTime?
+  status               String              @default("In Progress")
   // Fabric tracking
-  plannedFabricMeters   Float    @default(0)
-  actualFabricConsumed  Float    @default(0)
-  fabricStockId         String?
-  fabricStock           FabricStock? @relation(fields: [fabricStockId], references: [id])
+  plannedFabricMeters  Float               @default(0)
+  actualFabricConsumed Float               @default(0)
+  fabricStockId        String?
+  fabricStock          FabricStock?        @relation(fields: [fabricStockId], references: [id])
   // Cost tracking (Sprint 1 — actual vs estimated)
-  costSheetId           String?
-  actualFabricCost      Float    @default(0)
-  actualLaborCost       Float    @default(0)
-  actualOverheadCost    Float    @default(0)
-  totalActualCost       Float    @default(0)
-  qualityChecks   QualityCheck[]
-  stageTrackings  StageTracking[]
-  fabricConsumptions FabricConsumption[]
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @updatedAt
+  costSheetId          String?
+  actualFabricCost     Float               @default(0)
+  actualLaborCost      Float               @default(0)
+  actualOverheadCost   Float               @default(0)
+  totalActualCost      Float               @default(0)
+  qualityChecks        QualityCheck[]
+  stageTrackings       StageTracking[]
+  fabricConsumptions   FabricConsumption[]
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
 }
 
 // ============ OUTSOURCING / VENDORS ============
 
 model Vendor {
-  id              String          @id @default(cuid())
-  vendorName      String
-  contactPerson   String?
-  phone           String?
-  email           String?
-  address         String?
-  gstNumber       String?                 // GSTIN for tax invoices
-  state           String?                 // state (for GST place-of-supply)
-  vendorType      String          @default("Job Worker")  // type of vendor (customizable)
-  specialization  String          @default("")
-  paymentTerms    Int             @default(30)  // Payment cycle in days (30, 45, 60, etc.)
-  status          String          @default("Active")
-  purchaseOrders  PurchaseOrder[]
-  stageTrackings  StageTracking[]
-  vendorBills     VendorBill[]
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
+  id             String          @id @default(cuid())
+  vendorName     String
+  contactPerson  String?
+  phone          String?
+  email          String?
+  address        String?
+  gstNumber      String? // GSTIN for tax invoices
+  state          String? // state (for GST place-of-supply)
+  vendorType     String          @default("Job Worker") // type of vendor (customizable)
+  specialization String          @default("")
+  paymentTerms   Int             @default(30) // Payment cycle in days (30, 45, 60, etc.)
+  status         String          @default("Active")
+  purchaseOrders PurchaseOrder[]
+  stageTrackings StageTracking[]
+  vendorBills    VendorBill[]
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
 }
 
 model StageTracking {
-  id                 String   @id @default(cuid())
+  id                 String        @id @default(cuid())
   productionJobId    String
   productionJob      ProductionJob @relation(fields: [productionJobId], references: [id], onDelete: Cascade)
   stageName          String
   sequence           Int
-  locationType       String   @default("In-House")
+  locationType       String        @default("In-House")
   vendorId           String?
-  vendor             Vendor?  @relation(fields: [vendorId], references: [id])
+  vendor             Vendor?       @relation(fields: [vendorId], references: [id])
   sentDate           DateTime?
   expectedReturnDate DateTime?
   receivedDate       DateTime?
-  sentQty            Int      @default(0)
-  receivedQty        Int      @default(0)
-  defectiveQty       Int      @default(0)
-  perPieceRate       Float    @default(0)   // Rate agreed per piece for this stage
-  totalAmount        Float    @default(0)   // Auto-calculated: receivedQty × perPieceRate
-  status             String   @default("Pending")
+  sentQty            Int           @default(0)
+  receivedQty        Int           @default(0)
+  defectiveQty       Int           @default(0)
+  perPieceRate       Float         @default(0) // Rate agreed per piece for this stage
+  totalAmount        Float         @default(0) // Auto-calculated: receivedQty × perPieceRate
+  status             String        @default("Pending")
   notes              String?
   vendorBills        VendorBill[]
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
 
   @@unique([productionJobId, stageName])
 }
@@ -704,91 +750,91 @@ model StageTracking {
 // ============ VENDOR BILLING & PAYMENTS ============
 
 model VendorBill {
-  id              String           @id @default(cuid())
-  billNo          String           @unique
+  id              String          @id @default(cuid())
+  billNo          String          @unique
   vendorId        String
-  vendor          Vendor           @relation(fields: [vendorId], references: [id])
+  vendor          Vendor          @relation(fields: [vendorId], references: [id])
   stageTrackingId String?
-  stageTracking   StageTracking?   @relation(fields: [stageTrackingId], references: [id])
-  description     String            // e.g. "Embroidery - 100 pcs × ₹15"
-  totalQty        Int              @default(0)
-  perPieceRate    Float            @default(0)
+  stageTracking   StageTracking?  @relation(fields: [stageTrackingId], references: [id])
+  description     String // e.g. "Embroidery - 100 pcs × ₹15"
+  totalQty        Int             @default(0)
+  perPieceRate    Float           @default(0)
   // GST fields
-  gstType         String           @default("IntraState")
-  gstPercent      Float            @default(18)
-  taxableAmount   Float            @default(0)
-  cgstAmount      Float            @default(0)
-  sgstAmount      Float            @default(0)
-  igstAmount      Float            @default(0)
-  totalGst        Float            @default(0)
-  totalAmount     Float            @default(0)  // taxableAmount + totalGst
-  paidAmount      Float            @default(0)
-  billDate        DateTime         @default(now())
+  gstType         String          @default("IntraState")
+  gstPercent      Float           @default(18)
+  taxableAmount   Float           @default(0)
+  cgstAmount      Float           @default(0)
+  sgstAmount      Float           @default(0)
+  igstAmount      Float           @default(0)
+  totalGst        Float           @default(0)
+  totalAmount     Float           @default(0) // taxableAmount + totalGst
+  paidAmount      Float           @default(0)
+  billDate        DateTime        @default(now())
   dueDate         DateTime?
-  status          String           @default("Pending") // Pending, Partially Paid, Paid, Overdue, Cancelled
+  status          String          @default("Pending") // Pending, Partially Paid, Paid, Overdue, Cancelled
   notes           String?
   payments        VendorPayment[]
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
 }
 
 model VendorPayment {
-  id              String      @id @default(cuid())
-  paymentNo       String      @unique
-  vendorBillId    String
-  vendorBill      VendorBill  @relation(fields: [vendorBillId], references: [id], onDelete: Cascade)
-  vendorId        String
-  amount          Float
-  paymentDate     DateTime    @default(now())
-  paymentMethod   String      @default("Bank Transfer") // Cash, UPI, Bank Transfer, Cheque
-  referenceNo     String?
-  notes           String?
-  createdAt       DateTime    @default(now())
-  updatedAt       DateTime    @updatedAt
+  id            String     @id @default(cuid())
+  paymentNo     String     @unique
+  vendorBillId  String
+  vendorBill    VendorBill @relation(fields: [vendorBillId], references: [id], onDelete: Cascade)
+  vendorId      String
+  amount        Float
+  paymentDate   DateTime   @default(now())
+  paymentMethod String     @default("Bank Transfer") // Cash, UPI, Bank Transfer, Cheque
+  referenceNo   String?
+  notes         String?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
 }
 
 // ============ GRN (GOODS RECEIVED NOTE) ============
 
 model GrnNote {
-  id              String     @id @default(cuid())
-  grnNo           String     @unique
-  poId            String?
-  purchaseOrder   PurchaseOrder? @relation(fields: [poId], references: [id])
-  supplierId      String?
-  supplier        Supplier?  @relation(fields: [supplierId], references: [id])
-  supplierName    String     // Denormalized for easy display
-  receivedDate    DateTime   @default(now())
-  status          String     @default("Draft") // Draft, Inspected, Approved, Rejected
-  totalReceivedQty Float     @default(0)
-  acceptedQty     Float      @default(0)
-  rejectedQty     Float      @default(0)
-  qualityRemarks  String?
-  notes           String?
-  grnItems        GrnItem[]
-  fabricReceipts  FabricReceipt[]        // receipts created from this GRN (NEW)
-  createdAt       DateTime   @default(now())
-  updatedAt       DateTime   @updatedAt
+  id               String         @id @default(cuid())
+  grnNo            String         @unique
+  poId             String?
+  purchaseOrder    PurchaseOrder? @relation(fields: [poId], references: [id])
+  supplierId       String?
+  supplier         Supplier?      @relation(fields: [supplierId], references: [id])
+  supplierName     String // Denormalized for easy display
+  receivedDate     DateTime       @default(now())
+  status           String         @default("Draft") // Draft, Inspected, Approved, Rejected
+  totalReceivedQty Float          @default(0)
+  acceptedQty      Float          @default(0)
+  rejectedQty      Float          @default(0)
+  qualityRemarks   String?
+  notes            String?
+  grnItems         GrnItem[]
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
 
   @@index([poId])
   @@index([status])
 }
 
 model GrnItem {
-  id              String   @id @default(cuid())
-  grnId           String
-  grnNote         GrnNote  @relation(fields: [grnId], references: [id], onDelete: Cascade)
-  fabricName      String
-  color           String?                 // NEW — Pink / Maroon / Red (for color-wise GRN)
-  lotNumber       String?                 // NEW — lot/batch number
-  orderedQty      Float
-  receivedQty     Float
-  acceptedQty     Float
-  rejectedQty     Float
-  defectNotes     String?
-  ratePerUnit     Float
-  totalValue      Float    @default(0)  // acceptedQty × ratePerUnit
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id          String   @id @default(cuid())
+  grnId       String
+  grnNote     GrnNote  @relation(fields: [grnId], references: [id], onDelete: Cascade)
+  poItemId    String? // link to POItem for line-level receipt tracking
+  fabricName  String
+  color       String? // NEW — Pink / Maroon / Red (for color-wise GRN)
+  lotNumber   String? // NEW — lot/batch number
+  orderedQty  Float
+  receivedQty Float
+  acceptedQty Float
+  rejectedQty Float
+  defectNotes String?
+  ratePerUnit Float
+  totalValue  Float    @default(0) // acceptedQty × ratePerUnit
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   @@index([grnId])
 }
@@ -796,43 +842,43 @@ model GrnItem {
 // ============ DISPATCH / SHIPPING ============
 
 model Dispatch {
-  id              String         @id @default(cuid())
-  dispatchNo      String         @unique
-  salesOrderId    String
-  salesOrder      SalesOrder     @relation(fields: [salesOrderId], references: [id])
-  productionJobId String?        // Sprint 3: link to production job
-  customerId      String
-  customer        Customer       @relation(fields: [customerId], references: [id], name: "CustomerDispatches")
-  dispatchDate    DateTime       @default(now())
-  status          String         @default("Packed") // Packed, InTransit, Delivered
-  shippingAddress String?
-  trackingNo      String?
-  transporter     String?
-  vehicleNo       String?
-  totalDispatchedQty Int         @default(0)
-  notes           String?
-  dispatchItems   DispatchItem[]
-  invoices        Invoice[]      // Sprint 3: invoices generated from this dispatch
-  createdAt       DateTime       @default(now())
-  updatedAt       DateTime       @updatedAt
+  id                 String         @id @default(cuid())
+  dispatchNo         String         @unique
+  salesOrderId       String
+  salesOrder         SalesOrder     @relation(fields: [salesOrderId], references: [id])
+  productionJobId    String? // Sprint 3: link to production job
+  customerId         String
+  customer           Customer       @relation(fields: [customerId], references: [id], name: "CustomerDispatches")
+  dispatchDate       DateTime       @default(now())
+  status             String         @default("Packed") // Packed, InTransit, Delivered
+  shippingAddress    String?
+  trackingNo         String?
+  transporter        String?
+  vehicleNo          String?
+  totalDispatchedQty Int            @default(0)
+  notes              String?
+  dispatchItems      DispatchItem[]
+  invoices           Invoice[] // Sprint 3: invoices generated from this dispatch
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
 
   @@index([salesOrderId])
   @@index([status])
 }
 
 model DispatchItem {
-  id              String   @id @default(cuid())
-  dispatchId      String
-  dispatch        Dispatch @relation(fields: [dispatchId], references: [id], onDelete: Cascade)
-  styleNo         String
-  styleName       String
-  orderedQty      Int
-  dispatchedQty   Int
-  color           String?                       // e.g., "Pink"
-  colorCode       String?                       // e.g., "DH-01-PK01"
-  size            String?                       // e.g., "S", "M", "L"
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id            String   @id @default(cuid())
+  dispatchId    String
+  dispatch      Dispatch @relation(fields: [dispatchId], references: [id], onDelete: Cascade)
+  styleNo       String
+  styleName     String
+  orderedQty    Int
+  dispatchedQty Int
+  color         String? // e.g., "Pink"
+  colorCode     String? // e.g., "DH-01-PK01"
+  size          String? // e.g., "S", "M", "L"
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   @@index([dispatchId])
 }
@@ -840,38 +886,38 @@ model DispatchItem {
 // ============ RETURNS ============
 
 model Return {
-  id              String       @id @default(cuid())
-  returnNo        String       @unique
-  returnType      String       // Customer, Supplier
-  referenceId     String       // salesOrderId or purchaseOrderId or vendorBillId
-  referenceNo     String       // SO-xxx or PO-xxx or VB-xxx (denormalized)
-  partyName       String       // Customer or Supplier name (denormalized)
-  reason          String
-  status          String       @default("Requested") // Requested, Approved, Processed, Rejected
-  totalQty        Int          @default(0)
-  totalValue      Float        @default(0)
-  refundAmount    Float        @default(0)
-  notes           String?
-  returnItems     ReturnItem[]
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt
+  id           String       @id @default(cuid())
+  returnNo     String       @unique
+  returnType   String // Customer, Supplier
+  referenceId  String // salesOrderId or purchaseOrderId or vendorBillId
+  referenceNo  String // SO-xxx or PO-xxx or VB-xxx (denormalized)
+  partyName    String // Customer or Supplier name (denormalized)
+  reason       String
+  status       String       @default("Requested") // Requested, Approved, Processed, Rejected
+  totalQty     Int          @default(0)
+  totalValue   Float        @default(0)
+  refundAmount Float        @default(0)
+  notes        String?
+  returnItems  ReturnItem[]
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
 
   @@index([returnType])
   @@index([status])
 }
 
 model ReturnItem {
-  id              String   @id @default(cuid())
-  returnId        String
-  return          Return   @relation(fields: [returnId], references: [id], onDelete: Cascade)
-  itemName        String
-  styleNo         String?
-  quantity        Int
-  unitValue       Float
-  totalValue      Float    @default(0)
-  reason          String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id         String   @id @default(cuid())
+  returnId   String
+  return     Return   @relation(fields: [returnId], references: [id], onDelete: Cascade)
+  itemName   String
+  styleNo    String?
+  quantity   Int
+  unitValue  Float
+  totalValue Float    @default(0)
+  reason     String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
   @@index([returnId])
 }
@@ -881,7 +927,7 @@ model ReturnItem {
 model CostCategory {
   id         String   @id @default(cuid())
   name       String   @unique
-  colorIndex Int      @default(0)   // Index into frontend color palette
+  colorIndex Int      @default(0) // Index into frontend color palette
   sortOrder  Int      @default(0)
   isSystem   Boolean  @default(false) // Pre-seeded categories cannot be deleted
   createdAt  DateTime @default(now())
@@ -889,35 +935,35 @@ model CostCategory {
 }
 
 model CostSheet {
-  id            String   @id @default(cuid())
-  sheetNo       String   @unique
-  styleNo       String
-  styleName     String
-  customerId    String?
-  customer      Customer? @relation(fields: [customerId], references: [id])
-  description   String?
-  sizeRange     String?
-  targetQty     Int      @default(0)
-  fabricCost    Float    @default(0)
-  trimCost      Float    @default(0)
-  laborCost     Float    @default(0)
-  washCost      Float    @default(0)
-  packagingCost Float    @default(0)
-  overheadCost  Float    @default(0)
-  otherCost     Float    @default(0)
-  totalCost     Float    @default(0)
-  profitPercent         Float    @default(30)
-  sellingPrice           Float    @default(0)
-  brokerCommissionPercent Float    @default(0)
-  brokerCommissionAmount Float    @default(0)
-  status                 String   @default("Draft")
-  image          String?                          // Base64 image for design photo
-  notes         String?
-  costItems     CostItem[]
-  colorBreakdown CostSheetColor[]
-  catalogItems  ClientCatalogItem[]              // Which catalogs include this cost sheet
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id                      String              @id @default(cuid())
+  sheetNo                 String              @unique
+  styleNo                 String
+  styleName               String
+  customerId              String?
+  customer                Customer?           @relation(fields: [customerId], references: [id])
+  description             String?
+  sizeRange               String?
+  targetQty               Int                 @default(0)
+  fabricCost              Float               @default(0)
+  trimCost                Float               @default(0)
+  laborCost               Float               @default(0)
+  washCost                Float               @default(0)
+  packagingCost           Float               @default(0)
+  overheadCost            Float               @default(0)
+  otherCost               Float               @default(0)
+  totalCost               Float               @default(0)
+  profitPercent           Float               @default(30)
+  sellingPrice            Float               @default(0)
+  brokerCommissionPercent Float               @default(0)
+  brokerCommissionAmount  Float               @default(0)
+  status                  String              @default("Draft")
+  image                   String? // Base64 image for design photo
+  notes                   String?
+  costItems               CostItem[]
+  colorBreakdown          CostSheetColor[]
+  catalogItems            ClientCatalogItem[] // Which catalogs include this cost sheet
+  createdAt               DateTime            @default(now())
+  updatedAt               DateTime            @updatedAt
 }
 
 model CostSheetColor {
@@ -931,64 +977,64 @@ model CostSheetColor {
 }
 
 model CostItem {
-  id            String    @id @default(cuid())
-  costSheetId   String
-  costSheet     CostSheet @relation(fields: [costSheetId], references: [id], onDelete: Cascade)
-  category      String
-  itemName      String
-  description   String?
-  consumption   Float     @default(0)
-  unit          String    @default("pcs")
-  unitRate      Float     @default(0)
-  wastagePercent Float    @default(5)
-  itemCost      Float     @default(0)
-  notes         String?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  id             String    @id @default(cuid())
+  costSheetId    String
+  costSheet      CostSheet @relation(fields: [costSheetId], references: [id], onDelete: Cascade)
+  category       String
+  itemName       String
+  description    String?
+  consumption    Float     @default(0)
+  unit           String    @default("pcs")
+  unitRate       Float     @default(0)
+  wastagePercent Float     @default(5)
+  itemCost       Float     @default(0)
+  notes          String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 }
 
 // ============ BROKER MANAGEMENT ============
 
 model Broker {
-  id            String           @id @default(cuid())
-  name          String
-  phone         String?
-  commissionPercent Float        @default(5)
-  address       String?
-  notes         String?
-  status        String           @default("Active")
-  catalogs      ClientCatalog[]
-  createdAt     DateTime         @default(now())
-  updatedAt     DateTime         @updatedAt
+  id                String          @id @default(cuid())
+  name              String
+  phone             String?
+  commissionPercent Float           @default(5)
+  address           String?
+  notes             String?
+  status            String          @default("Active")
+  catalogs          ClientCatalog[]
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
 }
 
 // ============ CLIENT CATALOG (Costing Selection for Client) ============
 
 model ClientCatalog {
-  id            String             @id @default(cuid())
-  catalogNo     String             @unique
-  customerId    String
-  customer      Customer           @relation("CustomerCatalogs", fields: [customerId], references: [id])
-  brokerId      String?
-  broker        Broker?            @relation(fields: [brokerId], references: [id])
-  date          DateTime           @default(now())
-  status        String             @default("Draft")   // Draft, Sent, Converted
-  notes         String?
-  items         ClientCatalogItem[]
-  createdAt     DateTime           @default(now())
-  updatedAt     DateTime           @updatedAt
+  id         String              @id @default(cuid())
+  catalogNo  String              @unique
+  customerId String
+  customer   Customer            @relation("CustomerCatalogs", fields: [customerId], references: [id])
+  brokerId   String?
+  broker     Broker?             @relation(fields: [brokerId], references: [id])
+  date       DateTime            @default(now())
+  status     String              @default("Draft") // Draft, Sent, Converted
+  notes      String?
+  items      ClientCatalogItem[]
+  createdAt  DateTime            @default(now())
+  updatedAt  DateTime            @updatedAt
 }
 
 model ClientCatalogItem {
-  id            String       @id @default(cuid())
-  catalogId     String
-  catalog       ClientCatalog @relation(fields: [catalogId], references: [id], onDelete: Cascade)
-  costSheetId   String
-  costSheet     CostSheet    @relation(fields: [costSheetId], references: [id])
-  discountPercent Float      @default(0)
+  id              String        @id @default(cuid())
+  catalogId       String
+  catalog         ClientCatalog @relation(fields: [catalogId], references: [id], onDelete: Cascade)
+  costSheetId     String
+  costSheet       CostSheet     @relation(fields: [costSheetId], references: [id])
+  discountPercent Float         @default(0)
   // Calculated at save time (not stored — computed from costSheet + discount + broker)
-  createdAt     DateTime     @default(now())
-  updatedAt     DateTime     @updatedAt
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
 
   @@unique([catalogId, costSheetId])
 }
@@ -996,134 +1042,134 @@ model ClientCatalogItem {
 // ============ FINANCE / TRANSACTIONS ============
 
 model Transaction {
-  id            String   @id @default(cuid())
-  type          String
-  category      String
-  amount        Float
-  description   String
-  referenceNo   String?
-  date          DateTime @default(now())
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id          String   @id @default(cuid())
+  type        String
+  category    String
+  amount      Float
+  description String
+  referenceNo String?
+  date        DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }
 
 // ============ DAILY SNAPSHOT ============
 
 model DailySnapshot {
-  id            String   @id @default(cuid())
-  date          DateTime @unique
-  revenue       Float    @default(0)
-  expenses      Float    @default(0)
-  grossProfit   Float    @default(0)
-  netProfit     Float    @default(0)
-  cashIn        Float    @default(0)
-  cashOut       Float    @default(0)
-  receivables   Float    @default(0)
-  payables      Float    @default(0)
-  cashBalance   Float    @default(0)
-  inventoryValue Float   @default(0)
-  ordersCount   Int      @default(0)
-  productionQty Int      @default(0)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id             String   @id @default(cuid())
+  date           DateTime @unique
+  revenue        Float    @default(0)
+  expenses       Float    @default(0)
+  grossProfit    Float    @default(0)
+  netProfit      Float    @default(0)
+  cashIn         Float    @default(0)
+  cashOut        Float    @default(0)
+  receivables    Float    @default(0)
+  payables       Float    @default(0)
+  cashBalance    Float    @default(0)
+  inventoryValue Float    @default(0)
+  ordersCount    Int      @default(0)
+  productionQty  Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 }
 
 // ============ QUOTATIONS ============
 
 model Quotation {
-  id              String   @id @default(cuid())
-  quotationNo     String   @unique
-  customerId      String
-  customer        Customer @relation(fields: [customerId], references: [id], name: "CustomerQuotations")
-  quotationDate   DateTime @default(now())
-  validUntil      DateTime
-  status          String   @default("Draft") // Draft, Sent, Accepted, Rejected, Converted
+  id               String          @id @default(cuid())
+  quotationNo      String          @unique
+  customerId       String
+  customer         Customer        @relation(fields: [customerId], references: [id], name: "CustomerQuotations")
+  quotationDate    DateTime        @default(now())
+  validUntil       DateTime
+  status           String          @default("Draft") // Draft, Sent, Accepted, Rejected, Converted
   // GST fields
-  gstType         String   @default("IntraState")
-  gstPercent      Float    @default(18)
-  taxableAmount   Float    @default(0)
-  cgstAmount      Float    @default(0)
-  sgstAmount      Float    @default(0)
-  igstAmount      Float    @default(0)
-  totalGst        Float    @default(0)
-  totalAmount     Float    @default(0)  // taxableAmount + totalGst - discount
-  totalCost       Float    @default(0)
-  discountPercent Float    @default(0)
-  notes           String?
+  gstType          String          @default("IntraState")
+  gstPercent       Float           @default(18)
+  taxableAmount    Float           @default(0)
+  cgstAmount       Float           @default(0)
+  sgstAmount       Float           @default(0)
+  igstAmount       Float           @default(0)
+  totalGst         Float           @default(0)
+  totalAmount      Float           @default(0) // taxableAmount + totalGst - discount
+  totalCost        Float           @default(0)
+  discountPercent  Float           @default(0)
+  notes            String?
   convertedOrderId String?
-  items           QuotationItem[]
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  items            QuotationItem[]
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
 }
 
 model QuotationItem {
-  id           String    @id @default(cuid())
-  quotationId  String
-  quotation    Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
-  styleName    String
-  quantity     Int
-  unitPrice    Float
-  unitCost     Float
-  totalAmount  Float
-  totalCost    Float
-  profit       Float
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id          String    @id @default(cuid())
+  quotationId String
+  quotation   Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+  styleName   String
+  quantity    Int
+  unitPrice   Float
+  unitCost    Float
+  totalAmount Float
+  totalCost   Float
+  profit      Float
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 }
 
 // ============ QUALITY CONTROL ============
 
 model QualityCheck {
-  id             String   @id @default(cuid())
-  checkNo        String   @unique
+  id              String        @id @default(cuid())
+  checkNo         String        @unique
   productionJobId String
-  productionJob  ProductionJob @relation(fields: [productionJobId], references: [id])
-  inspectionPoint String   // Fabric Check, Cutting Check, In-Process Check, Finishing Check, Final Inspection
-  checkedQty     Int      @default(0)
-  passedQty      Int      @default(0)
-  failedQty      Int      @default(0)
-  defectType     String?
-  defectCount    Int      @default(0)
-  severity       String   @default("Minor") // Minor, Major, Critical
-  status         String   @default("Pass")  // Pass, Fail, Conditional
-  inspectorName  String?
-  notes          String?
-  checkedAt      DateTime @default(now())
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  productionJob   ProductionJob @relation(fields: [productionJobId], references: [id])
+  inspectionPoint String // Fabric Check, Cutting Check, In-Process Check, Finishing Check, Final Inspection
+  checkedQty      Int           @default(0)
+  passedQty       Int           @default(0)
+  failedQty       Int           @default(0)
+  defectType      String?
+  defectCount     Int           @default(0)
+  severity        String        @default("Minor") // Minor, Major, Critical
+  status          String        @default("Pass") // Pass, Fail, Conditional
+  inspectorName   String?
+  notes           String?
+  checkedAt       DateTime      @default(now())
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
 }
 
 // ============ SAMPLING ============
 
 model Sample {
-  id            String          @id @default(cuid())
-  sampleNo      String          @unique
-  customerId    String?
-  customer      Customer?       @relation(fields: [customerId], references: [id])
-  styleNo       String
-  styleName     String
-  stage         String          @default("Design") // Design, Fabric Sourcing, Pattern Making, Cutting, Stitching, Finishing, Ready
-  status        String          @default("In Progress") // In Progress, Submitted, Approved, Rejected, Revised
-  assignedTo    String?
+  id             String              @id @default(cuid())
+  sampleNo       String              @unique
+  customerId     String?
+  customer       Customer?           @relation(fields: [customerId], references: [id])
+  styleNo        String
+  styleName      String
+  stage          String              @default("Design") // Design, Fabric Sourcing, Pattern Making, Cutting, Stitching, Finishing, Ready
+  status         String              @default("In Progress") // In Progress, Submitted, Approved, Rejected, Revised
+  assignedTo     String?
   submissionDate DateTime?
-  approvedDate  DateTime?
-  cost          Float          @default(0)
-  notes         String?
-  photos        SamplePhoto[]
-  catalogItems  SampleCatalogItem[]
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @updatedAt
+  approvedDate   DateTime?
+  cost           Float               @default(0)
+  notes          String?
+  photos         SamplePhoto[]
+  catalogItems   SampleCatalogItem[]
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
 }
 
 model SamplePhoto {
-  id          String   @id @default(cuid())
-  sampleId    String
-  sample      Sample   @relation(fields: [sampleId], references: [id], onDelete: Cascade)
-  imageUrl    String                // Base64 data URI of hi-res photo
-  caption     String?               // e.g. "Front View", "Back View", "Detail"
-  sortOrder   Int      @default(0)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id        String   @id @default(cuid())
+  sampleId  String
+  sample    Sample   @relation(fields: [sampleId], references: [id], onDelete: Cascade)
+  imageUrl  String // Base64 data URI of hi-res photo
+  caption   String? // e.g. "Front View", "Back View", "Detail"
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([sampleId])
 }
@@ -1131,26 +1177,26 @@ model SamplePhoto {
 // ============ SAMPLE CATALOG (Photo catalog sent to clients) ============
 
 model SampleCatalog {
-  id            String               @id @default(cuid())
-  catalogNo     String               @unique
-  customerId    String
-  customer      Customer             @relation("CustomerSampleCatalogs", fields: [customerId], references: [id])
-  sentDate      DateTime             @default(now())
-  status        String               @default("Draft") // Draft, Sent
-  notes         String?
-  items         SampleCatalogItem[]
-  createdAt     DateTime             @default(now())
-  updatedAt     DateTime             @updatedAt
+  id         String              @id @default(cuid())
+  catalogNo  String              @unique
+  customerId String
+  customer   Customer            @relation("CustomerSampleCatalogs", fields: [customerId], references: [id])
+  sentDate   DateTime            @default(now())
+  status     String              @default("Draft") // Draft, Sent
+  notes      String?
+  items      SampleCatalogItem[]
+  createdAt  DateTime            @default(now())
+  updatedAt  DateTime            @updatedAt
 }
 
 model SampleCatalogItem {
-  id          String        @id @default(cuid())
-  catalogId   String
-  catalog     SampleCatalog @relation(fields: [catalogId], references: [id], onDelete: Cascade)
-  sampleId    String
-  sample      Sample        @relation(fields: [sampleId], references: [id])
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  id        String        @id @default(cuid())
+  catalogId String
+  catalog   SampleCatalog @relation(fields: [catalogId], references: [id], onDelete: Cascade)
+  sampleId  String
+  sample    Sample        @relation(fields: [sampleId], references: [id])
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
 
   @@unique([catalogId, sampleId])
 }
@@ -1173,7 +1219,7 @@ model AgentConversation {
   id        String   @id @default(cuid())
   title     String?
   role      String   @default("founder")
-  messages  String   // JSON array: Array<{role, content, timestamp}>
+  messages  String // JSON array: Array<{role, content, timestamp}>
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
@@ -1183,8 +1229,8 @@ model AgentFeedback {
   conversationId String?
   userMessage    String
   agentResponse  String
-  toolCallsJson  String?  // JSON: array of tool call details
-  rating         String   // "up" | "down"
+  toolCallsJson  String? // JSON: array of tool call details
+  rating         String // "up" | "down"
   comment        String?
   createdAt      DateTime @default(now())
 }
@@ -1195,7 +1241,7 @@ model AuditLog {
   entityId       String?
   entityNo       String?
   action         String
-  changes        String?  // JSON string of field-level changes
+  changes        String? // JSON string of field-level changes
   toolName       String?
   userMessage    String?
   confirmation   String?
@@ -1206,18 +1252,18 @@ model AuditLog {
 // ============ EVAL HARNESS ============
 
 model EvalRun {
-  id            String       @id @default(cuid())
-  startedAt     DateTime     @default(now())
-  completedAt   DateTime?
-  version       String       @default("6.2")
-  totalTests    Int          @default(0)
-  passed        Int          @default(0)
-  failed        Int          @default(0)
-  errors        Int          @default(0)
-  accuracy      Float        @default(0)
-  avgLatencyMs  Int          @default(0)
-  results       EvalResult[]
-  createdAt     DateTime     @default(now())
+  id           String       @id @default(cuid())
+  startedAt    DateTime     @default(now())
+  completedAt  DateTime?
+  version      String       @default("6.2")
+  totalTests   Int          @default(0)
+  passed       Int          @default(0)
+  failed       Int          @default(0)
+  errors       Int          @default(0)
+  accuracy     Float        @default(0)
+  avgLatencyMs Int          @default(0)
+  results      EvalResult[]
+  createdAt    DateTime     @default(now())
 }
 
 model EvalResult {
@@ -1227,8 +1273,8 @@ model EvalResult {
   query           String
   category        String
   difficulty      String   @default("medium")
-  expectedTools   String   // JSON array
-  actualTools     String   // JSON array
+  expectedTools   String // JSON array
+  actualTools     String // JSON array
   toolAccuracy    Boolean  @default(false)
   partialAccuracy Float    @default(0)
   response        String   @default("")
@@ -1237,44 +1283,45 @@ model EvalResult {
   evalRun         EvalRun  @relation(fields: [evalRunId], references: [id], onDelete: Cascade)
   createdAt       DateTime @default(now())
 }
+
 // ─── Company Settings (White-Label Configuration) ───────────────────────────
 // Allows any brand to customize company info shown in PDFs, UI, etc.
 model CompanySettings {
-  id            String   @id @default("default")
-  companyName   String   @default("Dhanya Lifestyle LLP")
-  brandName     String?
-  tagline       String?
-  location      String   @default("Surat, Gujarat, India")
-  phone         String?
-  email         String?
-  website       String?
-  gstNumber     String?
-  logoUrl       String?
-  primaryColor  String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id           String   @id @default("default")
+  companyName  String   @default("Dhanya Lifestyle LLP")
+  brandName    String?
+  tagline      String?
+  location     String   @default("Surat, Gujarat, India")
+  phone        String?
+  email        String?
+  website      String?
+  gstNumber    String?
+  logoUrl      String?
+  primaryColor String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 }
 
 // ─── INVOICE & PAYMENT (Sprint 3 — full pipeline) ──────────────────────────
 
 model Invoice {
-  id              String    @id @default(cuid())
-  invoiceNo       String    @unique
-  salesOrderId    String?
-  dispatchId      String?
-  dispatch        Dispatch? @relation(fields: [dispatchId], references: [id])
-  customerId      String?
-  customer        Customer? @relation(fields: [customerId], references: [id], name: "CustomerInvoices")
-  totalAmount     Float     @default(0)
-  paidAmount      Float     @default(0)
-  paymentStatus   String    @default("Unpaid") // Unpaid, Partial, Paid
-  paymentTerms    Int       @default(0) // credit days (0 = immediate)
-  dueDate         DateTime?
-  invoiceDate     DateTime  @default(now())
-  notes           String?
-  payments        Payment[]
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  id            String    @id @default(cuid())
+  invoiceNo     String    @unique
+  salesOrderId  String?
+  dispatchId    String?
+  dispatch      Dispatch? @relation(fields: [dispatchId], references: [id])
+  customerId    String?
+  customer      Customer? @relation(fields: [customerId], references: [id], name: "CustomerInvoices")
+  totalAmount   Float     @default(0)
+  paidAmount    Float     @default(0)
+  paymentStatus String    @default("Unpaid") // Unpaid, Partial, Paid
+  paymentTerms  Int       @default(0) // credit days (0 = immediate)
+  dueDate       DateTime?
+  invoiceDate   DateTime  @default(now())
+  notes         String?
+  payments      Payment[]
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
   @@index([salesOrderId])
   @@index([customerId])
@@ -1282,16 +1329,16 @@ model Invoice {
 }
 
 model Payment {
-  id              String    @id @default(cuid())
-  paymentNo       String    @unique
-  invoiceId       String
-  invoice         Invoice   @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
-  amount          Float     @default(0)
-  paymentDate     DateTime  @default(now())
-  paymentMode     String    @default("Cash") // Cash, UPI, Bank Transfer, Cheque, Other
-  referenceNo     String?   // UPI ref, cheque no, etc.
-  notes           String?
-  createdAt       DateTime  @default(now())
+  id          String   @id @default(cuid())
+  paymentNo   String   @unique
+  invoiceId   String
+  invoice     Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  amount      Float    @default(0)
+  paymentDate DateTime @default(now())
+  paymentMode String   @default("Cash") // Cash, UPI, Bank Transfer, Cheque, Other
+  referenceNo String? // UPI ref, cheque no, etc.
+  notes       String?
+  createdAt   DateTime @default(now())
 
   @@index([invoiceId])
 }

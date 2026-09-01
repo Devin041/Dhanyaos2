@@ -42,6 +42,7 @@ import {
   FlaskConical,
   Camera,
   Settings,
+  Component,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -90,6 +91,7 @@ const navGroups: NavGroup[] = [
     icon: Database,
     items: [
       { label: 'Style Master', icon: Shirt, view: 'styles' },
+      { label: 'Bill of Materials', icon: Component, view: 'bom' },
       { label: 'Workers', icon: Users, view: 'workers' },
     ],
   },

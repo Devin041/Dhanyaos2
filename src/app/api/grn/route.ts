@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabase-db'
 import { NextRequest, NextResponse } from 'next/server'
+import { batchResolveStyleImages } from '@/lib/style-image'
 
 // ─── GET: List GRN notes ──────────────────────────────────────────────────
 
@@ -80,23 +81,39 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // Fetch PO references
+    // Fetch PO references (+ first item styleNo as fallback — older POs never
+    // had header styleNo persisted, but their line items often do)
     const poIds = grns.map((g: any) => g.poId).filter(Boolean)
     let poMap: Record<string, any> = {}
     if (poIds.length > 0) {
       const { data: pos } = await supabase
         .from('PurchaseOrder')
-        .select('id, poNumber, fabricName')
+        .select('id, poNumber, fabricName, styleNo')
         .in('id', poIds)
       if (pos) {
         poMap = Object.fromEntries(pos.map((p: any) => [p.id, p]))
+        const { data: poItems } = await supabase
+          .from('POItem')
+          .select('purchaseOrderId, styleNo')
+          .in('purchaseOrderId', poIds)
+          .order('createdAt', { ascending: true })
+        for (const pi of poItems || []) {
+          const po = poMap[pi.purchaseOrderId]
+          if (po && !po.styleNo && pi.styleNo) po.styleNo = pi.styleNo
+        }
       }
     }
+
+    // Resolve product images per GRN (via linked PO's styleNo) so the receive
+    // screen shows WHICH product's material is arriving
+    const grnStyleNos = [...new Set(grns.map((g: any) => poMap[g.poId || '']?.styleNo).filter(Boolean))] as string[]
+    const imageMap = grnStyleNos.length > 0 ? await batchResolveStyleImages(grnStyleNos) : {}
 
     // Build response with relations
     const grnsWithRelations = grns.map((g: any) => ({
       ...g,
       purchaseOrder: g.poId ? poMap[g.poId] || null : null,
+      _image: poMap[g.poId || '']?.styleNo ? imageMap[poMap[g.poId].styleNo] || null : null,
       grnItems: grnItemsMap[g.id] || [],
     }))
 
@@ -174,6 +191,7 @@ export async function POST(req: NextRequest) {
       totalRejectedQty += rejectedQty
 
       return {
+        poItemId: item.poItemId ? String(item.poItemId) : null,
         fabricName: String(item.fabricName || ''),
         color: item.color ? String(item.color) : null,
         lotNumber: item.lotNumber ? String(item.lotNumber) : null,
@@ -232,14 +250,26 @@ export async function POST(req: NextRequest) {
     if (grn.poId) {
       const { data: po } = await supabase
         .from('PurchaseOrder')
-        .select('poNumber, fabricName')
+        .select('poNumber, fabricName, styleNo')
         .eq('id', grn.poId)
         .single()
       purchaseOrder = po || null
     }
 
+    // Product image for the newly created GRN (best-effort)
+    let grnImage: string | null = null
+    try {
+      if ((purchaseOrder as any)?.styleNo) {
+        const { resolveStyleImage } = await import('@/lib/style-image')
+        const resolved = await resolveStyleImage((purchaseOrder as any).styleNo)
+        grnImage = resolved.url
+      }
+    } catch {
+      grnImage = null
+    }
+
     return NextResponse.json({
-      grn: { ...grn, purchaseOrder, grnItems: insertedItems || [] },
+      grn: { ...grn, purchaseOrder, _image: grnImage, grnItems: insertedItems || [] },
     }, { status: 201 })
   } catch (error) {
     console.error('GRN create error:', error)

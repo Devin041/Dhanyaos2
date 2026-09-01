@@ -90,6 +90,16 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
             .from('ProductionJob')
             .update({ actualFabricConsumed: planned })
             .eq('id', id)
+          // Sync the StockReservation ledger row created at job creation
+          try {
+            await supabase
+              .from('StockReservation')
+              .update({ consumedQty: planned, status: 'Fully Consumed', updatedAt: new Date().toISOString() })
+              .eq('referenceType', 'ProductionJob')
+              .eq('referenceId', id)
+          } catch (resErr) {
+            console.error('StockReservation consume sync (non-fatal):', resErr)
+          }
         }
       } catch (fabricErr) {
         console.error('Fabric consumption automation (non-fatal):', fabricErr)

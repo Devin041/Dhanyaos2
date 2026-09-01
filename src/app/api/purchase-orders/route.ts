@@ -387,6 +387,14 @@ export async function POST(request: NextRequest) {
     if (supplierId) insertBase.supplierId = supplierId
     if (notes) insertBase.notes = notes
     if (salesOrderId) insertBase.salesOrderId = salesOrderId
+    // Product linkage on the PO header (styleNo was historically never persisted
+    // here — only on POItem rows — which broke GRN/stock product tracing)
+    const headerStyleNo = styleNo || normalizedItems.find((it: any) => it.styleNo)?.styleNo || null
+    const headerStyleName = styleName || normalizedItems.find((it: any) => it.styleName)?.styleName || null
+    const headerCostSheetId = costSheetId || normalizedItems.find((it: any) => it.costSheetId)?.costSheetId || null
+    if (headerStyleNo) insertBase.styleNo = headerStyleNo
+    if (headerStyleName) insertBase.styleName = headerStyleName
+    if (headerCostSheetId) insertBase.costSheetId = headerCostSheetId
 
     let po: any = null
     // Insert with retry-without-new-columns fallback
@@ -402,7 +410,7 @@ export async function POST(request: NextRequest) {
     // PostgREST complains about a missing column (PGRST204 / "Could not find
     // the 'X' column"), we progressively strip the offending columns and retry.
     // This makes the API resilient to migrations not being applied yet.
-    const NEW_COLUMNS = ['poType', 'vendorId', 'brokerName', 'commissionPercent', 'commissionAmount', 'netAmount', 'notes', 'paymentTerms', 'paymentDueDate', 'salesOrderId']
+    const NEW_COLUMNS = ['poType', 'vendorId', 'brokerName', 'commissionPercent', 'commissionAmount', 'netAmount', 'notes', 'paymentTerms', 'paymentDueDate', 'salesOrderId', 'styleNo', 'styleName', 'costSheetId']
 
     if (vendorId) insertBase.vendorId = vendorId
     let currentPayload = { ...insertBase }
