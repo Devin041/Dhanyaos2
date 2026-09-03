@@ -2134,3 +2134,34 @@ Stage Summary:
 - F1 CLOSED (live-verified: every payment-in now auto-posts balanced double-entry GL + cashbook row + invoice update, cheque mode → Cheques in Hand with clear/bounce lifecycle)
 - Remaining known gap: Payment.tdsSection column missing in THIS Supabase project (user can run 1-line patch: ALTER TABLE "Payment" ADD COLUMN IF NOT EXISTS "tdsSection" text;) — app degrades gracefully without it (TDS section label not persisted, TDS amount still books)
 - NEXT: F3 (P&L actual vs target views) + F4 (vendor bill GST) + backfill pre-migration payments to GL (3 payments: 25,000 + 500 + 7,00,000)
+
+---
+Task ID: FIN-F3-F4-BACKFILL
+Agent: Main Agent (Z.ai Code)
+Task: F3 (P&L target-vs-actual) + F4 (vendor bill GST=0) + backfill 3 pre-migration payments to GL — per MASTER-PLAN F-series.
+
+Work Log:
+- F2 re-verified first (was already fixed in f405cfc): live GSTR-3B Sep-2026 net payable ₹1,33,938 matches master ₹1,33,938.48
+- F3 backend (/api/accounts/monthly-pnl rewritten): 3 clearly-labeled views
+  * TARGET: revenue=SalesOrder.totalAmount (booking), COGS=cost-sheet target, GP, margin, orderCount
+  * ACTUAL: revenue=Invoice.totalAmount (invoiced, GST-incl), directCosts={material PO, jobWork VendorBill, broker CostSheet.brokerCommissionAmount, direct expense entries}, grossProfit, margin
+  * NET: actualGP − netGST − indirect; netGST via Rule 88A cross-utilization (invoice+PO+bill GST per month)
+  * CRITICAL FIX: Transaction credits 'Customer Payment'/'Investor Capital'/'Sales Revenue'/capital/loan categories EXCLUDED from revenue (were double-counting ₹7L+ as income); direct debit categories (Fabric Purchase, Embroidery, Stitching, Accessories…) moved to direct costs, not indirect
+- F3 frontend (pnl-dashboard.tsx rewritten): TARGET/ACTUAL/NET tab switcher with hints, amber honesty banner on TARGET view ("not money received or spent"), per-view summary cards + chart + current-month breakdown cards (Actual Revenue / Actual Direct Costs / GST & Overheads / Net Calculation), monthly table with all 3 views side-by-side (Target GP | Actual GP | Net GST | Indirect | Net Profit | Margin)
+- EL-025 live verification (Sep 26): TARGET 14,74,637/10,12,800/GP 4,61,837 | ACTUAL revenue 14,68,492 (invoice ✓) − direct 6,17,133 (Chirag 4,91,400 + jobwork 99,400 + broker 26,333) = GP 8,51,359 | GST net 1,33,938.48 (EXACT master value) | NET 7,17,421 (48.9%)
+- F4 backend (vendor-bills POST): GST compute — taxable=qty×rate (else entered amount is pre-tax), IntraState→CGST+SGST half each, InterState→IGST, unregistered vendor (no gstNumber) forced 0% with note (no ITC); gstType/gstPercent/cgst/sgst/igst/totalGst/taxableAmount all persisted; response enriched with _gst note
+- F4 frontend (vendors.tsx): VendorBill+Vendor interfaces gain GST fields; bill form GST section (Supply Type + GST Rate 0/5/12/18/28 selects, live computed preview Taxable/+CGST/+SGST or +IGST/Bill Total, GSTIN display, amber unregistered notice, selects disabled when unregistered); bill list GST badges (GST 5% / IGST 12% / No GST), amount column shows taxable+GST, expanded row GST breakdown card
+- F4 E2E (curl + browser): registered IntraState 100×10@5% → 25+25=50, total 1050 ✓; unregistered tries 18% → forced 0 with note ✓; InterState 2000@12% → IGST 240, total 2240 ✓; browser dialog 200×15 → preview 3,000+75+75=3,150, submitted bill VB-20260903-010 stored exactly that, "GST 5%" badge in list ✓; test bills deleted after
+- Backfill (scripts/backfill-payments.ts, kept for reuse): 3 payments journalEntryId=null → posted Dr Bank/Cash + Cr Receivable JEs at HISTORICAL payment dates (JE-20260807-001 ₹25,000 UPI, JE-20260811-001 ₹500 Cash, JE-20260903-002 ₹7,00,000 Bank) + cashbook Credit 'Customer Payment' rows linked to JEs + Payment.journalEntryId set; idempotency guards (skip existing cashbook sourceId, skip cheques)
+- Trial balance after backfill: Dr = Cr ₹39,99,952 BALANCED ✓ (32,74,452 opening + 7,25,500 backfilled)
+- Browser E2E: P&L module renders all 3 views + Sep-26 row (4,61,837 | 8,51,359 | −1,33,938 | −0 | 7,17,421 | 48.9% PROFIT); Vendors Bills & Payments tab shows No GST badges on 9 legacy bills; no console errors; lint 0 errors
+- Screenshots: docs/verify-pnl-net-view.png, docs/verify-pnl-target-view.png
+- Commit c0926c9 pushed to main
+
+Stage Summary:
+- F1, F2, F3, F4 ALL CLOSED — full F-series done
+- P&L now honest: target never shown as actual; payments/capital not revenue; net GST cross-utilized; EL-025 Sep numbers match master ledger exactly
+- Vendor bills: GST computed at creation with registered-vendor rule (unregistered = no GST, no ITC); 9 legacy Sep bills remain GST=0 (their vendors are unregistered — correct as-is)
+- 3 pre-migration payments now visible in GL/cashbook; ledger fully live
+- Note: /api/financial-statements (orphan, no frontend consumer) still has old booking-based math — dead code, not user-visible; cleanup candidate for later
+- Remaining from earlier session note: user can optionally run 1-line Supabase patch ALTER TABLE "Payment" ADD COLUMN IF NOT EXISTS "tdsSection" text; (app degrades gracefully without)
