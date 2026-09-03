@@ -48,7 +48,9 @@ import {
   AlertTriangle,
   MoreVertical,
   ArrowDownToLine,
+  ArrowDownLeft,
   ArrowUpFromLine,
+  RefreshCw,
   Unlock,
   Pencil,
   SortAsc,
@@ -113,6 +115,34 @@ interface Reservation {
   fabricStock: { id: string; fabricName: string; availableMeters: number; reservedMeters: number }
 }
 
+// Receipts tab (Phase 4) — FabricReceipt ledger flattened with joins
+// from /api/fabric-receipts (PO number, GRN no, supplier, stock info)
+interface FabricReceiptRow {
+  id: string
+  fabricStockId: string | null
+  poId: string | null
+  grnId: string | null
+  supplierId: string | null
+  fabricName: string
+  color: string | null
+  lotNumber: string | null
+  receivedQty: number
+  acceptedQty: number
+  rejectedQty: number
+  ratePerUnit: number
+  totalValue: number
+  receivedDate: string
+  notes: string | null
+  grnNo: string | null
+  poNumber: string | null
+  supplierName: string | null
+  stockFabricName: string | null
+  stockColor: string | null
+  stockLot: string | null
+  stockStyleNo: string | null
+  stockAvailableMeters: number | null
+}
+
 // ─── Helpers ───────────────────────────────────────────────────────────────
 const inr = (n: number) =>
   new Intl.NumberFormat('en-IN', {
@@ -160,6 +190,12 @@ export function FabricStock() {
   const [resLoading, setResLoading] = useState(true)
   const [resSearch, setResSearch] = useState('')
   const [resStatusFilter, setResStatusFilter] = useState('All')
+
+  // Receipts tab state (Phase 4 — GRN audit ledger)
+  const [receipts, setReceipts] = useState<FabricReceiptRow[]>([])
+  const [receiptsLoading, setReceiptsLoading] = useState(true)
+  const [receiptSearch, setReceiptSearch] = useState('')
+  const [receiptImages, setReceiptImages] = useState<Record<string, string>>({})
 
   // Dialogs
   const [addOpen, setAddOpen] = useState(false)
@@ -253,6 +289,40 @@ export function FabricStock() {
     fetchReservations()
   }, [fetchReservations])
 
+  // ─── Fetch receipts (Phase 4 — one call + ONE batch style-image) ───
+  const fetchReceipts = useCallback(async () => {
+    try {
+      setReceiptsLoading(true)
+      const res = await fetch('/api/fabric-receipts?limit=200')
+      if (res.ok) {
+        const data = await res.json()
+        const rows: FabricReceiptRow[] = data.receipts || []
+        setReceipts(rows)
+        // ONE batch image lookup for the distinct stockStyleNos
+        const styleNos = [...new Set(rows.map((r) => r.stockStyleNo).filter(Boolean))] as string[]
+        if (styleNos.length > 0) {
+          try {
+            const imgRes = await fetch(`/api/style-images?styleNos=${encodeURIComponent(styleNos.join(','))}`)
+            if (imgRes.ok) {
+              const imgData = await imgRes.json()
+              setReceiptImages(imgData.images || {})
+            }
+          } catch {
+            // thumbnails are display-only
+          }
+        }
+      }
+    } catch {
+      toast.error('Failed to load fabric receipts')
+    } finally {
+      setReceiptsLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    fetchReceipts()
+  }, [fetchReceipts])
+
   // ─── Sorting ───────────────────────────────────────────────────────
   const sortedStocks = [...stocks].sort((a, b) => {
     let cmp = 0
@@ -260,6 +330,24 @@ export function FabricStock() {
     else if (sortKey === 'value') cmp = a.totalValue - b.totalValue
     else if (sortKey === 'available') cmp = a.availableMeters - b.availableMeters
     return sortDir === 'asc' ? cmp : -cmp
+  })
+
+  // Receipts search (fabric / color / lot / GRN / PO / supplier / style)
+  const filteredReceipts = receipts.filter((r) => {
+    if (!receiptSearch) return true
+    const term = receiptSearch.toLowerCase()
+    return [
+      r.fabricName,
+      r.color,
+      r.lotNumber,
+      r.grnNo,
+      r.poNumber,
+      r.supplierName,
+      r.stockStyleNo,
+      r.stockFabricName,
+      r.stockColor,
+      r.stockLot,
+    ].some((v) => v && String(v).toLowerCase().includes(term))
   })
 
   const toggleSort = (key: SortKey) => {
@@ -418,6 +506,10 @@ export function FabricStock() {
           <TabsTrigger value="reservations" className="gap-1.5">
             <Lock className="h-4 w-4" />
             Reservations
+          </TabsTrigger>
+          <TabsTrigger value="receipts" className="gap-1.5">
+            <ArrowDownLeft className="h-4 w-4" />
+            Receipts
           </TabsTrigger>
         </TabsList>
 
@@ -855,6 +947,150 @@ className="h-40 text-center">
                         </TableCell>
                         <TableCell className="hidden md:table-cell text-xs text-muted-foreground">
                           {format(new Date(r.reservedDate), 'dd-MMM-yyyy')}
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </Card>
+        </TabsContent>
+
+        {/* ─── Tab 3: Receipts (Phase 4 — GRN audit ledger) ───────── */}
+        <TabsContent value="receipts" className="space-y-4">
+          {/* Receipts toolbar */}
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="relative flex-1 min-w-[200px] max-w-sm">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search fabric, color, lot, GRN, PO, supplier, style..."
+                className="pl-9 bg-background/50"
+                value={receiptSearch}
+                onChange={(e) => setReceiptSearch(e.target.value)}
+              />
+            </div>
+            <Button
+              variant="outline"
+              className="gap-1.5"
+              onClick={fetchReceipts}
+              disabled={receiptsLoading}
+            >
+              <RefreshCw className={`h-4 w-4 ${receiptsLoading ? 'animate-spin' : ''}`} />
+              Refresh
+            </Button>
+            <Button
+              variant="outline"
+              className="gap-1.5"
+              onClick={() => setActiveView('grn')}
+            >
+              <ExternalLink className="h-4 w-4" />
+              Open GRN Module
+            </Button>
+          </div>
+
+          {/* Receipts Table */}
+          <Card className="glass-card overflow-hidden">
+            <div className="max-h-[70vh] overflow-y-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="hover:bg-transparent border-border/50">
+                    <TableHead className="text-xs font-semibold">Date</TableHead>
+                    <TableHead className="text-xs font-semibold">Fabric</TableHead>
+                    <TableHead className="text-xs font-semibold text-right">Accepted</TableHead>
+                    <TableHead className="text-xs font-semibold text-right hidden sm:table-cell">Rate</TableHead>
+                    <TableHead className="text-xs font-semibold">GRN / PO</TableHead>
+                    <TableHead className="text-xs font-semibold hidden md:table-cell">Supplier</TableHead>
+                    <TableHead className="text-xs font-semibold hidden lg:table-cell">Style</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {receiptsLoading ? (
+                    [...Array(6)].map((_, i) => (
+                      <TableRow key={i} className="border-border/30">
+                        {[...Array(7)].map((_, j) => (
+                          <TableCell key={j} className={j === 2 || j === 3 ? 'text-right' : ''}>
+                            <Skeleton className="h-4 w-16" />
+                          </TableCell>
+                        ))}
+                      </TableRow>
+                    ))
+                  ) : filteredReceipts.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={7} className="h-40 text-center">
+                        <div className="flex flex-col items-center gap-2 text-muted-foreground">
+                          <ArrowDownLeft className="h-8 w-8" />
+                          <p className="text-sm">{receiptSearch ? 'No receipts match your search' : 'No fabric receipts yet'}</p>
+                          <p className="text-xs">Receipts are recorded automatically when a GRN is approved</p>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    filteredReceipts.map((r) => (
+                      <TableRow key={r.id} className="border-border/30 hover:bg-muted/50">
+                        <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
+                          {format(new Date(r.receivedDate), 'dd-MMM-yyyy')}
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex flex-col min-w-0">
+                            <span className="font-medium text-foreground text-sm">{r.fabricName}</span>
+                            <span className="text-[10px] text-muted-foreground">
+                              {r.color && <span>Color: <span className="font-medium text-foreground/80">{r.color}</span> · </span>}
+                              {r.lotNumber ? <span>Lot {r.lotNumber}</span> : <span>No lot</span>}
+                              {r.rejectedQty > 0 && (
+                                <span className="ml-1.5 inline-flex items-center gap-0.5 rounded-full border border-red-500/30 bg-red-500/10 px-1.5 py-0 text-[9px] font-medium text-red-600 dark:text-red-400">
+                                  <AlertTriangle className="h-2 w-2" />
+                                  {fmt(r.rejectedQty)}m rejected
+                                </span>
+                              )}
+                            </span>
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex flex-col items-end">
+                            <span className="text-sm font-semibold tabular-nums text-foreground">{fmt(r.acceptedQty)}m</span>
+                            {r.stockAvailableMeters !== null && (
+                              <span className="text-[10px] text-muted-foreground">{fmt(r.stockAvailableMeters)}m in stock</span>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-right hidden sm:table-cell text-sm tabular-nums text-muted-foreground">
+                          {inr(r.ratePerUnit)}/m
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex flex-col gap-0.5">
+                            {r.grnNo ? (
+                              <span className="font-mono text-xs font-medium text-primary">{r.grnNo}</span>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">—</span>
+                            )}
+                            {r.poNumber && (
+                              <span className="font-mono text-[10px] text-muted-foreground">{r.poNumber}</span>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell className="hidden md:table-cell text-xs text-muted-foreground">
+                          {r.supplierName || '—'}
+                        </TableCell>
+                        <TableCell className="hidden lg:table-cell">
+                          {r.stockStyleNo ? (
+                            <div className="flex items-center gap-2">
+                              {receiptImages[r.stockStyleNo] ? (
+                                <img
+                                  src={receiptImages[r.stockStyleNo]}
+                                  alt={r.stockStyleNo}
+                                  className="h-8 w-8 rounded object-cover border border-border/50"
+                                />
+                              ) : (
+                                <div className="h-8 w-8 rounded bg-muted flex items-center justify-center border border-border/50">
+                                  <Shirt className="h-3.5 w-3.5 text-muted-foreground/50" />
+                                </div>
+                              )}
+                              <span className="text-xs font-medium text-primary font-mono">{r.stockStyleNo}</span>
+                            </div>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">—</span>
+                          )}
                         </TableCell>
                       </TableRow>
                     ))

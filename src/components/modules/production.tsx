@@ -50,6 +50,7 @@ import {
   Edit3,
   Truck,
   Shirt,
+  Scissors,
   Gauge,
   Zap,
   Sparkles,
@@ -72,6 +73,7 @@ import {
 } from 'recharts'
 import { useDashboardStore } from '@/store/dashboard-store'
 import { toast } from 'sonner'
+import { FabricIssueDialog } from '@/components/modules/production-fabric-issue'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -128,6 +130,7 @@ interface ProductionJob {
   startDate: string
   endDate: string | null
   status: string
+  color?: string | null
   createdAt: string
   updatedAt: string
   _image?: string | null
@@ -292,6 +295,9 @@ export function ProductionModule() {
   const [detailOpen, setDetailOpen] = useState(false)
   const [newJobOpen, setNewJobOpen] = useState(false)
   const [saving, setSaving] = useState(false)
+
+  // Fabric Issue dialog (Phase 4 — GRN-received fabric → production job)
+  const [fabricIssueJob, setFabricIssueJob] = useState<ProductionJob | null>(null)
 
   // New job form - from sales order
   const [eligibleOrders, setEligibleOrders] = useState<EligibleOrder[]>([])
@@ -787,6 +793,33 @@ export function ProductionModule() {
     fetchStageTracking(job.id)
     fetchVendors()
   }
+
+  // ─── Fabric Issue dialog (Phase 4) ────────────────────────────────
+  const openFabricIssue = (job: ProductionJob) => {
+    setFabricIssueJob({
+      ...job,
+      color: job.color ?? null,
+      _image: job._image ?? null,
+    })
+  }
+
+  const handleFabricIssued = useCallback(async () => {
+    fetchData()
+    if (fabricIssueJob) {
+      try {
+        const res = await fetch(`/api/production/${fabricIssueJob.id}`)
+        if (res.ok) {
+          const updated = await res.json()
+          if (selectedJob?.id === fabricIssueJob.id) {
+            setSelectedJob((prev) => (prev ? { ...prev, ...updated } : updated))
+          }
+        }
+        fetchStageTracking(fabricIssueJob.id)
+      } catch {
+        // refresh is best-effort — fetchData above already reloaded the board
+      }
+    }
+  }, [fetchData, fabricIssueJob, selectedJob, fetchStageTracking])
 
   // ─── Computed ──────────────────────────────────────────────────────────
 
@@ -1450,8 +1483,8 @@ export function ProductionModule() {
                     {/* Job list */}
                     <div className="space-y-2 max-h-[420px] overflow-y-auto">
                       {jobs.map((job) => (
+                        <div key={job.id} className="space-y-1">
                         <button
-                          key={job.id}
                           onClick={() => openDetail(job)}
                           className={`w-full rounded-lg border p-2.5 text-left transition-colors hover:bg-muted/50 ${getJobBorderColor(job)}`}
                         >
@@ -1537,6 +1570,16 @@ export function ProductionModule() {
                             </div>
                           )}
                         </button>
+                        {job.stage === 'Fabric Issue' && job.status !== 'Cancelled' && (
+                          <button
+                            onClick={() => openFabricIssue(job)}
+                            className="w-full flex items-center justify-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-2 py-1.5 text-[11px] font-medium text-emerald-600 dark:text-emerald-400 transition-colors hover:bg-emerald-500/20"
+                          >
+                            <Scissors className="h-3 w-3" />
+                            Issue Fabric
+                          </button>
+                        )}
+                        </div>
                       ))}
                       {jobs.length === 0 && (
                         <p className="text-[10px] text-muted-foreground text-center py-4">No jobs</p>
@@ -1602,8 +1645,8 @@ export function ProductionModule() {
                 </Badge>
               </div>
               {(stageGroups[PRODUCTION_STAGES[mobileStageIdx]] ?? []).map((job) => (
+                <div key={job.id} className="space-y-1.5">
                 <button
-                  key={job.id}
                   onClick={() => openDetail(job)}
                   className={`w-full rounded-lg border p-3 text-left transition-colors hover:bg-muted/50 ${getJobBorderColor(job)}`}
                 >
@@ -1690,6 +1733,16 @@ export function ProductionModule() {
                     </div>
                   )}
                 </button>
+                {job.stage === 'Fabric Issue' && job.status !== 'Cancelled' && (
+                  <button
+                    onClick={() => openFabricIssue(job)}
+                    className="w-full flex items-center justify-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-2 py-2 text-xs font-medium text-emerald-600 dark:text-emerald-400 transition-colors hover:bg-emerald-500/20"
+                  >
+                    <Scissors className="h-3.5 w-3.5" />
+                    Issue Fabric
+                  </button>
+                )}
+                </div>
               ))}
               {(stageGroups[PRODUCTION_STAGES[mobileStageIdx]] ?? []).length === 0 && (
                 <p className="text-xs text-muted-foreground text-center py-6">No jobs in this stage</p>
@@ -2009,6 +2062,15 @@ export function ProductionModule() {
                 {/* Action buttons */}
                 {selectedJob.status !== 'Completed' && selectedJob.status !== 'Cancelled' && (
                   <div className="flex flex-wrap gap-2">
+                    {selectedJob.stage === 'Fabric Issue' && (
+                      <Button
+                        className="gap-2 bg-emerald-600 text-white hover:bg-emerald-600/90"
+                        onClick={() => openFabricIssue(selectedJob)}
+                      >
+                        <Scissors className="h-3.5 w-3.5" />
+                        Issue Fabric
+                      </Button>
+                    )}
                     {getStageIndex(selectedJob.stage) < PRODUCTION_STAGES.length - 1 && (
                       <Button
                         className="gap-2 bg-primary text-primary-foreground hover:bg-primary/90"
@@ -2282,7 +2344,16 @@ export function ProductionModule() {
         </DialogContent>
       </Dialog>
 
-      {/* ─── Production Efficiency Dashboard (NEW FEATURE) ─────────────── */}
+      {/* ─── Fabric Issue Dialog (Phase 4 — GRN-received fabric → job) ── */}
+      {fabricIssueJob && (
+        <FabricIssueDialog
+          job={fabricIssueJob}
+          onClose={() => setFabricIssueJob(null)}
+          onIssued={handleFabricIssued}
+        />
+      )}
+
+      {/* ─── Production Efficiency Dashboard (NEW FEATURE) ───────────── */}
       {eff && eff.summary.totalJobs > 0 && (
         <ProductionEfficiencyWidget data={eff} />
       )}
