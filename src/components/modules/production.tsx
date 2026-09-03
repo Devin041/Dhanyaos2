@@ -13,6 +13,7 @@ import { Separator } from '@/components/ui/separator'
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -61,6 +62,8 @@ import {
   AlertCircle,
   TrendingDown,
   Palette,
+  Trash2,
+  Lock,
 } from 'lucide-react'
 import {
   BarChart,
@@ -176,6 +179,28 @@ interface StageTracking {
   totalAmount: number
   status: string
   notes: string | null
+  // Phase 5b — per-split color + vendor-bill lock flag (from the stages API)
+  color?: string | null
+  hasBills?: boolean
+  _bills?: Array<{ id: string; billNo: string; totalAmount: number; status: string }>
+}
+
+// Phase 5b — one editable row of the STAGE SPLITS editor (multi-vendor /
+// multi-color split rows of a single stage)
+interface StageSplitForm {
+  id?: string
+  color: string
+  locationType: string
+  vendorId: string
+  sentDate: string
+  expectedReturnDate: string
+  receivedDate: string
+  sentQty: string
+  receivedQty: string
+  defectiveQty: string
+  perPieceRate: string
+  notes: string
+  hasBills: boolean
 }
 
 interface VendorOption {
@@ -460,19 +485,11 @@ export function ProductionModule() {
   const [stageTrackings, setStageTrackings] = useState<StageTracking[]>([])
   const [vendors, setVendors] = useState<VendorOption[]>([])
   const [stageEditOpen, setStageEditOpen] = useState(false)
-  const [editingStage, setEditingStage] = useState<StageTracking | null>(null)
-  const [stageForm, setStageForm] = useState({
-    locationType: 'In-House',
-    vendorId: '',
-    sentDate: '',
-    expectedReturnDate: '',
-    receivedDate: '',
-    sentQty: '',
-    receivedQty: '',
-    defectiveQty: '',
-    perPieceRate: '',
-    notes: '',
-  })
+  // Phase 5b — STAGE SPLITS editor state: the stage name being edited + the
+  // full list of split rows (one row per vendor/color split of that stage)
+  const [editingStageName, setEditingStageName] = useState<string | null>(null)
+  const [stageSplits, setStageSplits] = useState<StageSplitForm[]>([])
+  const [savingSplits, setSavingSplits] = useState(false)
 
   // Start date for new jobs
   const [jobStartDate, setJobStartDate] = useState(() => new Date().toISOString().split('T')[0])
@@ -552,58 +569,160 @@ export function ProductionModule() {
     } catch { /* silent */ }
   }, [])
 
-  // Save stage tracking edit
-  const handleSaveStageTracking = async () => {
-    if (!selectedJob || !editingStage) return
+  // ─── Phase 5b — STAGE SPLITS editor logic ────────────────────────────
+  // One stage carries N vendor/color split rows. The editor edits the FULL
+  // list of that stage's rows and saves via PATCH { stageName, rows } with
+  // REPLACE semantics (rows absent from the payload are deleted server-side,
+  // unless they carry vendor bills — those are locked here AND server-side).
+
+  // Map a saved StageTracking row into the editor's form shape
+  const rowToSplitForm = (r: StageTracking): StageSplitForm => ({
+    id: r.id,
+    color: r.color || '',
+    locationType: r.locationType || 'In-House',
+    vendorId: r.vendorId || '',
+    sentDate: r.sentDate ? r.sentDate.split('T')[0] : '',
+    expectedReturnDate: r.expectedReturnDate ? r.expectedReturnDate.split('T')[0] : '',
+    receivedDate: r.receivedDate ? r.receivedDate.split('T')[0] : '',
+    sentQty: r.sentQty ? String(r.sentQty) : '',
+    receivedQty: r.receivedQty ? String(r.receivedQty) : '',
+    defectiveQty: r.defectiveQty ? String(r.defectiveQty) : '',
+    perPieceRate: r.perPieceRate ? String(r.perPieceRate) : '',
+    notes: r.notes || '',
+    hasBills: !!r.hasBills,
+  })
+
+  // A brand-new split defaults to Outsourced (the whole point of a split is
+  // sending work out), today's sent date, and the job's color prefilled
+  const blankSplit = (): StageSplitForm => ({
+    color: isColorJob(selectedJob?.color) ? (selectedJob?.color as string) : '',
+    locationType: 'Outsourced',
+    vendorId: '',
+    sentDate: new Date().toISOString().split('T')[0],
+    expectedReturnDate: '',
+    receivedDate: '',
+    sentQty: '',
+    receivedQty: '',
+    defectiveQty: '',
+    perPieceRate: '',
+    notes: '',
+    hasBills: false,
+  })
+
+  // Opens the splits editor for a stage — loads ALL rows of that stage
+  const openStageEdit = (stageName: string) => {
+    const rows = stageTrackings.filter((s) => s.stageName === stageName)
+    if (rows.length === 0) return
+    setEditingStageName(stageName)
+    setStageSplits(rows.map(rowToSplitForm))
+    setStageEditOpen(true)
+  }
+
+  const updateSplit = (idx: number, patch: Partial<StageSplitForm>) => {
+    setStageSplits((prev) => prev.map((s, i) => (i === idx ? { ...s, ...patch } : s)))
+  }
+
+  const removeSplit = (idx: number) => {
+    setStageSplits((prev) => prev.filter((_, i) => i !== idx))
+  }
+
+  // Persist the full split list (silent — callers toast their own success).
+  // Returns the saved rows from the server (ids, resolved vendor ids,
+  // hasBills flags) or null on failure, and refreshes the editor + pipeline.
+  const persistSplits = async (): Promise<StageTracking[] | null> => {
+    if (!selectedJob || !editingStageName) return null
+    setSavingSplits(true)
     try {
-      const derivedStatus = stageForm.receivedDate ? 'Completed' : stageForm.sentDate ? 'Sent Out' : 'In Progress'
-      const payload: Record<string, unknown> = {
-        stageName: editingStage.stageName,
-        locationType: stageForm.locationType,
-        vendorId: stageForm.locationType === 'Outsourced' ? (stageForm.vendorId || null) : null,
-        sentDate: stageForm.sentDate || null,
-        expectedReturnDate: stageForm.expectedReturnDate || null,
-        receivedDate: stageForm.receivedDate || null,
-        sentQty: stageForm.sentQty ? Number(stageForm.sentQty) : 0,
-        receivedQty: stageForm.receivedQty ? Number(stageForm.receivedQty) : 0,
-        defectiveQty: stageForm.defectiveQty ? Number(stageForm.defectiveQty) : 0,
-        perPieceRate: stageForm.perPieceRate ? Number(stageForm.perPieceRate) : 0,
-        status: derivedStatus,
-        notes: stageForm.notes || null,
+      const payload = {
+        stageName: editingStageName,
+        rows: stageSplits.map((s) => ({
+          id: s.id || undefined,
+          ...(s.color.trim() ? { color: s.color.trim() } : {}),
+          locationType: s.locationType,
+          vendorId: s.locationType === 'Outsourced' ? (s.vendorId || null) : null,
+          sentDate: s.sentDate || null,
+          expectedReturnDate: s.expectedReturnDate || null,
+          receivedDate: s.receivedDate || null,
+          sentQty: s.sentQty ? Number(s.sentQty) : 0,
+          receivedQty: s.receivedQty ? Number(s.receivedQty) : 0,
+          defectiveQty: s.defectiveQty ? Number(s.defectiveQty) : 0,
+          perPieceRate: s.perPieceRate ? Number(s.perPieceRate) : 0,
+          notes: s.notes || null,
+        })),
       }
       const res = await fetch(`/api/production/${selectedJob.id}/stages`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       })
-      if (res.ok) {
-        toast.success(`${editingStage.stageName} updated`)
-        setStageEditOpen(false)
-        fetchStageTracking(selectedJob.id)
-      } else {
+      if (!res.ok) {
         const err = await res.json().catch(() => ({}))
-        toast.error(err.error || 'Failed to update stage')
+        toast.error((err as { error?: string }).error || 'Failed to save stage splits')
+        return null
       }
+      const json = await res.json()
+      const rows: StageTracking[] = json.rows || []
+      // Refresh the editor state from the saved rows (ids assigned to new
+      // rows, Supplier ids resolved to Vendor ids, hasBills flags)
+      setStageSplits(rows.map(rowToSplitForm))
+      fetchStageTracking(selectedJob.id)
+      return rows
     } catch {
-      toast.error('Failed to update stage')
+      toast.error('Failed to save stage splits')
+      return null
+    } finally {
+      setSavingSplits(false)
     }
   }
 
-  const openStageEdit = (stage: StageTracking) => {
-    setEditingStage(stage)
-    setStageForm({
-      locationType: stage.locationType,
-      vendorId: stage.vendorId || '',
-      sentDate: stage.sentDate ? stage.sentDate.split('T')[0] : '',
-      expectedReturnDate: stage.expectedReturnDate ? stage.expectedReturnDate.split('T')[0] : '',
-      receivedDate: stage.receivedDate ? stage.receivedDate.split('T')[0] : '',
-      sentQty: stage.sentQty ? String(stage.sentQty) : '',
-      receivedQty: stage.receivedQty ? String(stage.receivedQty) : '',
-      defectiveQty: stage.defectiveQty ? String(stage.defectiveQty) : '',
-      perPieceRate: stage.perPieceRate ? String(stage.perPieceRate) : '',
-      notes: stage.notes || '',
-    })
-    setStageEditOpen(true)
+  const handleSaveStageSplits = async () => {
+    const rows = await persistSplits()
+    if (rows) {
+      toast.success(`${editingStageName}: ${rows.length} split${rows.length !== 1 ? 's' : ''} saved`)
+      setStageEditOpen(false)
+    }
+  }
+
+  // Per-split BILL action — saves all splits first (so the server resolves
+  // Supplier ids → Vendor ids), then raises a VendorBill against the SAVED
+  // row (vendorId + stageTrackingId + amounts from the row itself).
+  const handleBillSplit = async (idx: number) => {
+    if (!selectedJob || !editingStageName) return
+    const split = stageSplits[idx]
+    if (!split.id || split.locationType !== 'Outsourced' || !split.vendorId) return
+    const rows = await persistSplits()
+    if (!rows) return
+    const savedRow = rows.find((r) => r.id === split.id)
+    if (!savedRow || !savedRow.vendorId) {
+      toast.error('Split must be saved with a vendor before billing')
+      return
+    }
+    try {
+      const res = await fetch('/api/vendor-bills', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          vendorId: savedRow.vendorId,
+          stageTrackingId: savedRow.id,
+          description: `${editingStageName} — ${selectedJob.jobNo} (${savedRow.color || selectedJob.color || 'Free'})`,
+          totalQty: savedRow.receivedQty || savedRow.sentQty || 0,
+          perPieceRate: savedRow.perPieceRate || 0,
+          totalAmount: savedRow.totalAmount || 0,
+        }),
+      })
+      if (res.ok) {
+        const json = await res.json()
+        toast.success(`Bill ${json.bill?.billNo || ''} created — split locked`)
+        // Flip the row to billed (locked) in the editor + pipeline
+        setStageSplits((prev) => prev.map((s, i) => (i === idx ? { ...s, hasBills: true } : s)))
+        fetchStageTracking(selectedJob.id)
+      } else {
+        const err = await res.json().catch(() => ({}))
+        toast.error((err as { error?: string }).error || 'Failed to create vendor bill')
+      }
+    } catch {
+      toast.error('Failed to create vendor bill')
+    }
   }
 
   const openNewJobDialog = () => {
@@ -2469,12 +2588,36 @@ export function ProductionModule() {
                       const currentIdx = getStageIndex(selectedJob.stage)
                       const isCurrent = idx === currentIdx
                       const isPast = idx < currentIdx
-                      const tracking = stageTrackings.find((s) => s.stageName === stage)
+                      // Phase 5b — a stage can carry N split rows: aggregate
+                      // them for the pipeline display (Σ qtys / Σ amount,
+                      // distinct vendor names, distinct colors, split count)
+                      const stageRows = stageTrackings.filter((s) => s.stageName === stage)
+                      const tracking = stageRows[0]
+                      const multiSplit = stageRows.length > 1
+                      const outsourcedRows = stageRows.filter((r) => r.locationType === 'Outsourced')
+                      const isOutsourcedStage = outsourcedRows.length > 0
+                      const distinctVendors = Array.from(
+                        new Set(outsourcedRows.map((r) => r.vendor?.vendorName).filter((n): n is string => !!n))
+                      )
+                      const stageColors = Array.from(
+                        new Set(stageRows.map((r) => r.color).filter((c) => isColorJob(c)))
+                      )
+                      const sumSent = stageRows.reduce((s, r) => s + (r.sentQty || 0), 0)
+                      const sumReceived = stageRows.reduce((s, r) => s + (r.receivedQty || 0), 0)
+                      const sumDefective = stageRows.reduce((s, r) => s + (r.defectiveQty || 0), 0)
+                      const sumAmount = stageRows.reduce((s, r) => s + (r.totalAmount || 0), 0)
+                      const anySentOut = stageRows.some((r) => r.status === 'Sent Out')
+                      const latestExpectedReturn = stageRows
+                        .map((r) => r.expectedReturnDate)
+                        .filter((d): d is string => !!d)
+                        .sort()
+                        .pop()
+                      const anyBilled = stageRows.some((r) => r.hasBills)
 
                       return (
                         <button
                           key={stage}
-                          onClick={() => tracking && openStageEdit(tracking)}
+                          onClick={() => stageRows.length > 0 && openStageEdit(stage)}
                           className="w-full flex items-center gap-3 rounded-lg p-1.5 transition-colors hover:bg-muted/30 text-left group"
                         >
                           {/* Node */}
@@ -2505,7 +2648,7 @@ export function ProductionModule() {
 
                           {/* Label + Tracking Info */}
                           <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 flex-wrap">
                               <span
                                 className={`text-xs ${
                                   isCurrent
@@ -2517,43 +2660,61 @@ export function ProductionModule() {
                               >
                                 {stage}
                               </span>
-                              {tracking?.locationType === 'Outsourced' && (
-                                <Badge className="bg-orange-500/15 text-orange-400 border-orange-500/30 text-[8px] px-1 py-0 shrink-0">
-                                  <Building2 className="h-2 w-2 mr-0.5" />
-                                  {tracking.vendor?.vendorName || 'Outsourced'}
+                              {multiSplit && (
+                                <Badge variant="outline" className="text-[8px] px-1 py-0 shrink-0">
+                                  {stageRows.length} splits
                                 </Badge>
                               )}
-                              {tracking?.locationType === 'In-House' && !isPast && !isCurrent && (
+                              {isOutsourcedStage && (
+                                <Badge className="bg-orange-500/15 text-orange-400 border-orange-500/30 text-[8px] px-1 py-0 shrink-0">
+                                  <Building2 className="h-2 w-2 mr-0.5" />
+                                  {distinctVendors[0] || 'Outsourced'}
+                                  {distinctVendors.length > 1 ? ` +${distinctVendors.length - 1}` : ''}
+                                </Badge>
+                              )}
+                              {!isOutsourcedStage && tracking?.locationType === 'In-House' && !isPast && !isCurrent && (
                                 <Badge variant="outline" className="text-[8px] px-1 py-0 border-emerald-500/30 text-emerald-400 shrink-0">
                                   In-House
                                 </Badge>
                               )}
+                              {anyBilled && (
+                                <Badge className="bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30 text-[8px] px-1 py-0 shrink-0 gap-0.5">
+                                  <Lock className="h-2 w-2" />
+                                  Billed
+                                </Badge>
+                              )}
+                              {stageColors.slice(0, 4).map((c) => (
+                                <ColorBadge key={c} color={c} />
+                              ))}
+                              {stageColors.length > 4 && (
+                                <span className="text-[9px] text-muted-foreground">+{stageColors.length - 4}</span>
+                              )}
                             </div>
-                            {/* Outsourced tracking info */}
-                            {tracking?.locationType === 'Outsourced' && (
-                              <div className="flex items-center gap-3 mt-0.5 text-[10px] text-muted-foreground">
-                                {tracking.status === 'Sent Out' && tracking.sentQty > 0 && (
+                            {/* Outsourced tracking info (aggregated across splits) */}
+                            {isOutsourcedStage && (sumSent > 0 || sumReceived > 0 || sumAmount > 0) && (
+                              <div className="flex items-center gap-3 mt-0.5 text-[10px] text-muted-foreground flex-wrap">
+                                {anySentOut && sumSent > 0 && (
                                   <span className="flex items-center gap-0.5">
                                     <Send className="h-2.5 w-2.5" />
-                                    Sent {tracking.sentQty}
-                                    {tracking.expectedReturnDate && (
-                                      <> · Exp {new Date(tracking.expectedReturnDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}</>
+                                    Sent {formatNumber(sumSent)}
+                                    {latestExpectedReturn && (
+                                      <> · Exp {new Date(latestExpectedReturn).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}</>
                                     )}
                                   </span>
                                 )}
-                                {tracking.receivedQty > 0 && (
+                                {sumReceived > 0 && (
                                   <span className="flex items-center gap-0.5 text-emerald-400">
                                     <ArrowDownLeft className="h-2.5 w-2.5" />
-                                    Received {tracking.receivedQty}
-                                    {tracking.defectiveQty > 0 && (
-                                      <span className="text-red-400 ml-1">({tracking.defectiveQty} defect)</span>
+                                    Received {formatNumber(sumReceived)}
+                                    {sumDefective > 0 && (
+                                      <span className="text-red-400 ml-1">({formatNumber(sumDefective)} defect)</span>
                                     )}
                                   </span>
                                 )}
-                                {tracking.totalAmount > 0 && (
+                                {sumAmount > 0 && (
                                   <span className="flex items-center gap-0.5 text-amber-400 font-medium">
-                                    ₹{new Intl.NumberFormat('en-IN').format(Math.round(tracking.totalAmount))}
-                                    {tracking.perPieceRate > 0 && (
+                                    ₹{new Intl.NumberFormat('en-IN').format(Math.round(sumAmount))}
+                                    {tracking?.perPieceRate > 0 && !multiSplit && (
                                       <span className="text-muted-foreground font-normal ml-0.5">
                                         @{tracking.perPieceRate}/pc
                                       </span>
@@ -2571,7 +2732,7 @@ export function ProductionModule() {
                                 Current
                               </Badge>
                             )}
-                            {tracking && (
+                            {stageRows.length > 0 && (
                               <Edit3 className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
                             )}
                           </div>
@@ -2665,216 +2826,382 @@ export function ProductionModule() {
         </DialogContent>
       </Dialog>
 
-      {/* Stage Tracking Edit Dialog */}
+      {/* Stage SPLITS Dialog (Phase 5b — one stage, N vendor/color splits) */}
       <Dialog open={stageEditOpen} onOpenChange={setStageEditOpen}>
-        <DialogContent className="glass-card border-border sm:max-w-md">
-          {editingStage && (
+        <DialogContent className="glass-card border-border sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+          {editingStageName && (
             <>
               <DialogHeader>
                 <DialogTitle className="text-base">
-                  <span className="text-primary">{editingStage.stageName}</span> — Stage Tracking
+                  <span className="text-primary">{editingStageName}</span> — Stage Splits
                 </DialogTitle>
+                <DialogDescription className="text-xs">
+                  {selectedJob?.jobNo} · {formatNumber(selectedJob?.targetQty || 0)} pcs target ·{' '}
+                  {isColorJob(selectedJob?.color) ? 'Color ' : ''}
+                  {selectedJob?.color || '—'}
+                  {' '}· Split this stage across multiple vendors and colors (e.g. Cutting me Red
+                  vendor A ko, Maroon vendor B ko).
+                </DialogDescription>
               </DialogHeader>
-              <div className="space-y-4">
-                {/* Location Type */}
-                <div className="space-y-2">
-                  <Label className="text-xs text-muted-foreground">Location</Label>
-                  <div className="flex gap-2">
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant={stageForm.locationType === 'In-House' ? 'default' : 'outline'}
-                      className={`flex-1 text-xs ${stageForm.locationType !== 'In-House' ? 'border-border' : ''}`}
-                      onClick={() => setStageForm({ ...stageForm, locationType: 'In-House', vendorId: '' })}
+
+              <div className="space-y-3">
+                {/* Split rows — one card per vendor/color split */}
+                {stageSplits.map((split, idx) => {
+                  const derivedStatus = split.receivedDate
+                    ? 'Completed'
+                    : split.sentDate
+                    ? 'Sent Out'
+                    : 'In Progress'
+                  const rowTotal = (Number(split.receivedQty) || 0) * (Number(split.perPieceRate) || 0)
+                  return (
+                    <div
+                      key={split.id || `new-split-${idx}`}
+                      className="rounded-lg border border-border bg-muted/10 p-3 space-y-3"
                     >
-                      <Factory className="h-3.5 w-3.5 mr-1" />
-                      In-House
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant={stageForm.locationType === 'Outsourced' ? 'default' : 'outline'}
-                      className={`flex-1 text-xs ${stageForm.locationType !== 'Outsourced' ? 'border-border' : ''}`}
-                      onClick={() => setStageForm({ ...stageForm, locationType: 'Outsourced' })}
-                    >
-                      <Handshake className="h-3.5 w-3.5 mr-1" />
-                      Outsourced
-                    </Button>
-                  </div>
-                </div>
+                      {/* Split header: number + vendor + color + billed lock + actions */}
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 min-w-0 flex-wrap">
+                          <span className="text-[10px] font-bold text-muted-foreground shrink-0">
+                            #{idx + 1}
+                          </span>
+                          {split.locationType === 'Outsourced' ? (
+                            <span className="text-xs font-medium truncate max-w-[160px]">
+                              {vendors.find((v) => v.id === split.vendorId)?.vendorName || 'No vendor selected'}
+                            </span>
+                          ) : (
+                            <span className="text-xs font-medium text-muted-foreground">In-House</span>
+                          )}
+                          <ColorBadge color={split.color} />
+                          <Badge
+                            variant="outline"
+                            className={`text-[8px] px-1 py-0 shrink-0 ${
+                              derivedStatus === 'Completed'
+                                ? 'border-emerald-500/30 text-emerald-400'
+                                : derivedStatus === 'Sent Out'
+                                ? 'border-orange-500/30 text-orange-400'
+                                : 'border-border text-muted-foreground'
+                            }`}
+                          >
+                            {derivedStatus}
+                          </Badge>
+                          {split.hasBills && (
+                            <Badge className="bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30 text-[9px] px-1.5 py-0 gap-1 shrink-0">
+                              <Lock className="h-2.5 w-2.5" />
+                              Billed
+                            </Badge>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          {split.id && split.locationType === 'Outsourced' && !split.hasBills && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-7 px-2 text-[10px] gap-1"
+                              disabled={savingSplits}
+                              onClick={() => handleBillSplit(idx)}
+                              title="Raise a vendor bill for this split"
+                            >
+                              <FileText className="h-3 w-3" />
+                              Bill
+                            </Button>
+                          )}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 w-7 p-0"
+                            disabled={split.hasBills || savingSplits}
+                            title={
+                              split.hasBills
+                                ? 'This split has vendor bills — cancel them first'
+                                : 'Remove split'
+                            }
+                            onClick={() => removeSplit(idx)}
+                          >
+                            {split.hasBills ? (
+                              <Lock className="h-3.5 w-3.5 text-muted-foreground" />
+                            ) : (
+                              <Trash2 className="h-3.5 w-3.5 text-muted-foreground hover:text-red-400" />
+                            )}
+                          </Button>
+                        </div>
+                      </div>
 
-                {/* Counterparty (Vendor OR Supplier — only if Outsourced) */}
-                {stageForm.locationType === 'Outsourced' && (
-                  <div className="space-y-2">
-                    <Label className="text-xs text-muted-foreground">Vendor / Supplier</Label>
-                    {vendors.length > 0 ? (
-                      <Select value={stageForm.vendorId} onValueChange={(v) => setStageForm({ ...stageForm, vendorId: v })}>
-                        <SelectTrigger className="bg-muted/50 border-border text-xs h-9">
-                          <SelectValue placeholder="Select vendor or supplier..." />
-                        </SelectTrigger>
-                        <SelectContent className="max-h-72">
-                          {vendors.map((v) => (
-                            <SelectItem key={`${v.kind}-${v.id}`} value={v.id} className="text-xs">
-                              <span className="flex items-center gap-1.5">
-                                <span className={`text-[8px] px-1 py-0.5 rounded font-medium ${
-                                  v.kind === 'Supplier'
-                                    ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
-                                    : 'bg-violet-500/15 text-violet-600 dark:text-violet-400'
-                                }`}>
-                                  {v.kind === 'Supplier' ? 'SUP' : 'VEN'}
-                                </span>
-                                <span className="font-medium">{v.vendorName}</span>
-                                <span className="text-muted-foreground text-[10px]">({v.type})</span>
-                                {v.phone && (
-                                  <span className="text-muted-foreground/70 text-[10px]">· {v.phone}</span>
-                                )}
-                              </span>
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    ) : (
-                      <p className="text-xs text-muted-foreground bg-muted/50 rounded-md p-2 border border-border">
-                        No vendors or suppliers added yet. Go to <span className="text-primary font-medium">Vendors</span> or <span className="text-primary font-medium">Suppliers</span> section to add outsourcing partners.
-                      </p>
-                    )}
-                    <p className="text-[10px] text-muted-foreground">
-                      Includes both Vendors (job workers) and Suppliers (raw material providers). Tagged VEN / SUP for clarity.
-                    </p>
-                  </div>
-                )}
+                      {/* Location toggle */}
+                      <div className="flex gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant={split.locationType === 'In-House' ? 'default' : 'outline'}
+                          className={`flex-1 text-xs h-8 ${split.locationType !== 'In-House' ? 'border-border' : ''}`}
+                          onClick={() => updateSplit(idx, { locationType: 'In-House', vendorId: '' })}
+                        >
+                          <Factory className="h-3.5 w-3.5 mr-1" />
+                          In-House
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant={split.locationType === 'Outsourced' ? 'default' : 'outline'}
+                          className={`flex-1 text-xs h-8 ${split.locationType !== 'Outsourced' ? 'border-border' : ''}`}
+                          onClick={() => updateSplit(idx, { locationType: 'Outsourced' })}
+                        >
+                          <Handshake className="h-3.5 w-3.5 mr-1" />
+                          Outsourced
+                        </Button>
+                      </div>
 
-                <Separator className="bg-border" />
+                      {/* Color + vendor */}
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1.5">
+                          <Label className="text-[10px] text-muted-foreground">Color</Label>
+                          <div className="flex items-center gap-1.5">
+                            <Input
+                              value={split.color}
+                              onChange={(e) => updateSplit(idx, { color: e.target.value })}
+                              placeholder={
+                                isColorJob(selectedJob?.color)
+                                  ? (selectedJob?.color as string)
+                                  : 'e.g. Red'
+                              }
+                              className="h-8 bg-muted/50 border-border text-xs flex-1"
+                            />
+                            <ColorBadge color={split.color} />
+                          </div>
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label className="text-[10px] text-muted-foreground">Vendor / Supplier</Label>
+                          {split.locationType === 'Outsourced' ? (
+                            vendors.length > 0 ? (
+                              <Select
+                                value={split.vendorId}
+                                onValueChange={(v) => updateSplit(idx, { vendorId: v })}
+                              >
+                                <SelectTrigger className="bg-muted/50 border-border text-xs h-8">
+                                  <SelectValue placeholder="Select vendor or supplier..." />
+                                </SelectTrigger>
+                                <SelectContent className="max-h-72">
+                                  {vendors.map((v) => (
+                                    <SelectItem key={`${v.kind}-${v.id}`} value={v.id} className="text-xs">
+                                      <span className="flex items-center gap-1.5">
+                                        <span className={`text-[8px] px-1 py-0.5 rounded font-medium ${
+                                          v.kind === 'Supplier'
+                                            ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+                                            : 'bg-violet-500/15 text-violet-600 dark:text-violet-400'
+                                        }`}>
+                                          {v.kind === 'Supplier' ? 'SUP' : 'VEN'}
+                                        </span>
+                                        <span className="font-medium">{v.vendorName}</span>
+                                        <span className="text-muted-foreground text-[10px]">({v.type})</span>
+                                      </span>
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            ) : (
+                              <p className="text-[10px] text-muted-foreground bg-muted/50 rounded-md p-2 border border-border">
+                                No vendors/suppliers yet — add them in the Vendors section.
+                              </p>
+                            )
+                          ) : (
+                            <div className="flex h-8 items-center rounded-md border border-border bg-muted/30 px-2.5 text-xs text-muted-foreground">
+                              Not outsourced
+                            </div>
+                          )}
+                        </div>
+                      </div>
 
-                {/* Tracking fields */}
-                {stageForm.locationType === 'Outsourced' && (
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-1.5">
-                      <Label className="text-[10px] text-muted-foreground">Sent Date</Label>
-                      <Input
-                        type="date"
-                        value={stageForm.sentDate}
-                        onChange={(e) => setStageForm({ ...stageForm, sentDate: e.target.value })}
-                        className="h-8 bg-muted/50 border-border text-xs"
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-[10px] text-muted-foreground">Expected Return</Label>
-                      <Input
-                        type="date"
-                        value={stageForm.expectedReturnDate}
-                        onChange={(e) => setStageForm({ ...stageForm, expectedReturnDate: e.target.value })}
-                        className="h-8 bg-muted/50 border-border text-xs"
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-[10px] text-muted-foreground">Received Date</Label>
-                      <Input
-                        type="date"
-                        value={stageForm.receivedDate}
-                        onChange={(e) => setStageForm({ ...stageForm, receivedDate: e.target.value })}
-                        className="h-8 bg-muted/50 border-border text-xs"
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-[10px] text-muted-foreground">Status</Label>
-                      <Select
-                        value={stageForm.receivedDate ? 'Completed' : stageForm.sentDate ? 'Sent Out' : 'In Progress'}
-                        disabled
-                      >
-                        <SelectTrigger className="h-8 bg-muted/50 border-border text-xs">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="In Progress" className="text-xs">In Progress</SelectItem>
-                          <SelectItem value="Sent Out" className="text-xs">Sent Out</SelectItem>
-                          <SelectItem value="Completed" className="text-xs">Completed</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                )}
+                      {/* Dates */}
+                      {split.locationType === 'Outsourced' && (
+                        <div className="grid grid-cols-3 gap-2">
+                          <div className="space-y-1.5">
+                            <Label className="text-[10px] text-muted-foreground">Sent Date</Label>
+                            <Input
+                              type="date"
+                              value={split.sentDate}
+                              onChange={(e) => updateSplit(idx, { sentDate: e.target.value })}
+                              className="h-8 bg-muted/50 border-border text-xs"
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <Label className="text-[10px] text-muted-foreground">Expected Return</Label>
+                            <Input
+                              type="date"
+                              value={split.expectedReturnDate}
+                              onChange={(e) => updateSplit(idx, { expectedReturnDate: e.target.value })}
+                              className="h-8 bg-muted/50 border-border text-xs"
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <Label className="text-[10px] text-muted-foreground">Received Date</Label>
+                            <Input
+                              type="date"
+                              value={split.receivedDate}
+                              onChange={(e) => updateSplit(idx, { receivedDate: e.target.value })}
+                              className="h-8 bg-muted/50 border-border text-xs"
+                            />
+                          </div>
+                        </div>
+                      )}
 
-                {/* Qty tracking */}
-                <div className="grid grid-cols-3 gap-3">
-                  <div className="space-y-1.5">
-                    <Label className="text-[10px] text-muted-foreground">Sent Qty</Label>
-                    <Input
-                      type="number"
-                      value={stageForm.sentQty}
-                      onChange={(e) => setStageForm({ ...stageForm, sentQty: e.target.value })}
-                      placeholder="0"
-                      className="h-8 bg-muted/50 border-border text-xs"
-                      min={0}
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-[10px] text-muted-foreground">Received Qty</Label>
-                    <Input
-                      type="number"
-                      value={stageForm.receivedQty}
-                      onChange={(e) => setStageForm({ ...stageForm, receivedQty: e.target.value })}
-                      placeholder="0"
-                      className="h-8 bg-muted/50 border-border text-xs"
-                      min={0}
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-[10px] text-muted-foreground">Defective</Label>
-                    <Input
-                      type="number"
-                      value={stageForm.defectiveQty}
-                      onChange={(e) => setStageForm({ ...stageForm, defectiveQty: e.target.value })}
-                      placeholder="0"
-                      className="h-8 bg-muted/50 border-border text-xs"
-                      min={0}
-                    />
-                  </div>
-                </div>
+                      {/* Qty + rate grid */}
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        <div className="space-y-1.5">
+                          <Label className="text-[10px] text-muted-foreground">Sent Qty</Label>
+                          <Input
+                            type="number"
+                            value={split.sentQty}
+                            onChange={(e) => updateSplit(idx, { sentQty: e.target.value })}
+                            placeholder="0"
+                            className="h-8 bg-muted/50 border-border text-xs"
+                            min={0}
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label className="text-[10px] text-muted-foreground">Received Qty</Label>
+                          <Input
+                            type="number"
+                            value={split.receivedQty}
+                            onChange={(e) => updateSplit(idx, { receivedQty: e.target.value })}
+                            placeholder="0"
+                            className="h-8 bg-muted/50 border-border text-xs"
+                            min={0}
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label className="text-[10px] text-muted-foreground">Defective</Label>
+                          <Input
+                            type="number"
+                            value={split.defectiveQty}
+                            onChange={(e) => updateSplit(idx, { defectiveQty: e.target.value })}
+                            placeholder="0"
+                            className="h-8 bg-muted/50 border-border text-xs"
+                            min={0}
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label className="text-[10px] text-muted-foreground">Rate (₹/pc)</Label>
+                          <Input
+                            type="number"
+                            value={split.perPieceRate}
+                            onChange={(e) => updateSplit(idx, { perPieceRate: e.target.value })}
+                            placeholder="e.g. 15"
+                            className="h-8 bg-muted/50 border-border text-xs"
+                            min={0}
+                            step={0.5}
+                          />
+                        </div>
+                      </div>
 
-                {/* Per-piece rate + Total Amount (for outsourced stages) */}
-                {stageForm.locationType === 'Outsourced' && (
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-1.5">
-                      <Label className="text-[10px] text-muted-foreground">Per Piece Rate (₹)</Label>
-                      <Input
-                        type="number"
-                        value={stageForm.perPieceRate}
-                        onChange={(e) => setStageForm({ ...stageForm, perPieceRate: e.target.value })}
-                        placeholder="e.g. 15"
-                        className="h-8 bg-muted/50 border-border text-xs"
-                        min={0}
-                        step={0.5}
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-[10px] text-muted-foreground">Total Amount (₹)</Label>
-                      <div className="flex h-8 items-center rounded-md border border-border bg-muted/30 px-2.5 text-xs font-semibold text-foreground">
-                        {stageForm.perPieceRate && stageForm.receivedQty
-                          ? `₹${new Intl.NumberFormat('en-IN').format(Math.round(Number(stageForm.perPieceRate) * Number(stageForm.receivedQty)))}`
-                          : '₹0'}
+                      {/* Live per-row total */}
+                      {rowTotal > 0 && (
+                        <p className="text-[10px] text-amber-400 font-medium">
+                          Row total: ₹{new Intl.NumberFormat('en-IN').format(Math.round(rowTotal))}
+                          {Number(split.perPieceRate) > 0 && (
+                            <span className="text-muted-foreground font-normal">
+                              {' '}({Number(split.receivedQty) || 0} × ₹{Number(split.perPieceRate) || 0})
+                            </span>
+                          )}
+                        </p>
+                      )}
+
+                      {/* Notes */}
+                      <div className="space-y-1.5">
+                        <Label className="text-[10px] text-muted-foreground">Notes</Label>
+                        <Input
+                          value={split.notes}
+                          onChange={(e) => updateSplit(idx, { notes: e.target.value })}
+                          placeholder="e.g. Special instructions for vendor..."
+                          className="h-8 bg-muted/50 border-border text-xs"
+                        />
                       </div>
                     </div>
-                  </div>
-                )}
+                  )
+                })}
 
-                {/* Notes */}
-                <div className="space-y-1.5">
-                  <Label className="text-[10px] text-muted-foreground">Notes</Label>
-                  <Input
-                    value={stageForm.notes}
-                    onChange={(e) => setStageForm({ ...stageForm, notes: e.target.value })}
-                    placeholder="e.g. Special instructions for vendor..."
-                    className="h-8 bg-muted/50 border-border text-xs"
-                  />
-                </div>
+                {/* Add Split */}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full border-dashed text-xs gap-1.5"
+                  onClick={() => setStageSplits((prev) => [...prev, blankSplit()])}
+                  disabled={savingSplits}
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Add Split
+                </Button>
+
+                {/* Σ footer validation */}
+                {(() => {
+                  const target = selectedJob?.targetQty || 0
+                  const totalSent = stageSplits.reduce((s, r) => s + (Number(r.sentQty) || 0), 0)
+                  const totalReceived = stageSplits.reduce((s, r) => s + (Number(r.receivedQty) || 0), 0)
+                  const totalAmount = stageSplits.reduce(
+                    (s, r) => s + (Number(r.receivedQty) || 0) * (Number(r.perPieceRate) || 0), 0
+                  )
+                  const maxAllowed = target * 1.5
+                  const overLimit = totalSent > maxAllowed
+                  const overTarget = totalSent > target
+                  return (
+                    <div
+                      className={`rounded-lg border px-3 py-2 flex items-center justify-between gap-2 flex-wrap ${
+                        overLimit
+                          ? 'border-red-500/40 bg-red-500/10'
+                          : overTarget
+                          ? 'border-amber-500/40 bg-amber-500/10'
+                          : 'border-border bg-muted/20'
+                      }`}
+                    >
+                      <p
+                        className={`text-xs font-medium ${
+                          overLimit
+                            ? 'text-red-400'
+                            : overTarget
+                            ? 'text-amber-400'
+                            : 'text-muted-foreground'
+                        }`}
+                      >
+                        Σ sent {formatNumber(totalSent)}/{formatNumber(target)} pcs · Σ received{' '}
+                        {formatNumber(totalReceived)} · Σ ₹
+                        {new Intl.NumberFormat('en-IN').format(Math.round(totalAmount))}
+                      </p>
+                      <p className="text-[10px] text-muted-foreground">
+                        {overLimit
+                          ? `Over the 1.5× rework limit (${formatNumber(maxAllowed)} pcs) — Save disabled`
+                          : overTarget
+                          ? `Above target — allowed up to 1.5× for rework (${formatNumber(maxAllowed)} pcs)`
+                          : 'Within target'}
+                      </p>
+                    </div>
+                  )
+                })()}
 
                 <div className="flex justify-end gap-2">
-                  <Button variant="outline" size="sm" className="text-xs" onClick={() => setStageEditOpen(false)}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-xs"
+                    onClick={() => setStageEditOpen(false)}
+                  >
                     Cancel
                   </Button>
-                  <Button size="sm" className="bg-primary text-primary-foreground hover:bg-primary/90 text-xs" onClick={handleSaveStageTracking}>
-                    Save
+                  <Button
+                    size="sm"
+                    className="bg-primary text-primary-foreground hover:bg-primary/90 text-xs"
+                    onClick={handleSaveStageSplits}
+                    disabled={
+                      savingSplits ||
+                      stageSplits.reduce((s, r) => s + (Number(r.sentQty) || 0), 0) >
+                        (selectedJob?.targetQty || 0) * 1.5
+                    }
+                  >
+                    {savingSplits ? (
+                      <>
+                        <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                        Saving…
+                      </>
+                    ) : (
+                      `Save ${stageSplits.length} split${stageSplits.length !== 1 ? 's' : ''}`
+                    )}
                   </Button>
                 </div>
               </div>

@@ -13,6 +13,7 @@ import {
   Search, Shirt, IndianRupee, Package, Factory, Truck, FileText, CheckCircle2,
   TrendingUp, ArrowRight, Circle, AlertCircle,
 } from 'lucide-react'
+import { colorNameToClasses, isColorJob } from '@/lib/color-badge'
 
 interface LifecycleData {
   styleNo: string
@@ -267,15 +268,24 @@ export function ProductTrackerModule() {
               <CardContent>
                 {data.productionJobs.length > 0 ? (
                   <div className="space-y-2">
-                    {data.productionJobs.slice(0, 3).map((j: any) => (
-                      <div key={j.id} className="flex items-center justify-between text-xs">
-                        <div>
+                    {data.productionJobs.slice(0, 4).map((j: any) => (
+                      <div key={j.id} className="flex items-center justify-between text-xs gap-2">
+                        <div className="flex items-center gap-1.5 min-w-0">
                           <span className="font-medium">{j.jobNo}</span>
-                          <Badge variant="outline" className="ml-2 text-[9px] px-1 py-0">{j.status}</Badge>
+                          <Badge variant="outline" className="text-[9px] px-1 py-0">{j.status}</Badge>
+                          {isColorJob(j.color) && (
+                            <span
+                              className={`inline-flex items-center rounded-full border px-1.5 py-0.5 text-[9px] font-semibold leading-none ${colorNameToClasses(j.color)}`}
+                              title={`${j.color} job`}
+                            >
+                              {j.color}
+                            </span>
+                          )}
                         </div>
-                        <span className="text-muted-foreground">{j.completedQty}/{j.targetQty} pcs · {j.stage}</span>
+                        <span className="text-muted-foreground whitespace-nowrap">{j.completedQty}/{j.targetQty} pcs · {j.stage}</span>
                       </div>
                     ))}
+                    {data.productionJobs.length > 4 && <p className="text-[10px] text-muted-foreground">+{data.productionJobs.length - 4} more</p>}
                   </div>
                 ) : <p className="text-xs text-muted-foreground">No production jobs</p>}
               </CardContent>

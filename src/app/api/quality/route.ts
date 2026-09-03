@@ -22,6 +22,7 @@ export async function GET(req: NextRequest) {
         (c.checkNo || '').toLowerCase().includes(term) ||
         (c.productionJob?.styleNo || '').toLowerCase().includes(term) ||
         (c.productionJob?.styleName || '').toLowerCase().includes(term) ||
+        (c.color || '').toLowerCase().includes(term) ||
         (c.defectType || '').toLowerCase().includes(term)
       )
     }
@@ -52,6 +53,7 @@ export async function GET(req: NextRequest) {
         (c.checkNo || '').toLowerCase().includes(term) ||
         (c.productionJob?.styleNo || '').toLowerCase().includes(term) ||
         (c.productionJob?.styleName || '').toLowerCase().includes(term) ||
+        (c.color || '').toLowerCase().includes(term) ||
         (c.defectType || '').toLowerCase().includes(term)
       )
     }
@@ -68,14 +70,24 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
-    const { productionJobId, inspectionPoint, checkedQty, passedQty, failedQty, defectType, defectCount, severity, status, inspectorName, notes } = body
+    const { productionJobId, inspectionPoint, checkedQty, passedQty, failedQty, defectType, defectCount, severity, status, inspectorName, notes, color } = body
     if (!productionJobId || !inspectionPoint || checkedQty == null)
       return NextResponse.json({ error: 'productionJobId, inspectionPoint, and checkedQty are required' }, { status: 400 })
     const validPoints = INSPECTION_POINTS as readonly string[]
     if (!validPoints.includes(inspectionPoint))
       return NextResponse.json({ error: `Invalid inspectionPoint. Must be one of: ${validPoints.join(', ')}` }, { status: 400 })
-    const { data: job } = await supabase.from('ProductionJob').select('jobNo').eq('id', productionJobId).single()
+    // Phase 5b — explicit QC color: optional, but must be a non-empty string
+    // when present (an empty string is a typo, not "no color")
+    if (color !== undefined && color !== null) {
+      if (typeof color !== 'string' || color.trim() === '')
+        return NextResponse.json({ error: 'color must be a non-empty string (or omit it)' }, { status: 400 })
+    }
+    const { data: job } = await supabase.from('ProductionJob').select('jobNo, color').eq('id', productionJobId).single()
     if (!job) return NextResponse.json({ error: 'Production job not found' }, { status: 404 })
+    // Color defaulting: explicit > the job's own color
+    const finalColor = (typeof color === 'string' && color.trim() !== '')
+      ? color.trim()
+      : ((job as { color?: string | null }).color || null)
     const checked = Number(checkedQty)
     const passed = passedQty != null ? Number(passedQty) : checked
     const failed = failedQty != null ? Number(failedQty) : checked - passed
@@ -91,13 +103,28 @@ export async function POST(req: NextRequest) {
     const validSeverities = ['Minor', 'Major', 'Critical']
     const finalSeverity = severity && validSeverities.includes(severity) ? severity : 'Minor'
     const ts = new Date().toISOString()
-    const { data: check, error } = await supabase.from('QualityCheck').insert({
+    const insertBase = {
       checkNo, productionJobId, inspectionPoint, checkedQty: checked, passedQty: passed,
       failedQty: Math.max(0, failed), defectType: defectType || null,
       defectCount: defectCount != null ? Number(defectCount) : (failed > 0 ? failed : 0),
       severity: finalSeverity, status: finalStatus, inspectorName: inspectorName || null, notes: notes || null,
       checkedAt: ts, createdAt: ts, updatedAt: ts,
-    }).select('*, productionJob:productionJobId(*)').single()
+    }
+    // Phase 5b — record the color. Defensive: if the live QualityCheck.color
+    // column were missing, retry once without it (the column exists since the
+    // COLOR-PRODUCTION migration, so this is belt-and-braces).
+    let { data: check, error } = await supabase.from('QualityCheck')
+      .insert({ ...insertBase, color: finalColor })
+      .select('*, productionJob:productionJobId(*)')
+      .single()
+    if (error && /color/i.test(String((error as { message?: string }).message || ''))) {
+      const retry = await supabase.from('QualityCheck')
+        .insert(insertBase)
+        .select('*, productionJob:productionJobId(*)')
+        .single()
+      check = retry.data
+      error = retry.error
+    }
     if (error) throw error
     return NextResponse.json(check, { status: 201 })
   } catch (error) {

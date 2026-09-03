@@ -44,6 +44,40 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       const targetIdx = PRODUCTION_STAGES.indexOf(targetStage)
       if (targetIdx === -1) return NextResponse.json({ error: `Invalid target stage: ${targetStage}` }, { status: 400 })
       if (targetIdx <= currentIdx && body.nextStage !== 'next') return NextResponse.json({ error: 'Can only advance to a later stage' }, { status: 400 })
+
+      // ── Phase 5b — STAGE ADVANCE GATE ────────────────────────────────
+      // Advancing FROM stage X on a LEAF job requires every Outsourced split
+      // row of stage X with sentQty > 0 to have receivedQty > 0 — vendor
+      // return pending blocks the advance. Parents / group headers are
+      // skipped (their values are Σ rollups of the child jobs).
+      if (targetStage !== ex.stage) {
+        const { count: childCount } = await supabase
+          .from('ProductionJob')
+          .select('id', { count: 'exact', head: true })
+          .eq('parentJobId', id)
+        if ((childCount ?? 0) === 0) {
+          const { data: stageRows } = await supabase
+            .from('StageTracking')
+            .select('id, sentQty, receivedQty, vendor:vendorId(vendorName)')
+            .eq('productionJobId', id)
+            .eq('stageName', ex.stage)
+            .eq('locationType', 'Outsourced')
+            .gt('sentQty', 0)
+          const pending = (stageRows || []).find(
+            (r) => !((r as { receivedQty?: number }).receivedQty ?? 0)
+          )
+          if (pending) {
+            const vendorName =
+              ((pending as { vendor?: { vendorName?: string } | null }).vendor?.vendorName) || 'job worker'
+            const sent = Number((pending as { sentQty?: number }).sentQty) || 0
+            const received = Number((pending as { receivedQty?: number }).receivedQty) || 0
+            return NextResponse.json({
+              error: `${ex.stage}: vendor ${vendorName} return pending (sent ${sent}, received ${received}). Record the received quantity before advancing.`,
+            }, { status: 400 })
+          }
+        }
+      }
+
       updateData.stage = targetStage
       if (targetStage === 'Dispatched') autoComplete = true
       if (ex.endDate && new Date(ex.endDate) < new Date() && ex.status !== 'Completed' && ex.status !== 'Cancelled') {
@@ -147,41 +181,67 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       try {
         const completedQty = Number(updateData.completedQty ?? ex.completedQty ?? ex.targetQty ?? 0)
         if (completedQty > 0) {
+          // ── Phase 5b — FG AUTO-ENTRY COLOR-AWARE ─────────────────────
+          // Child color jobs (job.color set, not 'Free') enter ONE FGStockBin
+          // row in their OWN color directly — the child's completed qty IS the
+          // color qty (no scaling). Size comes from the linked OrderItemColor
+          // row (job.orderItemColorId), else 'Free'. Parent / legacy jobs keep
+          // the previous OrderItemColor-scaled behavior below.
+          const jobColor = String(ex.color || '').trim()
+          const isChildColorJob = jobColor !== '' && jobColor.toLowerCase() !== 'free'
+
           // Try to fetch color×size breakdown from linked SalesOrder items
           let colorSizeRows: Array<{ color: string; size: string; qty: number }> = []
-          if (ex.salesOrderId) {
-            const { data: orderItems } = await supabase
-              .from('OrderItem')
-              .select('id, styleNo, quantity')
-              .eq('salesOrderId', ex.salesOrderId)
-              .or(`styleNo.eq.${ex.styleNo},styleName.ilike.%${ex.styleName}%`)
-            for (const oi of (orderItems || [])) {
-              const { data: colorBreakdown } = await supabase
-                .from('OrderItemColor')
-                .select('color, size, quantity')
-                .eq('orderItemId', (oi as any).id)
-              for (const cb of (colorBreakdown || [])) {
-                colorSizeRows.push({
-                  color: (cb as any).color || 'Free',
-                  size: (cb as any).size || 'Free',
-                  qty: Number((cb as any).quantity) || 0,
-                })
+          if (isChildColorJob) {
+            let size = 'Free'
+            if (ex.orderItemColorId) {
+              try {
+                const { data: oic } = await supabase
+                  .from('OrderItemColor')
+                  .select('size')
+                  .eq('id', ex.orderItemColorId)
+                  .single()
+                if (oic && (oic as { size?: string }).size) {
+                  size = String((oic as { size?: string }).size)
+                }
+              } catch { /* keep 'Free' */ }
+            }
+            colorSizeRows = [{ color: jobColor, size, qty: completedQty }]
+          } else {
+            if (ex.salesOrderId) {
+              const { data: orderItems } = await supabase
+                .from('OrderItem')
+                .select('id, styleNo, quantity')
+                .eq('salesOrderId', ex.salesOrderId)
+                .or(`styleNo.eq.${ex.styleNo},styleName.ilike.%${ex.styleName}%`)
+              for (const oi of (orderItems || [])) {
+                const { data: colorBreakdown } = await supabase
+                  .from('OrderItemColor')
+                  .select('color, size, quantity')
+                  .eq('orderItemId', (oi as { id: string }).id)
+                for (const cb of (colorBreakdown || [])) {
+                  colorSizeRows.push({
+                    color: (cb as { color?: string }).color || 'Free',
+                    size: (cb as { size?: string }).size || 'Free',
+                    qty: Number((cb as { quantity?: number }).quantity) || 0,
+                  })
+                }
               }
             }
-          }
-          // If no color×size breakdown found, create a single "Free" entry
-          if (colorSizeRows.length === 0) {
-            colorSizeRows = [{ color: 'Free', size: 'Free', qty: completedQty }]
-          } else {
-            // Scale the breakdown to match completedQty (in case production made
-            // a different qty than ordered)
-            const totalOrdered = colorSizeRows.reduce((s, r) => s + r.qty, 0)
-            if (totalOrdered > 0 && totalOrdered !== completedQty) {
-              const scale = completedQty / totalOrdered
-              colorSizeRows = colorSizeRows.map(r => ({
-                ...r,
-                qty: Math.round(r.qty * scale),
-              }))
+            // If no color×size breakdown found, create a single "Free" entry
+            if (colorSizeRows.length === 0) {
+              colorSizeRows = [{ color: 'Free', size: 'Free', qty: completedQty }]
+            } else {
+              // Scale the breakdown to match completedQty (in case production made
+              // a different qty than ordered)
+              const totalOrdered = colorSizeRows.reduce((s, r) => s + r.qty, 0)
+              if (totalOrdered > 0 && totalOrdered !== completedQty) {
+                const scale = completedQty / totalOrdered
+                colorSizeRows = colorSizeRows.map(r => ({
+                  ...r,
+                  qty: Math.round(r.qty * scale),
+                }))
+              }
             }
           }
           // Upsert FGStockBin for each color×size combo

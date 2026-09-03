@@ -100,15 +100,22 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ styl
       }
     } catch { /* ignore */ }
 
-    // ── 6. Production Jobs ──
+    // ── 6. Production Jobs (LEAF JOBS ONLY — Phase 5b) ──
+    // Color-group parents are Σ rollups of their children; showing both would
+    // double-count. color + parentJobId come along for the tracker's chips.
     let productionJobs: any[] = []
     try {
       const { data, error } = await supabase
         .from('ProductionJob')
-        .select('id, jobNo, salesOrderId, styleNo, styleName, targetQty, completedQty, stage, status, startDate, endDate, salesOrder:salesOrderId(orderNo, customer:customerId(companyName))')
+        .select('id, jobNo, salesOrderId, styleNo, styleName, targetQty, completedQty, stage, status, startDate, endDate, color, parentJobId, salesOrder:salesOrderId(orderNo, customer:customerId(companyName))')
         .eq('styleNo', styleNo)
         .order('createdAt', { ascending: false })
-      if (!error && data) productionJobs = data
+      if (!error && data) {
+        const parentIds = new Set(
+          data.map((j: any) => j.parentJobId).filter((p: unknown): p is string => !!p)
+        )
+        productionJobs = data.filter((j: any) => !parentIds.has(j.id))
+      }
     } catch { /* ignore */ }
 
     // ── 7. Dispatch ──
@@ -180,13 +187,22 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ styl
     }
 
     // ── 11. Pipeline Status ──
+    // Production detail appends the distinct garment-color count (Phase 5b)
+    const productionColorCount = new Set(
+      productionJobs
+        .map((j: any) => String(j.color || '').trim())
+        .filter((c: string) => c !== '' && c.toLowerCase() !== 'free')
+    ).size
+    const productionDetail = productionJobs.length > 0
+      ? `${productionJobs.length} job(s)${productionColorCount > 0 ? ` — ${productionColorCount} color(s)` : ''}`
+      : 'No production'
     const stages = [
       { key: 'sample', label: 'Sample Catalog', status: sample ? 'done' : 'pending', detail: sample ? `${sample.sampleNo} — ${sample.status}` : 'Not created' },
       { key: 'costing', label: 'Costing', status: costing ? 'done' : 'pending', detail: costing ? `₹${costing.totalCost} cost → ₹${costing.sellingPrice} sell` : 'No cost sheet' },
       { key: 'po', label: 'Purchase Order', status: purchaseOrders.length > 0 ? 'done' : 'pending', detail: purchaseOrders.length > 0 ? `${purchaseOrders.length} PO(s)` : 'No POs' },
       { key: 'sampling', label: 'Sampling', status: samplings.length > 0 ? 'done' : 'pending', detail: samplings.length > 0 ? `${samplings.length} sample(s)` : 'No sampling' },
       { key: 'sales', label: 'Sales Order', status: salesOrders.length > 0 ? 'done' : 'pending', detail: salesOrders.length > 0 ? `${salesOrders.length} order(s) — ${totalQtySold} pcs` : 'No orders' },
-      { key: 'production', label: 'Production', status: productionJobs.length > 0 ? 'done' : 'pending', detail: productionJobs.length > 0 ? `${productionJobs.length} job(s)` : 'No production' },
+      { key: 'production', label: 'Production', status: productionJobs.length > 0 ? 'done' : 'pending', detail: productionDetail },
       { key: 'dispatch', label: 'Dispatch', status: dispatches.length > 0 ? 'done' : 'pending', detail: dispatches.length > 0 ? `${dispatches.length} dispatch(es)` : 'Not dispatched' },
       { key: 'invoice', label: 'Invoice', status: invoices.length > 0 ? 'done' : 'pending', detail: invoices.length > 0 ? `${invoices.length} invoice(s)` : 'No invoices' },
       { key: 'payment', label: 'Payment', status: payments.length > 0 ? 'done' : 'pending', detail: payments.length > 0 ? `${payments.length} payment(s)` : 'No payments' },
