@@ -2056,3 +2056,26 @@ Stage Summary:
 - Ledger / Payments Out / Chequebook error banners show a working download button
 - User flow: see error banner → click Download → open file → paste into Supabase SQL Editor → run → then app Banking → Initialize Ledger
 - Remaining for user: run the SQL in Supabase, then click "Initialize Ledger" in Banking module
+
+---
+Task ID: PHASE-A-ACTIVATION
+Agent: Main Agent (Z.ai Code)
+Task: User ran PHASE-A-MIGRATION.sql + JournalLine patch in Supabase — activate and verify the Phase A ledger foundation.
+
+Work Log:
+- User confirmed migration ran; GET /api/gl-accounts → 17 accounts exist
+- POST /api/gl-setup failed: "Could not find the 'updatedAt' column of 'JournalLine'" — migration v1 was missing JournalLine timestamps (app inserts them)
+- Fixed PHASE-A-MIGRATION.sql (commit 1d2295b): createdAt/updatedAt added to CREATE TABLE + ALTER IF NOT EXISTS section 7; public/migrations copy synced
+- User ran the 2-line patch in Supabase
+- Found orphan JournalEntry JE-20260903-001 (header ₹32,74,452, zero lines) left by the first failed gl-setup attempt — deleted via service-role script
+- Re-ran POST /api/gl-setup → SUCCESS: JE-20260903-001 posted with 9 lines
+- Opening balances: Receivable ₹10,53,892 (2 customers) | Vendor Bills ₹99,400 | Broker ₹26,724 | Inventory ₹11,70,560 | Bank+Cash ₹10,50,000 | Owner Capital ₹31,48,328 (balancing)
+- Trial balance verified: Dr ₹32,74,452 = Cr ₹32,74,452, balanced=true
+- Browser E2E: Ledger & Trial Balance ✓, Payments Out ✓, Cheque Book ✓ — all load headings/data, no migration error banners
+- Screenshot: docs/verify-ledger-live.png
+
+Stage Summary:
+- Phase A foundation (double-entry GL + PaymentOut + Cheque + Expense tables) is LIVE in Supabase
+- gl-setup idempotency guard now works correctly; orphan-entry cleanup script at /tmp/clean-je.ts pattern
+- Note: receivables include 2 customers (EL-025 + one more); supplier payable showed 0 (PO paidAmount data state) — actual vs target reconciliation is part of F-series work
+- NEXT: Phase 0 bug-fix sprint (U1–U5) as approved — order: U3+U4 (image flatten in fabric-stock/grn) → U2 (PO progress cap) → U1 (PO product card) → U5 (dispatch backfill + FG images)
