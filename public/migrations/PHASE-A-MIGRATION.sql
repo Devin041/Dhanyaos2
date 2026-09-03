@@ -159,6 +159,7 @@ ALTER TABLE "Payment" ADD COLUMN IF NOT EXISTS "bankAccountId"    uuid;
 ALTER TABLE "Payment" ADD COLUMN IF NOT EXISTS "journalEntryId"   uuid;
 ALTER TABLE "Payment" ADD COLUMN IF NOT EXISTS "chequeId"         uuid;
 ALTER TABLE "Payment" ADD COLUMN IF NOT EXISTS "tdsAmount"        numeric NOT NULL DEFAULT 0;
+ALTER TABLE "Payment" ADD COLUMN IF NOT EXISTS "tdsSection"       text;   -- 194H, 194C, ...
 ALTER TABLE "Payment" ADD COLUMN IF NOT EXISTS "adjustmentAmount" numeric NOT NULL DEFAULT 0;
 ALTER TABLE "Payment" ADD COLUMN IF NOT EXISTS "adjustmentNote"   text;
 ALTER TABLE "Payment" ADD COLUMN IF NOT EXISTS "status"           text NOT NULL DEFAULT 'Completed';

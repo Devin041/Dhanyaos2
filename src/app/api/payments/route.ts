@@ -185,24 +185,45 @@ export async function POST(req: NextRequest) {
     for (const [k, v] of Object.entries(optional)) {
       insertPayload[k] = v
     }
-    const { data: payment, error: payErr } = await supabase
-      .from('Payment')
-      .insert(insertPayload)
-      .select()
-      .single()
+    // Progressive column stripping (PGRST204-aware): Supabase tells us the
+    // EXACT missing column ("Could not find the 'tdsSection' column of ...") —
+    // strip just that key and retry, so all existing optional columns
+    // (status/journalEntryId/tdsAmount/…) still persist. Falls back to
+    // legacy all-strip if the column name can't be parsed.
+    const colFromMsg = (msg: string): string | null => {
+      const m1 = msg.match(/find the ['"](\w+)['"] column/i)          // PGRST204
+      if (m1) return m1[1]
+      const m2 = msg.match(/column ["']?\w+\.(\w+)["']?/i)          // PG native
+      if (m2) return m2[1]
+      const m3 = msg.match(/column ["'](\w+)["'] (?:of|does not exist)/i) // legacy
+      return m3 ? m3[1] : null
+    }
     let paymentRow: any
-    if (payErr) {
-      // Retry without the new columns (pre-migration DB)
-      if (/column .* does not exist/i.test(String(payErr.message))) {
+    let strippedColumns: string[] = []
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const { data: p, error: e } = await supabase.from('Payment').insert(insertPayload).select().single()
+      if (!e) { paymentRow = p; break }
+      const msg = String(e.message || '')
+      if (/does not exist|Could not find the|PGRST204/i.test(msg)) {
+        const bad = colFromMsg(msg)
+        if (bad && bad in insertPayload) {
+          strippedColumns.push(bad)
+          delete insertPayload[bad]
+          continue
+        }
+        // Unparseable → strip all optional columns (legacy behaviour)
+        strippedColumns.push(...Object.keys(optional).filter(k => k in insertPayload))
         for (const k of Object.keys(optional)) delete insertPayload[k]
         const { data: p2, error: e2 } = await supabase.from('Payment').insert(insertPayload).select().single()
         if (e2) throw e2
         paymentRow = p2
-      } else {
-        throw payErr
+        break
       }
-    } else {
-      paymentRow = payment
+      throw e
+    }
+    if (!paymentRow) throw new Error('Payment insert failed after retries')
+    if (strippedColumns.length > 0) {
+      console.warn('Payment saved without columns (DB migration pending):', strippedColumns.join(', '))
     }
 
     // ── 4. Cheque register row ──
