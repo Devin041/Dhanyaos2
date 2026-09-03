@@ -46,6 +46,30 @@ export function generateMovementNo(): string {
   return `FGM-${dateStr}-${rand}`
 }
 
+// Collision-safe sequential movement number: FGM-YYYYMMDD-XXX.
+// Starts from today's FGStockMovement row count + 1, then bumps past any
+// existing numbers with the same prefix (including the random-suffix numbers
+// emitted by generateMovementNo() above) so consecutive inserts never collide.
+export async function generateSequentialMovementNo(): Promise<string> {
+  const d = new Date()
+  const dateStr =
+    d.getFullYear().toString() +
+    String(d.getMonth() + 1).padStart(2, '0') +
+    String(d.getDate()).padStart(2, '0')
+  const prefix = `FGM-${dateStr}-`
+  const { data: existing } = await supabase
+    .from('FGStockMovement')
+    .select('movementNo')
+    .ilike('movementNo', `${prefix}%`)
+  const rows = (existing || []) as Array<{ movementNo: string }>
+  let nextSeq = rows.length + 1
+  for (const row of rows) {
+    const seq = parseInt(String(row.movementNo || '').slice(prefix.length), 10)
+    if (!isNaN(seq) && seq + 1 > nextSeq) nextSeq = seq + 1
+  }
+  return `${prefix}${String(nextSeq).padStart(3, '0')}`
+}
+
 export function generateGrnNo(): string {
   const d = new Date()
   const dateStr =

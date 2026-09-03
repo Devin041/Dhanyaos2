@@ -1,6 +1,6 @@
 import { supabase } from '@/lib/supabase-db'
 import { NextRequest, NextResponse } from 'next/server'
-import { decorateBom, parseBomLine } from '@/lib/bom-utils'
+import { decorateBom, parseBomLine, isMissingColumnError, stripWastage, WASTAGE_MIGRATION_HINT } from '@/lib/bom-utils'
 
 export async function GET(req: NextRequest) {
   try {
@@ -90,14 +90,27 @@ export async function POST(req: NextRequest) {
 
     const cleanLines = lines.map(parseBomLine).filter((l: any) => l.materialName)
     let createdLines: any[] = []
+    let warning: string | undefined
     if (cleanLines.length > 0) {
       const rows = cleanLines.map((l: any) => ({ ...l, bomId: bom.id }))
-      const { data: inserted, error: linesErr } = await supabase.from('BOMLine').insert(rows).select()
-      if (linesErr) throw linesErr
+      let { data: inserted, error: linesErr } = await supabase.from('BOMLine').insert(rows).select()
+
+      // Graceful wastage fallback — DB missing the wastagePercent column
+      // (migration not applied): retry WITHOUT the field, surface a warning.
+      if (linesErr && isMissingColumnError(linesErr)) {
+        console.warn('[BOM POST] wastagePercent column missing — retrying without it:', linesErr.message)
+        const retry = await supabase.from('BOMLine').insert(stripWastage(rows)).select()
+        if (retry.error) throw retry.error
+        inserted = retry.data
+        warning = WASTAGE_MIGRATION_HINT
+      } else if (linesErr) {
+        throw linesErr
+      }
+
       createdLines = inserted || []
     }
 
-    return NextResponse.json({ bom: decorateBom(bom, createdLines) }, { status: 201 })
+    return NextResponse.json({ bom: decorateBom(bom, createdLines), ...(warning ? { warning } : {}) }, { status: 201 })
   } catch (error: any) {
     console.error('BOM POST error:', error)
     const msg = String(error?.message || '')

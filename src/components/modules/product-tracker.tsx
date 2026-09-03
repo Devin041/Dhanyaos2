@@ -42,23 +42,38 @@ const STAGE_ICONS: Record<string, React.ElementType> = {
 
 export function ProductTrackerModule() {
   const [products, setProducts] = useState<Array<{ id: string; styleNo: string; styleName: string; photoCount: number }>>([])
+  const [productImages, setProductImages] = useState<Record<string, string>>({})
   const [selectedStyleNo, setSelectedStyleNo] = useState('')
   const [data, setData] = useState<LifecycleData | null>(null)
   const [loading, setLoading] = useState(false)
   const [search, setSearch] = useState('')
 
-  // Load all products for dropdown
+  // Load all products for dropdown + ONE batch image fetch (flat /api/style-images)
   useEffect(() => {
+    let cancelled = false
     async function loadProducts() {
       try {
         const res = await fetch('/api/samples')
         const d = await res.json()
+        if (cancelled) return
         if (Array.isArray(d)) {
-          setProducts(d.map((s: any) => ({ id: s.id, styleNo: s.styleNo, styleName: s.styleName, photoCount: s.photoCount || 0 })))
+          const prods = d.map((s: any) => ({ id: s.id, styleNo: s.styleNo, styleName: s.styleName, photoCount: s.photoCount || 0 }))
+          setProducts(prods)
+
+          // Product thumbnails for the dropdown rows
+          const styleNos = prods.map((p: any) => p.styleNo).filter(Boolean)
+          if (styleNos.length > 0) {
+            const imgRes = await fetch(`/api/style-images?styleNos=${encodeURIComponent(styleNos.join(','))}`).catch(() => null)
+            if (imgRes && imgRes.ok) {
+              const imgData = await imgRes.json()
+              if (!cancelled) setProductImages(imgData.images || {})
+            }
+          }
         }
       } catch { /* ignore */ }
     }
     loadProducts()
+    return () => { cancelled = true }
   }, [])
 
   // Fetch lifecycle when product selected
@@ -107,14 +122,24 @@ export function ProductTrackerModule() {
                   <SelectValue placeholder="Select product..." />
                 </SelectTrigger>
                 <SelectContent>
-                  {filteredProducts.map((p) => (
-                    <SelectItem key={p.id} value={p.styleNo}>
-                      <span className="flex items-center gap-2">
-                        <span className="font-medium">{p.styleNo}</span>
-                        <span className="text-muted-foreground text-[10px]">{p.styleName}</span>
-                      </span>
-                    </SelectItem>
-                  ))}
+                  {filteredProducts.map((p) => {
+                    const thumb = productImages[p.styleNo]
+                    return (
+                      <SelectItem key={p.id} value={p.styleNo}>
+                        <span className="flex items-center gap-2">
+                          {thumb ? (
+                            <img src={thumb || undefined} alt={p.styleNo} className="h-8 w-8 rounded-md object-cover border shrink-0" />
+                          ) : (
+                            <span className="h-8 w-8 rounded-md bg-muted flex items-center justify-center border shrink-0">
+                              <Shirt className="h-4 w-4 text-muted-foreground/60" />
+                            </span>
+                          )}
+                          <span className="font-medium">{p.styleNo}</span>
+                          <span className="text-muted-foreground text-[10px]">{p.styleName}</span>
+                        </span>
+                      </SelectItem>
+                    )
+                  })}
                 </SelectContent>
               </Select>
             </div>

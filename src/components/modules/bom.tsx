@@ -41,6 +41,7 @@ interface BomLine {
   color?: string | null
   unit: string
   qtyPerPiece: number
+  wastagePercent: number
   applicableColorsList: string[]
 }
 
@@ -68,8 +69,17 @@ const EMPTY_LINE = (): BomLine => ({
   color: '',
   unit: 'meters',
   qtyPerPiece: 0,
+  wastagePercent: 0,
   applicableColorsList: [],
 })
+
+/** Clamp wastage into 0-100 (mirrors API-side clamp in lib/bom-utils). */
+function clampWastage(v: any): number {
+  const n = Number(v)
+  if (!Number.isFinite(n) || n < 0) return 0
+  if (n > 100) return 100
+  return n
+}
 
 export function BomModule() {
   const [boms, setBoms] = useState<Bom[]>([])
@@ -85,10 +95,14 @@ export function BomModule() {
   const [lines, setLines] = useState<BomLine[]>([EMPTY_LINE()])
   const [styleOptions, setStyleOptions] = useState<StyleOption[]>([])
   const [styleSearch, setStyleSearch] = useState('')
+  // Photos for the style selector rows + preview banner (flat /api/style-images)
+  const [optionImages, setOptionImages] = useState<Record<string, string>>({})
+  // Material name autocomplete for the line editor (HTML datalist)
+  const [materialNames, setMaterialNames] = useState<string[]>([])
 
   // Detail dialog
   const [detailBom, setDetailBom] = useState<Bom | null>(null)
-  const [imageMap, setImageMap] = useState<Record<string, string | null>>({})
+  const [imageMap, setImageMap] = useState<Record<string, string>>({})
 
   const fetchBoms = useCallback(async () => {
     setLoading(true)
@@ -98,9 +112,10 @@ export function BomModule() {
       if (!res.ok) throw new Error(data.error || 'Failed to load')
       setBoms(data.boms || [])
 
+      // FLAT style-image map — plain URL strings (fixes the [object Object] bug)
       const styleNos = [...new Set((data.boms || []).map((b: Bom) => b.styleNo))]
       if (styleNos.length > 0) {
-        const imgRes = await fetch(`/api/style-image?styleNo=${encodeURIComponent(styleNos.join(','))}`).catch(() => null)
+        const imgRes = await fetch(`/api/style-images?styleNos=${encodeURIComponent(styleNos.join(','))}`).catch(() => null)
         if (imgRes && imgRes.ok) {
           const imgData = await imgRes.json()
           setImageMap(imgData.images || {})
@@ -117,16 +132,46 @@ export function BomModule() {
     fetchBoms()
   }, [fetchBoms])
 
+  // Create/edit dialog: when opened — ONE batch image fetch for ALL style
+  // options (→ optionImages) + ONE material-suggest fetch (→ datalist).
+  // Skipped while the dialog is closed; cancelled flag on cleanup.
   useEffect(() => {
-    fetch('/api/samples')
-      .then((r) => r.json())
-      .then((d) => {
+    if (!dialogOpen) return
+    let cancelled = false
+
+    async function loadDialogData() {
+      // Style options — samples are the product master (EL-xxx + photos)
+      try {
+        const res = await fetch('/api/samples')
+        const d = await res.json()
+        if (cancelled) return
         const opts: StyleOption[] = (d.samples || d || [])
           .filter((s: any) => s.styleNo)
           .map((s: any) => ({ styleNo: s.styleNo, styleName: s.styleName || '' }))
         setStyleOptions(opts)
-      })
-      .catch(() => {})
+
+        const styleNos = opts.map((s) => s.styleNo)
+        if (styleNos.length > 0) {
+          const imgRes = await fetch(`/api/style-images?styleNos=${encodeURIComponent(styleNos.join(','))}`).catch(() => null)
+          if (imgRes && imgRes.ok) {
+            const imgData = await imgRes.json()
+            if (!cancelled) setOptionImages(imgData.images || {})
+          }
+        }
+      } catch { /* ignore */ }
+
+      // Material name autocomplete (BOMLine ∪ FabricStock names)
+      try {
+        const res = await fetch('/api/boms/material-suggest')
+        if (res.ok && !cancelled) {
+          const d = await res.json()
+          if (!cancelled) setMaterialNames(d.names || [])
+        }
+      } catch { /* ignore */ }
+    }
+
+    loadDialogData()
+    return () => { cancelled = true }
   }, [dialogOpen])
 
   const openCreate = () => {
@@ -147,7 +192,11 @@ export function BomModule() {
       setEditingBom(full)
       setStyleNo(full.styleNo)
       setNotes(full.notes || '')
-      setLines(full.lines.length > 0 ? full.lines.map((l) => ({ ...l })) : [EMPTY_LINE()])
+      setLines(
+        full.lines.length > 0
+          ? full.lines.map((l) => ({ ...l, wastagePercent: clampWastage(l.wastagePercent ?? 0) }))
+          : [EMPTY_LINE()],
+      )
       setDialogOpen(true)
     } catch (err: any) {
       toast.error(err.message || 'Failed to load BOM')
@@ -175,6 +224,7 @@ export function BomModule() {
           color: l.color?.trim() || null,
           unit: l.unit,
           qtyPerPiece: Number(l.qtyPerPiece) || 0,
+          wastagePercent: clampWastage(l.wastagePercent),
           applicableColors: l.applicableColorsList,
         })),
       }
@@ -192,6 +242,7 @@ export function BomModule() {
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Failed to save')
       toast.success(editingBom ? 'BOM updated' : `BOM created for ${styleNo.trim()}`)
+      if (data.warning) toast.warning(data.warning)
       setDialogOpen(false)
       fetchBoms()
     } catch (err: any) {
@@ -235,6 +286,10 @@ export function BomModule() {
       s.styleNo.toLowerCase().includes(styleSearch.toLowerCase()) ||
       s.styleName.toLowerCase().includes(styleSearch.toLowerCase()),
   )
+
+  // Preview banner image — selector fetch ∪ list fetch, Shirt fallback
+  const previewImage = styleNo ? optionImages[styleNo] || imageMap[styleNo] : undefined
+  const previewStyleName = styleOptions.find((s) => s.styleNo === styleNo)?.styleName || ''
 
   return (
     <div className="space-y-6 p-1">
@@ -297,7 +352,7 @@ export function BomModule() {
                 <div className="flex items-start gap-3">
                   {imageMap[bom.styleNo] ? (
                     <img
-                      src={imageMap[bom.styleNo]}
+                      src={imageMap[bom.styleNo] || undefined}
                       alt={bom.styleNo}
                       className="h-16 w-16 rounded-lg object-cover border"
                     />
@@ -364,7 +419,40 @@ export function BomModule() {
             </DialogDescription>
           </DialogHeader>
 
+          {/* Material name autocomplete — one datalist shared by every line editor */}
+          <datalist id="material-name-suggestions">
+            {materialNames.map((n) => (
+              <option key={n} value={n} />
+            ))}
+          </datalist>
+
           <div className="space-y-4">
+            {/* Product preview banner — photo + style identity (grn "Receiving for…" pattern) */}
+            {styleNo && (
+              <div className="flex items-center gap-3 rounded-lg border border-border/50 bg-muted/30 p-2.5">
+                {previewImage ? (
+                  <img
+                    src={previewImage || undefined}
+                    alt={styleNo}
+                    className="h-[72px] w-[72px] rounded-md object-cover border shrink-0"
+                  />
+                ) : (
+                  <div className="h-[72px] w-[72px] rounded-md bg-muted flex items-center justify-center border shrink-0">
+                    <Shirt className="h-8 w-8 text-muted-foreground/50" />
+                  </div>
+                )}
+                <div className="min-w-0">
+                  <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                    {editingBom ? 'Editing BOM for' : 'Creating BOM for'}
+                  </p>
+                  <p className="text-sm font-bold truncate">{styleNo}</p>
+                  {previewStyleName && (
+                    <p className="text-xs text-muted-foreground truncate">{previewStyleName}</p>
+                  )}
+                </div>
+              </div>
+            )}
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>Product (styleNo)</Label>
@@ -377,18 +465,38 @@ export function BomModule() {
                       value={styleSearch}
                       onChange={(e) => setStyleSearch(e.target.value)}
                     />
-                    <div className="max-h-32 overflow-y-auto rounded-md border divide-y">
-                      {filteredStyles.slice(0, 30).map((s) => (
-                        <button
-                          key={s.styleNo}
-                          type="button"
-                          className={`w-full text-left px-3 py-1.5 text-sm hover:bg-primary/10 ${styleNo === s.styleNo ? 'bg-primary/15 font-medium' : ''}`}
-                          onClick={() => setStyleNo(s.styleNo)}
-                        >
-                          <span className="font-medium">{s.styleNo}</span>
-                          {s.styleName && <span className="text-muted-foreground ml-2">{s.styleName}</span>}
-                        </button>
-                      ))}
+                    <div className="max-h-64 overflow-y-auto rounded-md border divide-y">
+                      {filteredStyles.slice(0, 30).map((s) => {
+                        const thumb = optionImages[s.styleNo]
+                        return (
+                          <button
+                            key={s.styleNo}
+                            type="button"
+                            className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 text-sm hover:bg-primary/10 text-left ${styleNo === s.styleNo ? 'bg-primary/15' : ''}`}
+                            onClick={() => setStyleNo(s.styleNo)}
+                          >
+                            {thumb ? (
+                              <img
+                                src={thumb || undefined}
+                                alt={s.styleNo}
+                                className="h-10 w-10 rounded-md object-cover border shrink-0"
+                              />
+                            ) : (
+                              <div className="h-10 w-10 rounded-md bg-muted flex items-center justify-center border shrink-0">
+                                <Shirt className="h-5 w-5 text-muted-foreground/50" />
+                              </div>
+                            )}
+                            <span className="min-w-0">
+                              <span className="block font-bold truncate">{s.styleNo}</span>
+                              {s.styleName && (
+                                <span className="block text-xs text-muted-foreground truncate">
+                                  {s.styleName}
+                                </span>
+                              )}
+                            </span>
+                          </button>
+                        )
+                      })}
                       {filteredStyles.length === 0 && (
                         <p className="px-3 py-2 text-xs text-muted-foreground">No matching styles</p>
                       )}
@@ -412,7 +520,7 @@ export function BomModule() {
               <div className="space-y-3">
                 {lines.map((line, idx) => (
                   <div key={idx} className="rounded-lg border p-3 space-y-2 bg-muted/30">
-                    <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+                    <div className="grid grid-cols-2 md:grid-cols-6 gap-2">
                       <Select value={line.materialType} onValueChange={(v) => updateLine(idx, { materialType: v })}>
                         <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
                         <SelectContent>
@@ -423,6 +531,7 @@ export function BomModule() {
                       </Select>
                       <Input
                         placeholder="Material name *"
+                        list="material-name-suggestions"
                         value={line.materialName}
                         onChange={(e) => updateLine(idx, { materialName: e.target.value })}
                         className="h-9 md:col-span-2"
@@ -452,6 +561,16 @@ export function BomModule() {
                           </SelectContent>
                         </Select>
                       </div>
+                      <Input
+                        type="number"
+                        step="any"
+                        min="0"
+                        max="100"
+                        placeholder="Wastage %"
+                        value={line.wastagePercent || ''}
+                        onChange={(e) => updateLine(idx, { wastagePercent: Number(e.target.value) || 0 })}
+                        className="h-9"
+                      />
                     </div>
                     <div className="flex items-start gap-2">
                       <Input
@@ -514,12 +633,25 @@ export function BomModule() {
           {detailBom && (
             <>
               <DialogHeader>
-                <DialogTitle className="flex items-center gap-2">
-                  BOM — {detailBom.styleNo}
-                  <Badge variant="outline">v{detailBom.version}</Badge>
-                  {detailBom.isActive && (
-                    <Badge className="bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">Active</Badge>
+                <DialogTitle className="flex items-center gap-3">
+                  {imageMap[detailBom.styleNo] ? (
+                    <img
+                      src={imageMap[detailBom.styleNo] || undefined}
+                      alt={detailBom.styleNo}
+                      className="h-16 w-16 rounded-lg object-cover border shrink-0"
+                    />
+                  ) : (
+                    <div className="h-16 w-16 rounded-lg bg-muted flex items-center justify-center border shrink-0">
+                      <Shirt className="h-7 w-7 text-muted-foreground/50" />
+                    </div>
                   )}
+                  <span className="flex items-center gap-2 flex-wrap">
+                    BOM — {detailBom.styleNo}
+                    <Badge variant="outline">v{detailBom.version}</Badge>
+                    {detailBom.isActive && (
+                      <Badge className="bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">Active</Badge>
+                    )}
+                  </span>
                 </DialogTitle>
                 <DialogDescription>
                   {detailBom.lines.length} material lines · created {new Date(detailBom.createdAt).toLocaleDateString('en-IN')}
@@ -533,6 +665,7 @@ export function BomModule() {
                     <TableHead>Material</TableHead>
                     <TableHead>Color</TableHead>
                     <TableHead>Qty/Piece</TableHead>
+                    <TableHead>Wastage</TableHead>
                     <TableHead>Applies To</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -543,6 +676,7 @@ export function BomModule() {
                       <TableCell className="font-medium">{l.materialName}{l.color ? ` (${l.color})` : ''}</TableCell>
                       <TableCell>{l.unit}</TableCell>
                       <TableCell className="font-mono">{l.qtyPerPiece}</TableCell>
+                      <TableCell className="font-mono">{Number(l.wastagePercent) || 0}%</TableCell>
                       <TableCell>
                         {l.applicableColorsList.length === 0 ? (
                           <span className="text-emerald-600 dark:text-emerald-400 text-xs font-medium">ALL Colors</span>

@@ -170,6 +170,19 @@ const STATUS_CONFIG: Record<string, { label: string; className: string; icon: Re
 
 const STATUS_TABS = ['All', 'Draft', 'Inspected', 'Approved', 'Rejected']
 
+// FIX (updateItem): the ONLY fields that hold numeric quantities/rates.
+// Everything else on a GrnItem row (fabricName, color, lotNumber, defectNotes,
+// …) is free text and must keep its raw string value — coercing them through
+// Number() turned a color like "Pink" into 0 on every keystroke.
+const NUMERIC_ITEM_FIELDS = new Set<keyof GrnItem>([
+  'orderedQty',
+  'receivedQty',
+  'acceptedQty',
+  'rejectedQty',
+  'ratePerUnit',
+  'totalValue',
+])
+
 const BLANK_ITEM = (): GrnItem => ({
   fabricName: '',
   color: '',
@@ -328,15 +341,14 @@ export function GrnModule() {
       const updated = [...prev]
       const item = { ...updated[index] }
 
-      if (field === 'fabricName') {
-        item.fabricName = String(value)
-      } else if (field === 'defectNotes') {
-        item.defectNotes = String(value)
-      } else {
+      if (NUMERIC_ITEM_FIELDS.has(field)) {
         const numVal = Number(value) || 0
         ;(item as Record<string, unknown>)[field] = numVal
         // Auto-calc totalValue
         item.totalValue = item.acceptedQty * item.ratePerUnit
+      } else {
+        // Text fields (fabricName, color, lotNumber, defectNotes, …) keep raw strings
+        ;(item as Record<string, unknown>)[field] = String(value)
       }
 
       updated[index] = item
@@ -396,9 +408,9 @@ export function GrnModule() {
     // Universal POs have `items` array (POItem rows). Use them if available.
     const poItems: any[] = po.items || []
     if (poItems.length > 0) {
-      // Build one GRN item per PO line item, preserving color/size/lot info
+      // Build one GRN item per PO line item (ALL item types — fabric,
+      // accessory, goods, service — are receivable), preserving color info
       const newItems: GrnItem[] = poItems
-        .filter((it: any) => (it.itemType || 'FABRIC') === 'FABRIC' || (it.itemType || '') === 'ACCESSORY')
         .map((it: any) => {
           const prevKey = it.id ? String(it.id) : `${(it.name || it.fabricName || '').trim()}|${(it.color || '').trim()}`
           return {
@@ -474,6 +486,8 @@ export function GrnModule() {
           items: validItems.map((i) => ({
             poItemId: i.poItemId || undefined,
             fabricName: i.fabricName,
+            color: i.color || undefined,
+            lotNumber: i.lotNumber || undefined,
             orderedQty: i.orderedQty,
             receivedQty: i.receivedQty,
             acceptedQty: i.acceptedQty,
@@ -520,7 +534,10 @@ export function GrnModule() {
           notes: form.notes || null,
           qualityRemarks: form.qualityRemarks || null,
           items: items.map((i) => ({
+            poItemId: i.poItemId || undefined,
             fabricName: i.fabricName,
+            color: i.color || undefined,
+            lotNumber: i.lotNumber || undefined,
             orderedQty: i.orderedQty,
             receivedQty: i.receivedQty,
             acceptedQty: i.acceptedQty,

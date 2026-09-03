@@ -1,6 +1,6 @@
 import { supabase } from '@/lib/supabase-db'
 import { NextRequest, NextResponse } from 'next/server'
-import { decorateBom, parseBomLine } from '@/lib/bom-utils'
+import { decorateBom, parseBomLine, isMissingColumnError, stripWastage, WASTAGE_MIGRATION_HINT } from '@/lib/bom-utils'
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -31,6 +31,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (!existing) return NextResponse.json({ error: 'BOM not found' }, { status: 404 })
 
     const updatePayload: Record<string, any> = { updatedAt: now }
+    let patchWarning: string | undefined
     if (body.notes !== undefined) updatePayload.notes = body.notes ? String(body.notes) : null
     if (body.isActive !== undefined) {
       updatePayload.isActive = Boolean(body.isActive)
@@ -56,15 +57,26 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       const cleanLines = body.lines.map(parseBomLine).filter((l: any) => l.materialName)
       if (cleanLines.length > 0) {
         const rows = cleanLines.map((l: any) => ({ ...l, bomId: id }))
-        const { data: inserted, error: linesErr } = await supabase.from('BOMLine').insert(rows).select()
-        if (linesErr) throw linesErr
+        let { data: inserted, error: linesErr } = await supabase.from('BOMLine').insert(rows).select()
+
+        // Graceful wastage fallback — DB missing the wastagePercent column
+        // (migration not applied): retry WITHOUT the field, surface a warning.
+        if (linesErr && isMissingColumnError(linesErr)) {
+          console.warn('[BOM PATCH] wastagePercent column missing — retrying without it:', linesErr.message)
+          const retry = await supabase.from('BOMLine').insert(stripWastage(rows)).select()
+          if (retry.error) throw retry.error
+          inserted = retry.data
+          patchWarning = WASTAGE_MIGRATION_HINT
+        } else if (linesErr) {
+          throw linesErr
+        }
         lines = inserted || []
       } else {
         lines = []
       }
     }
 
-    return NextResponse.json({ bom: decorateBom(updated, lines) })
+    return NextResponse.json({ bom: decorateBom(updated, lines), ...(patchWarning ? { warning: patchWarning } : {}) })
   } catch (error: any) {
     console.error('BOM [id] PATCH error:', error)
     return NextResponse.json({ error: error?.message || 'Failed to update BOM' }, { status: 500 })

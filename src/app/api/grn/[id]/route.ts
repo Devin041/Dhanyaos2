@@ -100,7 +100,12 @@ export async function PATCH(
 
         return {
           grnId: id,
+          // Preserve the PO-line link + color/lot through the delete-and-rebuild
+          // so Draft-GRN edits don't orphan the GrnItem → POItem relation.
+          poItemId: item.poItemId ? String(item.poItemId) : null,
           fabricName: String(item.fabricName || ''),
+          color: item.color ? String(item.color) : null,
+          lotNumber: item.lotNumber ? String(item.lotNumber) : null,
           orderedQty: Number(item.orderedQty) || 0,
           receivedQty,
           acceptedQty,

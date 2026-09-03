@@ -1,0 +1,442 @@
+[
+  {
+    "id": "03e99f30-2d44-468f-b4d3-a8078020657b",
+    "orderItemId": "eebfb38b-1465-4049-b6b9-014b933fdd79",
+    "color": "Green",
+    "size": "M",
+    "quantity": 1,
+    "createdAt": "2026-08-22T06:54:06.019"
+  },
+  {
+    "id": "08426778-89d5-4fe0-ad7b-9170e97c644b",
+    "orderItemId": "6b8054ca-aec9-440b-8492-547052c13d9e",
+    "color": "Red",
+    "size": "M",
+    "quantity": 4,
+    "createdAt": "2026-08-22T10:45:37.299"
+  },
+  {
+    "id": "158a45d2-3707-48c3-a9f3-36a94da8abed",
+    "orderItemId": "6b8054ca-aec9-440b-8492-547052c13d9e",
+    "color": "Red",
+    "size": "S",
+    "quantity": 4,
+    "createdAt": "2026-08-22T10:45:37.299"
+  },
+  {
+    "id": "1af41ef3-a803-457b-82ba-d05464cfcfa4",
+    "orderItemId": "2a168404-bdf2-4481-b488-d67d64a384b9",
+    "color": "Green",
+    "size": "M",
+    "quantity": 4,
+    "createdAt": "2026-08-22T06:51:07.351"
+  },
+  {
+    "id": "2317fb76-2634-47fd-9f2c-4e1d1df2d94b",
+    "orderItemId": "2a168404-bdf2-4481-b488-d67d64a384b9",
+    "color": "Red",
+    "size": "S",
+    "quantity": 4,
+    "createdAt": "2026-08-22T06:51:07.351"
+  },
+  {
+    "id": "26d08142-a4f8-45f0-93b6-05d1a280037a",
+    "orderItemId": "2a168404-bdf2-4481-b488-d67d64a384b9",
+    "color": "Green",
+    "size": "XXL",
+    "quantity": 4,
+    "createdAt": "2026-08-22T06:51:07.351"
+  },
+  {
+    "id": "2b169eda-ea9a-4e0a-82cc-0a8bcaf61696",
+    "orderItemId": "2a168404-bdf2-4481-b488-d67d64a384b9",
+    "color": "Yellow",
+    "size": "L",
+    "quantity": 4,
+    "createdAt": "2026-08-22T06:51:07.351"
+  },
+  {
+    "id": "2bfe9358-03f2-467d-aad7-3a54f2956a7c",
+    "orderItemId": "2a168404-bdf2-4481-b488-d67d64a384b9",
+    "color": "Yellow",
+    "size": "XXL",
+    "quantity": 4,
+    "createdAt": "2026-08-22T06:51:07.351"
+  },
+  {
+    "id": "330fbfa4-981f-4c98-9e04-93ed49535694",
+    "orderItemId": "2a168404-bdf2-4481-b488-d67d64a384b9",
+    "color": "Red",
+    "size": "M",
+    "quantity": 4,
+    "createdAt": "2026-08-22T06:51:07.351"
+  },
+  {
+    "id": "33cd83be-006a-4b60-aef2-921ca6a2d012",
+    "orderItemId": "eebfb38b-1465-4049-b6b9-014b933fdd79",
+    "color": "Yellow",
+    "size": "S",
+    "quantity": 1,
+    "createdAt": "2026-08-22T06:54:06.019"
+  },
+  {
+    "id": "360cf7c4-a362-474c-a92c-f172f3e9492e",
+    "orderItemId": "ffa8d04c-9f11-4af3-a121-2f83fb45630d",
+    "color": "Yellow",
+    "size": "-",
+    "quantity": 4,
+    "createdAt": "2026-08-21T15:50:30.963"
+  },
+  {
+    "id": "3682b571-49c1-44d1-b89a-62239b217087",
+    "orderItemId": "2a168404-bdf2-4481-b488-d67d64a384b9",
+    "color": "Yellow",
+    "size": "XL",
+    "quantity": 4,
+    "createdAt": "2026-08-22T06:51:07.351"
+  },
+  {
+    "id": "36ec7693-7ae8-4785-87fa-066eadf8e5e7",
+    "orderItemId": "6b8054ca-aec9-440b-8492-547052c13d9e",
+    "color": "Blue",
+    "size": "L",
+    "quantity": 4,
+    "createdAt": "2026-08-22T10:45:37.299"
+  },
+  {
+    "id": "3a48ac2a-0280-4382-b598-a7ab442a22c2",
+    "orderItemId": "2a168404-bdf2-4481-b488-d67d64a384b9",
+    "color": "Red",
+    "size": "XL",
+    "quantity": 4,
+    "createdAt": "2026-08-22T06:51:07.351"
+  },
+  {
+    "id": "3bbc000f-6c09-4cd8-b558-69f256fb680e",
+    "orderItemId": "eebfb38b-1465-4049-b6b9-014b933fdd79",
+    "color": "Blue",
+    "size": "S",
+    "quantity": 1,
+    "createdAt": "2026-08-22T06:54:06.019"
+  },
+  {
+    "id": "3f8e5332-495f-4bed-b480-be4c72653d26",
+    "orderItemId": "eebfb38b-1465-4049-b6b9-014b933fdd79",
+    "color": "Green",
+    "size": "XL",
+    "quantity": 1,
+    "createdAt": "2026-08-22T06:54:06.019"
+  },
+  {
+    "id": "41071e07-060e-4668-8cd5-180c68ff365a",
+    "orderItemId": "eebfb38b-1465-4049-b6b9-014b933fdd79",
+    "color": "Red",
+    "size": "XL",
+    "quantity": 1,
+    "createdAt": "2026-08-22T06:54:06.019"
+  },
+  {
+    "id": "4ac35fbd-c809-4206-87aa-fce1800f4f85",
+    "orderItemId": "2a168404-bdf2-4481-b488-d67d64a384b9",
+    "color": "Red",
+    "size": "XXL",
+    "quantity": 4,
+    "createdAt": "2026-08-22T06:51:07.351"
+  },
+  {
+    "id": "5a56bedf-6ea8-4966-ade6-45ab24e52783",
+    "orderItemId": "eebfb38b-1465-4049-b6b9-014b933fdd79",
+    "color": "Blue",
+    "size": "M",
+    "quantity": 1,
+    "createdAt": "2026-08-22T06:54:06.019"
+  },
+  {
+    "id": "604221f1-3547-44eb-92cd-8f32492b67a5",
+    "orderItemId": "eebfb38b-1465-4049-b6b9-014b933fdd79",
+    "color": "Green",
+    "size": "L",
+    "quantity": 1,
+    "createdAt": "2026-08-22T06:54:06.019"
+  },
+  {
+    "id": "76d442fc-310e-4482-b2e0-83508deb5836",
+    "orderItemId": "2a168404-bdf2-4481-b488-d67d64a384b9",
+    "color": "Green",
+    "size": "S",
+    "quantity": 4,
+    "createdAt": "2026-08-22T06:51:07.351"
+  },
+  {
+    "id": "7b88f86d-d6d1-4100-93fd-629e31211d79",
+    "orderItemId": "6b8054ca-aec9-440b-8492-547052c13d9e",
+    "color": "Red",
+    "size": "XL",
+    "quantity": 4,
+    "createdAt": "2026-08-22T10:45:37.299"
+  },
+  {
+    "id": "870c593b-1eb0-41d0-af58-fb899fbcd53f",
+    "orderItemId": "eebfb38b-1465-4049-b6b9-014b933fdd79",
+    "color": "Yellow",
+    "size": "M",
+    "quantity": 1,
+    "createdAt": "2026-08-22T06:54:06.019"
+  },
+  {
+    "id": "87b94326-e381-47b5-adae-2491d7eeee5b",
+    "orderItemId": "eebfb38b-1465-4049-b6b9-014b933fdd79",
+    "color": "Green",
+    "size": "S",
+    "quantity": 1,
+    "createdAt": "2026-08-22T06:54:06.019"
+  },
+  {
+    "id": "8acd8ecc-54d0-4d96-a491-e80aa57c1449",
+    "orderItemId": "eebfb38b-1465-4049-b6b9-014b933fdd79",
+    "color": "Yellow",
+    "size": "L",
+    "quantity": 1,
+    "createdAt": "2026-08-22T06:54:06.019"
+  },
+  {
+    "id": "8e943029-3e2a-4224-9e56-34d9b6d62bdd",
+    "orderItemId": "2a168404-bdf2-4481-b488-d67d64a384b9",
+    "color": "Yellow",
+    "size": "S",
+    "quantity": 4,
+    "createdAt": "2026-08-22T06:51:07.351"
+  },
+  {
+    "id": "927dab44-a91c-4ca8-8743-27dfa1609099",
+    "orderItemId": "eebfb38b-1465-4049-b6b9-014b933fdd79",
+    "color": "Yellow",
+    "size": "XL",
+    "quantity": 1,
+    "createdAt": "2026-08-22T06:54:06.019"
+  },
+  {
+    "id": "9302bf41-07e1-474d-965c-2edb5a508d4e",
+    "orderItemId": "6b8054ca-aec9-440b-8492-547052c13d9e",
+    "color": "Red",
+    "size": "XXL",
+    "quantity": 4,
+    "createdAt": "2026-08-22T10:45:37.299"
+  },
+  {
+    "id": "9b561f86-4eb0-4b39-9f4f-d30039f2d7e0",
+    "orderItemId": "244dce4d-51ec-4283-8ab2-d910af1592c8",
+    "color": "Blue",
+    "size": "-",
+    "quantity": 10,
+    "createdAt": "2026-08-21T15:40:23.193"
+  },
+  {
+    "id": "9d3befdf-e0f0-47d6-aefd-41e2c2bc6226",
+    "orderItemId": "2a168404-bdf2-4481-b488-d67d64a384b9",
+    "color": "Red",
+    "size": "L",
+    "quantity": 4,
+    "createdAt": "2026-08-22T06:51:07.351"
+  },
+  {
+    "id": "a0516969-433f-4b3b-a72b-d46312330526",
+    "orderItemId": "2a168404-bdf2-4481-b488-d67d64a384b9",
+    "color": "Blue",
+    "size": "M",
+    "quantity": 4,
+    "createdAt": "2026-08-22T06:51:07.351"
+  },
+  {
+    "id": "a4a07c8a-0a8a-4e82-85e1-a3dc7773ead4",
+    "orderItemId": "a09b53aa-7477-469f-816e-20f2852f163e",
+    "color": "Red",
+    "size": "-",
+    "quantity": 4,
+    "createdAt": "2026-08-21T15:50:29.821"
+  },
+  {
+    "id": "a9253a6a-5dd1-4f0a-9716-1995c76dfb3e",
+    "orderItemId": "2a168404-bdf2-4481-b488-d67d64a384b9",
+    "color": "Blue",
+    "size": "XXL",
+    "quantity": 4,
+    "createdAt": "2026-08-22T06:51:07.351"
+  },
+  {
+    "id": "b1ed588f-6cce-4d02-b80a-d3c1058f8eaf",
+    "orderItemId": "ffa8d04c-9f11-4af3-a121-2f83fb45630d",
+    "color": "Blue",
+    "size": "-",
+    "quantity": 4,
+    "createdAt": "2026-08-21T15:50:30.963"
+  },
+  {
+    "id": "b46197fd-549e-41f8-84d8-0762f24d074b",
+    "orderItemId": "0a602125-884b-4248-8c7b-1864d4e559e1",
+    "color": "Red",
+    "size": "-",
+    "quantity": 6,
+    "createdAt": "2026-08-21T15:41:28.066"
+  },
+  {
+    "id": "b7ce6a6c-3c9c-4029-93f7-5535084c999f",
+    "orderItemId": "2a168404-bdf2-4481-b488-d67d64a384b9",
+    "color": "Blue",
+    "size": "XL",
+    "quantity": 4,
+    "createdAt": "2026-08-22T06:51:07.351"
+  },
+  {
+    "id": "ba14a41a-3554-44ca-b2c3-d43ba9d82484",
+    "orderItemId": "6b8054ca-aec9-440b-8492-547052c13d9e",
+    "color": "Blue",
+    "size": "XL",
+    "quantity": 4,
+    "createdAt": "2026-08-22T10:45:37.299"
+  },
+  {
+    "id": "c0213070-c624-4788-8c14-c0a7444ca11f",
+    "orderItemId": "2a168404-bdf2-4481-b488-d67d64a384b9",
+    "color": "Blue",
+    "size": "S",
+    "quantity": 4,
+    "createdAt": "2026-08-22T06:51:07.351"
+  },
+  {
+    "id": "cae7c949-4a72-427c-b54b-ce9fff5cf5c5",
+    "orderItemId": "370f2a56-cf4e-4738-8589-9f2a3e9a7352",
+    "color": "Red",
+    "size": "-",
+    "quantity": 6,
+    "createdAt": "2026-08-21T15:40:54.428"
+  },
+  {
+    "id": "ce6ef940-e430-47eb-ba3c-b01437bcd6c4",
+    "orderItemId": "eebfb38b-1465-4049-b6b9-014b933fdd79",
+    "color": "Red",
+    "size": "L",
+    "quantity": 1,
+    "createdAt": "2026-08-22T06:54:06.019"
+  },
+  {
+    "id": "d223c3e9-4064-4d3b-943d-78e6302e8fe7",
+    "orderItemId": "6b8054ca-aec9-440b-8492-547052c13d9e",
+    "color": "Blue",
+    "size": "XXL",
+    "quantity": 4,
+    "createdAt": "2026-08-22T10:45:37.299"
+  },
+  {
+    "id": "d250a797-d67e-49a5-8725-0be24e9383d3",
+    "orderItemId": "ffa8d04c-9f11-4af3-a121-2f83fb45630d",
+    "color": "Green",
+    "size": "-",
+    "quantity": 4,
+    "createdAt": "2026-08-21T15:50:30.963"
+  },
+  {
+    "id": "d54fe14e-38e9-4d50-9bc3-024ca60ce1d9",
+    "orderItemId": "2a168404-bdf2-4481-b488-d67d64a384b9",
+    "color": "Green",
+    "size": "XL",
+    "quantity": 4,
+    "createdAt": "2026-08-22T06:51:07.351"
+  },
+  {
+    "id": "d664b839-b537-4f28-8777-95dd1ba5c9ed",
+    "orderItemId": "2a168404-bdf2-4481-b488-d67d64a384b9",
+    "color": "Blue",
+    "size": "L",
+    "quantity": 4,
+    "createdAt": "2026-08-22T06:51:07.351"
+  },
+  {
+    "id": "d7511a61-66da-4991-868e-4b0fa47f85cb",
+    "orderItemId": "eebfb38b-1465-4049-b6b9-014b933fdd79",
+    "color": "Red",
+    "size": "M",
+    "quantity": 1,
+    "createdAt": "2026-08-22T06:54:06.019"
+  },
+  {
+    "id": "d82fad42-e24b-4e39-9519-61ebba37f0ae",
+    "orderItemId": "eebfb38b-1465-4049-b6b9-014b933fdd79",
+    "color": "Blue",
+    "size": "L",
+    "quantity": 120,
+    "createdAt": "2026-08-22T06:54:06.019"
+  },
+  {
+    "id": "d853983a-9016-4227-a92c-31ffa82af02b",
+    "orderItemId": "ffa8d04c-9f11-4af3-a121-2f83fb45630d",
+    "color": "Red",
+    "size": "-",
+    "quantity": 4,
+    "createdAt": "2026-08-21T15:50:30.963"
+  },
+  {
+    "id": "dc399d06-dd61-495f-b8cc-6eb400abaf0d",
+    "orderItemId": "6b8054ca-aec9-440b-8492-547052c13d9e",
+    "color": "Blue",
+    "size": "M",
+    "quantity": 4,
+    "createdAt": "2026-08-22T10:45:37.299"
+  },
+  {
+    "id": "dfb79def-ccf0-4116-bd02-79fb025bc8fe",
+    "orderItemId": "eebfb38b-1465-4049-b6b9-014b933fdd79",
+    "color": "Blue",
+    "size": "XL",
+    "quantity": 1,
+    "createdAt": "2026-08-22T06:54:06.019"
+  },
+  {
+    "id": "e11a2645-4bb0-4dbb-b1de-c8bfe2413eb0",
+    "orderItemId": "eebfb38b-1465-4049-b6b9-014b933fdd79",
+    "color": "Red",
+    "size": "S",
+    "quantity": 1,
+    "createdAt": "2026-08-22T06:54:06.019"
+  },
+  {
+    "id": "e7ba5008-4088-4e75-9707-8475718fbd6d",
+    "orderItemId": "6b8054ca-aec9-440b-8492-547052c13d9e",
+    "color": "Blue",
+    "size": "S",
+    "quantity": 4,
+    "createdAt": "2026-08-22T10:45:37.299"
+  },
+  {
+    "id": "e9c7e31a-24b2-492d-adfa-d7d57ed95e18",
+    "orderItemId": "2a168404-bdf2-4481-b488-d67d64a384b9",
+    "color": "Green",
+    "size": "L",
+    "quantity": 4,
+    "createdAt": "2026-08-22T06:51:07.351"
+  },
+  {
+    "id": "f82aca2f-c50c-48ab-a58a-16c1fb259341",
+    "orderItemId": "244dce4d-51ec-4283-8ab2-d910af1592c8",
+    "color": "Red",
+    "size": "-",
+    "quantity": 6,
+    "createdAt": "2026-08-21T15:40:23.193"
+  },
+  {
+    "id": "fd07d6bd-aadc-4421-828d-ad2e8d10ab42",
+    "orderItemId": "6b8054ca-aec9-440b-8492-547052c13d9e",
+    "color": "Red",
+    "size": "L",
+    "quantity": 4,
+    "createdAt": "2026-08-22T10:45:37.299"
+  },
+  {
+    "id": "fd591af6-cedb-4c99-ba03-a880189f0e48",
+    "orderItemId": "2a168404-bdf2-4481-b488-d67d64a384b9",
+    "color": "Yellow",
+    "size": "M",
+    "quantity": 4,
+    "createdAt": "2026-08-22T06:51:07.351"
+  }
+]

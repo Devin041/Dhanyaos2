@@ -90,9 +90,11 @@ export async function POST(req: NextRequest) {
       }
 
       // Try to resolve costSheetId from order items (separate query)
+      // (OrderItem is the real table — live OrderItem rows carry styleNo +
+      // costSheetId columns; 'SalesOrderItem' was a ghost-table name)
       if (!resolvedCostSheetId) {
         const { data: orderItems } = await supabase
-          .from('SalesOrderItem')
+          .from('OrderItem')
           .select('styleNo, costSheetId')
           .eq('salesOrderId', salesOrderId)
           .eq('styleNo', styleNo)
@@ -127,7 +129,41 @@ export async function POST(req: NextRequest) {
     const jobNo = `${prefix}${String(nextSeq).padStart(3, '0')}`
     const ts = new Date().toISOString()
 
-    const plannedMeters = Number(plannedFabricMeters) || 0
+    // Planned fabric meters: explicit value wins; else derive from ACTIVE BOM
+    // (sum FABRIC lines' qtyPerPiece × (1+wastage/100)); fallback 2.5 m/pc.
+    // Best-effort — never blocks job creation.
+    let plannedMeters = Number(plannedFabricMeters) || 0
+    let metersSource = 'explicit'
+    if (plannedMeters <= 0 && styleNo) {
+      try {
+        const { computeBomRequirement } = await import('@/lib/bom-requirement')
+        const outcome = await computeBomRequirement(styleNo, 1)
+        if (outcome.ok) {
+          const fabricLines = outcome.requirement.lines.filter(
+            (l: any) => l.materialType === 'FABRIC' && l.unit === 'meters'
+          )
+          if (fabricLines.length > 0) {
+            const consumptionPerPiece = fabricLines.reduce(
+              (sum: number, l: any) => sum + Number(l.qtyPerPiece) * (1 + (Number(l.wastagePercent) || 0) / 100),
+              0
+            )
+            if (consumptionPerPiece > 0) {
+              plannedMeters = Math.round(Number(targetQty) * consumptionPerPiece * 100) / 100
+              const v = Number((outcome.bom as any)?.version) || 0
+              metersSource = v ? `BOM v${v}` : 'BOM'
+            }
+          }
+        }
+      } catch {
+        // best-effort — fall through to default
+      }
+    }
+    if (plannedMeters <= 0) {
+      plannedMeters = Math.round(Number(targetQty) * 2.5 * 100) / 100
+      metersSource = 'default 2.5 m/pc'
+    }
+    console.log(`[Production POST] plannedFabricMeters=${plannedMeters}m for ${targetQty} pcs (${metersSource})`)
+
     const { data: job, error } = await supabase.from('ProductionJob').insert({
       jobNo,
       salesOrderId: salesOrderId || null,

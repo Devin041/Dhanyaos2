@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase-db'
+import { generateSequentialMovementNo } from '@/lib/fg-color-code'
 
 const PRODUCTION_STAGES = [
   'Fabric Issue', 'Cutting', 'Embroidery', 'Printing', 'Stitching',
@@ -190,7 +191,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
             // Try to find existing FGStockBin row
             const { data: existingFg } = await supabase
               .from('FGStockBin')
-              .select('id, availableQty')
+              .select('id, availableQty, styleName, colorCode, unitCost')
               .eq('styleNo', ex.styleNo)
               .eq('color', row.color)
               .eq('size', row.size)
@@ -198,17 +199,42 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
             if (existingFg && existingFg.length > 0) {
               // Update existing row
               const fg = existingFg[0] as any
+              const prevQty = Number(fg.availableQty) || 0
+              const newQty = prevQty + row.qty
               await supabase
                 .from('FGStockBin')
                 .update({
-                  availableQty: (fg.availableQty || 0) + row.qty,
+                  availableQty: newQty,
                   lastMovementDate: ts,
                   updatedAt: ts,
                 })
                 .eq('id', fg.id)
+              // Inward FG ledger row for this production (non-fatal)
+              try {
+                await supabase.from('FGStockMovement').insert({
+                  movementNo: await generateSequentialMovementNo(),
+                  movementType: 'Inward',
+                  fgStockBinId: fg.id,
+                  styleNo: ex.styleNo,
+                  styleName: fg.styleName || ex.styleName,
+                  colorCode: fg.colorCode,
+                  color: row.color,
+                  size: row.size,
+                  quantity: row.qty,
+                  previousQty: prevQty,
+                  newQty,
+                  unitCost: Number(fg.unitCost) || 0,
+                  referenceType: 'ProductionJob',
+                  referenceId: id,
+                  referenceNo: ex.jobNo,
+                  movedBy: 'System',
+                })
+              } catch (mvtErr) {
+                console.error('FGStockMovement insert on completion (non-fatal):', mvtErr)
+              }
             } else {
-              // Create new FGStockBin row
-              await supabase
+              // Create new FGStockBin row (select ledger fields back)
+              const { data: insertedBins } = await supabase
                 .from('FGStockBin')
                 .insert({
                   styleNo: ex.styleNo,
@@ -231,6 +257,33 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
                   createdAt: ts,
                   updatedAt: ts,
                 })
+                .select('id, styleName, colorCode, unitCost')
+              // Inward FG ledger row for this production (non-fatal)
+              try {
+                const bin = ((insertedBins || []) as any[])[0]
+                if (bin) {
+                  await supabase.from('FGStockMovement').insert({
+                    movementNo: await generateSequentialMovementNo(),
+                    movementType: 'Inward',
+                    fgStockBinId: bin.id,
+                    styleNo: ex.styleNo,
+                    styleName: bin.styleName || ex.styleName,
+                    colorCode: bin.colorCode,
+                    color: row.color,
+                    size: row.size,
+                    quantity: row.qty,
+                    previousQty: 0,
+                    newQty: row.qty,
+                    unitCost: Number(bin.unitCost) || 0,
+                    referenceType: 'ProductionJob',
+                    referenceId: id,
+                    referenceNo: ex.jobNo,
+                    movedBy: 'System',
+                  })
+                }
+              } catch (mvtErr) {
+                console.error('FGStockMovement insert on completion (non-fatal):', mvtErr)
+              }
             }
           }
         }

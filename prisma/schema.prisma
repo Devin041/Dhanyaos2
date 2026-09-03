@@ -351,6 +351,7 @@ model BOMLine {
   unit             String  @default("meters")
   qtyPerPiece      Float   @default(0) // consumption per garment piece
   applicableColors String? // JSON array string — empty/null = applies to ALL colors
+  wastagePercent  Float   @default(0) // % over-consumption allowance (0-100)
 
   @@index([bomId])
 }
@@ -438,6 +439,7 @@ model FGStockBin {
   image            String? // Cloudinary URL from Sample/CostSheet
   firstInDate      DateTime? // First stock inward date
   lastMovementDate DateTime? // Last stock movement date
+  lastDispatchDate DateTime? // Date of last dispatch delivery (COLOR-PRODUCTION)
   location         String    @default("Warehouse") // Warehouse, Exhibition, Vendor
   notes            String?
 
@@ -681,6 +683,10 @@ model ProductionJob {
   startDate            DateTime            @default(now())
   endDate              DateTime?
   status               String              @default("In Progress")
+  // Color-wise production (COLOR-PRODUCTION migration)
+  color                String?             @default("Free") // 'Free' = legacy/one-color job; else color name
+  parentJobId          String?             // set on child jobs; parent = color-group header
+  orderItemColorId     String?             // links child job to its OrderItemColor row
   // Fabric tracking
   plannedFabricMeters  Float               @default(0)
   actualFabricConsumed Float               @default(0)
@@ -741,10 +747,12 @@ model StageTracking {
   status             String        @default("Pending")
   notes              String?
   vendorBills        VendorBill[]
+  color             String? // per-split color (multi-vendor stage splits)
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
 
-  @@unique([productionJobId, stageName])
+  // COLOR-PRODUCTION: unique dropped in live DB — one stage carries N vendor/color rows
+  @@index([productionJobId, stageName])
 }
 
 // ============ VENDOR BILLING & PAYMENTS ============
@@ -1133,6 +1141,7 @@ model QualityCheck {
   severity        String        @default("Minor") // Minor, Major, Critical
   status          String        @default("Pass") // Pass, Fail, Conditional
   inspectorName   String?
+  color           String? // QC color (defaults from job.color)
   notes           String?
   checkedAt       DateTime      @default(now())
   createdAt       DateTime      @default(now())

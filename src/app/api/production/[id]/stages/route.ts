@@ -50,7 +50,58 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (!stageName) return NextResponse.json({ error: 'stageName is required' }, { status: 400 })
     if (updates.vendorId) {
       const { data: vendor } = await supabase.from('Vendor').select('id').eq('id', updates.vendorId).single()
-      if (!vendor) return NextResponse.json({ error: 'Vendor not found' }, { status: 400 })
+      if (!vendor) {
+        // The stage dialog merges Vendors AND Suppliers into one picker, so a
+        // Supplier id can arrive here. Resolve it: find the Supplier, then match
+        // (by name) or auto-create the corresponding Vendor row so the
+        // StageTracking vendorId FK (and the VendorBill relation) stays valid.
+        const { data: supplier } = await supabase
+          .from('Supplier')
+          .select('id, name, contactPerson, phone, email')
+          .eq('id', updates.vendorId)
+          .single()
+        if (supplier) {
+          const s = supplier as any
+          // Dedupe: reuse an existing Vendor with the same name (case-insensitive)
+          const { data: existingVendor } = await supabase
+            .from('Vendor')
+            .select('id')
+            .ilike('vendorName', s.name)
+            .limit(1)
+          if (existingVendor && existingVendor.length > 0) {
+            updates.vendorId = (existingVendor[0] as any).id
+          } else {
+            const now = new Date().toISOString()
+            const newVendor: Record<string, any> = {
+              vendorName: s.name,
+              contactPerson: s.contactPerson || null,
+              phone: s.phone || null,
+              email: s.email || null,
+              // Supplier has no gstNumber/state columns — null-safe via any-cast
+              gstNumber: (s as any).gstNumber || null,
+              state: (s as any).state || null,
+              vendorType: 'Job Worker',
+              specialization: 'Synced from Supplier',
+              paymentTerms: 30,
+              status: 'Active',
+              createdAt: now,
+              updatedAt: now,
+            }
+            let { data: created } = await supabase.from('Vendor').insert(newVendor).select('id').single()
+            if (!created) {
+              // gstNumber/state/vendorType columns may not exist in the live DB
+              // yet (VENDOR-GST migration pending) — retry without them.
+              const { gstNumber: _g, state: _st, vendorType: _vt, ...fallbackVendor } = newVendor
+              const retry = await supabase.from('Vendor').insert(fallbackVendor).select('id').single()
+              created = retry.data
+            }
+            if (!created) return NextResponse.json({ error: 'Vendor not found' }, { status: 400 })
+            updates.vendorId = (created as any).id
+          }
+        } else {
+          return NextResponse.json({ error: 'Vendor not found' }, { status: 400 })
+        }
+      }
     }
     const updateData: Record<string, any> = { updatedAt: new Date().toISOString() }
     if (updates.locationType !== undefined) updateData.locationType = updates.locationType

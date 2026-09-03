@@ -128,6 +128,52 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    // ── Batch fetch color×size breakdown for ALL order items ──
+    // ONE query on OrderItemColor (no N+1), grouped per orderItemId so each
+    // item can expose its colorBreakdown rows. Purely additive + non-fatal.
+    const allItemIds = allItems.map((i: any) => i.id).filter(Boolean) as string[]
+    const colorRowsByItem: Record<string, Array<{ id: string; orderItemId: string; color: string; size: string; quantity: number }>> = {}
+    if (allItemIds.length > 0) {
+      try {
+        const { data, error: colorErr } = await supabase
+          .from('OrderItemColor')
+          .select('id, orderItemId, color, size, quantity')
+          .in('orderItemId', allItemIds)
+        // Pre-typed so the size-less retry rows (missing `size` column) can be
+        // assigned without a type clash.
+        let rows: Array<Record<string, any>> = (data || []) as Array<Record<string, any>>
+        let fetchError = colorErr
+        if (fetchError) {
+          // `size` column may be missing on DBs that haven't run the migration —
+          // retry the batch query WITHOUT the size column.
+          const msg = String(fetchError.message || '')
+          if (/PGRST204|42703|size|column .* does not exist/i.test(msg)) {
+            const retry = await supabase
+              .from('OrderItemColor')
+              .select('id, orderItemId, color, quantity')
+              .in('orderItemId', allItemIds)
+            rows = (retry.data || []) as Array<Record<string, any>>
+            fetchError = retry.error
+          }
+        }
+        if (fetchError) throw fetchError
+        for (const row of rows) {
+          const key = String(row.orderItemId)
+          if (!colorRowsByItem[key]) colorRowsByItem[key] = []
+          colorRowsByItem[key].push({
+            id: String(row.id),
+            orderItemId: key,
+            color: row.color || '',
+            size: row.size || '-',
+            quantity: Number(row.quantity) || 0,
+          })
+        }
+      } catch (colorErr: any) {
+        // Non-fatal: orders still return, items just carry no breakdown
+        console.error('OrderItemColor batch fetch (non-fatal):', colorErr?.message)
+      }
+    }
+
     return NextResponse.json({
       orders: filteredOrders.map((o: any) => ({
         id: o.id,
@@ -160,6 +206,7 @@ export async function GET(request: NextRequest) {
           totalAmount: item.totalAmount,
           totalCost: item.totalCost,
           profit: item.profit,
+          colorBreakdown: colorRowsByItem[item.id] || [],
           _image: images[item.style?.styleNo || item.styleNo]?.url || null,
           _fgStockAvailable: stockMap[item.style?.styleNo || item.styleNo] || 0,
         })),
@@ -258,11 +305,22 @@ export async function POST(request: NextRequest) {
       let quantity: number
       let colorRows: Array<{ color: string; size: string; quantity: number }> = []
       if (Array.isArray(item.colors) && item.colors.length > 0) {
-        colorRows = item.colors.map(c => ({
-          color: String(c.color || ''),
-          size: String(c.size || '-'),
-          quantity: Number(c.quantity) || 0,
-        }))
+        // Dedupe incoming matrix rows by color+size (keep the first occurrence)
+        // BEFORE quantity summation — double-fired submits / client retries
+        // otherwise stack duplicate OrderItemColor rows and inflate the qty.
+        const seenCombos = new Set<string>()
+        colorRows = item.colors
+          .filter(c => {
+            const key = `${String(c.color || '')}|${String(c.size || '-')}`
+            if (seenCombos.has(key)) return false
+            seenCombos.add(key)
+            return true
+          })
+          .map(c => ({
+            color: String(c.color || ''),
+            size: String(c.size || '-'),
+            quantity: Number(c.quantity) || 0,
+          }))
         quantity = colorRows.reduce((s, r) => s + r.quantity, 0)
       } else {
         quantity = Number(item.quantity) || 0
@@ -458,6 +516,19 @@ export async function POST(request: NextRequest) {
       }
     })
     if (colorRows.length > 0) {
+      // Guard against double-submits/retries: clear any rows already attached
+      // to the newly created item ids before inserting the fresh set (no-op
+      // for brand-new items).
+      const newItemIds = createdItems
+        .filter((item: any, idx: number) => (calculatedItems[idx]?._colorRows || []).length > 0)
+        .map((item: any) => item.id)
+      if (newItemIds.length > 0) {
+        try {
+          await supabase.from('OrderItemColor').delete().in('orderItemId', newItemIds)
+        } catch {
+          // Non-fatal — brand-new items normally have nothing attached
+        }
+      }
       // Try with size column first
       const withSize = colorRows.map(r => ({
         orderItemId: r.orderItemId,
