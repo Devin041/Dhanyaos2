@@ -197,7 +197,7 @@ export async function GET(request: NextRequest) {
           id: item.id,
           styleId: item.styleId,
           styleName: item.styleName,
-          styleNo: item.style?.styleNo || null,
+          styleNo: item.style?.styleNo || item.styleNo || null,
           collectionName: item.style?.collectionName || null,
           category: item.style?.category || null,
           quantity: item.quantity,
@@ -467,10 +467,16 @@ export async function POST(request: NextRequest) {
     // (requires running SUPABASE-MIGRATION-ORDER-COLORSIZE.sql). We try with
     // them first; if that fails with a "column does not exist" error, we retry
     // without those columns so the order still creates.
+    // FIX (E2E test bug #1): persist the incoming styleNo on the OrderItem row.
+    // Without a Style-master entry (sample-only styles like EL-025) the styleId
+    // resolves to null and the item's styleNo was silently dropped (_styleNo
+    // destructured away), breaking styleNo-keyed lookups downstream (list view,
+    // FG stock map, image resolution, production creation from order items).
     const itemsWithOrderId = calculatedItems.map(item => {
       const { _colorRows, _styleNo, ...rest } = item
       return {
         ...rest,
+        styleNo: _styleNo || null,
         salesOrderId: order.id,
         createdAt: nowIso,
         updatedAt: nowIso,
@@ -485,8 +491,8 @@ export async function POST(request: NextRequest) {
     if (itemsErr1) {
       // Fallback: retry without productionQty/surplusQty (for DBs not yet migrated)
       const msg = String(itemsErr1.message || '')
-      if (/productionQty|surplusQty|column .* does not exist/i.test(msg)) {
-        const stripped = itemsWithOrderId.map(({ productionQty, surplusQty, ...rest }: any) => rest)
+      if (/productionQty|surplusQty|styleNo|column .* does not exist/i.test(msg)) {
+        const stripped = itemsWithOrderId.map(({ productionQty, surplusQty, styleNo, ...rest }: any) => rest)
         const { data: itemsData2, error: itemsErr2 } = await supabase
           .from('OrderItem')
           .insert(stripped)
