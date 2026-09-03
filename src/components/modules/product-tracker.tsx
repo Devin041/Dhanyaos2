@@ -12,6 +12,7 @@ import {
 import {
   Search, Shirt, IndianRupee, Package, Factory, Truck, FileText, CheckCircle2,
   TrendingUp, ArrowRight, Circle, AlertCircle, ClipboardList, Layers,
+  Target, Wallet, Scale, AlertTriangle, Landmark,
 } from 'lucide-react'
 import { colorNameToClasses, isColorJob } from '@/lib/color-badge'
 
@@ -49,6 +50,7 @@ interface LifecycleData {
   invoices: any[]
   payments: any[]
   profitAnalysis: any
+  productPnl: any
   pipeline: Array<{ key: string; label: string; status: string; detail: string }>
 }
 
@@ -69,6 +71,7 @@ export function ProductTrackerModule() {
   const [data, setData] = useState<LifecycleData | null>(null)
   const [loading, setLoading] = useState(false)
   const [search, setSearch] = useState('')
+  const [pnlView, setPnlView] = useState<'target' | 'actual' | 'net' | 'cash'>('actual')
 
   // Load all products for dropdown + ONE batch image fetch (flat /api/style-images)
   useEffect(() => {
@@ -205,11 +208,17 @@ export function ProductTrackerModule() {
                   <h2 className="text-lg font-bold">{data.styleNo}</h2>
                   <p className="text-sm text-muted-foreground">{data.styleName}</p>
                 </div>
-                {/* Profit Summary */}
+                {/* Profit Summary — target headline; full story in Order P&L card below */}
                 <div className="text-right">
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Est. Profit</p>
-                  <p className="text-xl font-bold text-emerald-400 tabular-nums">{formatINR(data.profitAnalysis.estimatedProfit)}</p>
-                  <p className="text-[10px] text-muted-foreground">{data.profitAnalysis.totalQtySold} pcs sold · {data.profitAnalysis.estimatedMargin}% margin</p>
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Target Profit (plan)</p>
+                  <p className="text-xl font-bold text-amber-400 tabular-nums">{formatINR(data.profitAnalysis.estimatedProfit)}</p>
+                  <p className="text-[10px] text-muted-foreground">{data.profitAnalysis.totalQtySold} pcs · {data.profitAnalysis.estimatedMargin}% margin</p>
+                  {data.productPnl && (
+                    <p className="text-[10px] text-muted-foreground">
+                      Actual GP <span className="text-emerald-400 font-medium">{formatINR(data.productPnl.actual.grossProfit)}</span>
+                      {data.productPnl.cash.redFlag && <> · Cash <span className="text-red-400 font-medium">{formatINR(data.productPnl.cash.cashGap)}</span></>}
+                    </p>
+                  )}
                 </div>
               </div>
             </CardContent>
@@ -448,38 +457,188 @@ export function ProductTrackerModule() {
             </Card>
           </div>
 
-          {/* Profit Analysis */}
+          {/* Order P&L — 4 Views (Phase C.1: Target | Actual | Net | Cash) */}
+          {data.productPnl && (
           <Card className="glass-card border-primary/20">
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium flex items-center gap-1.5">
-                <TrendingUp className="h-4 w-4 text-primary" /> Profit Analysis
-              </CardTitle>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <CardTitle className="text-sm font-medium flex items-center gap-1.5">
+                  <TrendingUp className="h-4 w-4 text-primary" /> Order P&amp;L — Kitna Kamaya?
+                </CardTitle>
+                <div className="flex rounded-lg border border-border/40 bg-muted/20 p-0.5" role="tablist" aria-label="P&L views">
+                  {([['target', 'Target'], ['actual', 'Actual'], ['net', 'Net'], ['cash', 'Cash']] as const).map(([v, label]) => (
+                    <button
+                      key={v}
+                      role="tab"
+                      aria-selected={pnlView === v}
+                      onClick={() => setPnlView(v)}
+                      className={`px-3 py-1 text-[10px] font-semibold uppercase tracking-wide rounded-md transition-colors ${pnlView === v ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-                <div className="rounded-lg border border-border/40 bg-muted/20 p-3">
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Revenue</p>
-                  <p className="text-lg font-bold tabular-nums">{formatINR(data.profitAnalysis.totalRevenue)}</p>
-                  <p className="text-[10px] text-muted-foreground">{data.profitAnalysis.totalQtySold} pcs</p>
+            <CardContent className="space-y-4">
+              {/* 4-number strip — the whole story at one glance */}
+              <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+                <button onClick={() => setPnlView('target')} className={`rounded-lg border p-3 text-left transition-colors ${pnlView === 'target' ? 'border-amber-500/40 bg-amber-500/5' : 'border-border/40 bg-muted/20 hover:border-amber-500/20'}`}>
+                  <p className="flex items-center gap-1 text-[10px] text-muted-foreground uppercase tracking-wider"><Target className="h-3 w-3 text-amber-400" /> Target GP</p>
+                  <p className="text-base font-bold tabular-nums text-amber-400">{formatINR(data.productPnl.target.grossProfit)}</p>
+                  <p className="text-[10px] text-muted-foreground">{data.productPnl.target.margin}% · cost-sheet plan</p>
+                </button>
+                <button onClick={() => setPnlView('actual')} className={`rounded-lg border p-3 text-left transition-colors ${pnlView === 'actual' ? 'border-emerald-500/40 bg-emerald-500/5' : 'border-border/40 bg-muted/20 hover:border-emerald-500/20'}`}>
+                  <p className="flex items-center gap-1 text-[10px] text-muted-foreground uppercase tracking-wider"><Scale className="h-3 w-3 text-emerald-400" /> Actual GP</p>
+                  <p className="text-base font-bold tabular-nums text-emerald-400">{formatINR(data.productPnl.actual.grossProfit)}</p>
+                  <p className="text-[10px] text-muted-foreground">{data.productPnl.actual.margin}% · invoiced − direct</p>
+                </button>
+                <button onClick={() => setPnlView('net')} className={`rounded-lg border p-3 text-left transition-colors ${pnlView === 'net' ? 'border-primary/40 bg-primary/5' : 'border-border/40 bg-muted/20 hover:border-primary/20'}`}>
+                  <p className="flex items-center gap-1 text-[10px] text-muted-foreground uppercase tracking-wider"><Landmark className="h-3 w-3 text-primary" /> Net Profit</p>
+                  <p className="text-base font-bold tabular-nums text-primary">{formatINR(data.productPnl.net.netProfit)}</p>
+                  <p className="text-[10px] text-muted-foreground">{data.productPnl.net.margin}% · after GST &amp; overheads</p>
+                </button>
+                <button onClick={() => setPnlView('cash')} className={`rounded-lg border p-3 text-left transition-colors ${data.productPnl.cash.redFlag ? 'border-red-500/40 bg-red-500/5' : pnlView === 'cash' ? 'border-border/60 bg-muted/20' : 'border-border/40 bg-muted/20'}`}>
+                  <p className="flex items-center gap-1 text-[10px] text-muted-foreground uppercase tracking-wider"><Wallet className="h-3 w-3 text-red-400" /> Cash Gap</p>
+                  <p className={`text-base font-bold tabular-nums ${data.productPnl.cash.cashGap < 0 ? 'text-red-400' : 'text-emerald-400'}`}>{data.productPnl.cash.cashGap < 0 ? '' : '+'}{formatINR(data.productPnl.cash.cashGap)}</p>
+                  <p className="text-[10px] text-muted-foreground">{data.productPnl.cash.redFlag ? 'sab dues ka baad short' : 'covered'}</p>
+                </button>
+              </div>
+
+              {/* ── TARGET view ── */}
+              {pnlView === 'target' && (
+                <div className="space-y-2">
+                  <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-2.5 text-[10px] text-amber-600 dark:text-amber-400">
+                    Booking-time plan from the cost sheet — ye paise aye ya gaye hue nahi hain. Actual dekhne ke liye ACTUAL/NET/CASH views kholo.
+                  </div>
+                  <div className="space-y-1.5 text-xs">
+                    <div className="flex justify-between"><span className="text-muted-foreground">Planned qty</span><span className="font-medium">{data.productPnl.target.qty} pcs</span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">Planned sell price</span><span className="font-medium">{formatINR(data.productPnl.target.sellPrice)}</span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">Planned cost (cost sheet)</span><span className="font-medium text-red-400">− {formatINR(data.productPnl.target.totalCost)}</span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">Broker commission ({data.costing?.brokerCommissionPercent ?? 0}%)</span><span className="font-medium">− {formatINR(data.productPnl.target.brokerCommission)}</span></div>
+                    <div className="flex justify-between border-t border-border/40 pt-1.5"><span className="text-muted-foreground">Target gross profit</span><span className="font-bold text-amber-400">{formatINR(data.productPnl.target.grossProfit)} ({data.productPnl.target.margin}%)</span></div>
+                  </div>
                 </div>
-                <div className="rounded-lg border border-border/40 bg-muted/20 p-3">
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Collected</p>
-                  <p className="text-lg font-bold tabular-nums text-emerald-400">{formatINR(data.profitAnalysis.totalCollected)}</p>
-                  <p className="text-[10px] text-amber-400">{formatINR(data.profitAnalysis.totalOutstanding)} outstanding</p>
+              )}
+
+              {/* ── ACTUAL view ── */}
+              {pnlView === 'actual' && (
+                <div className="space-y-2">
+                  <div className="rounded-lg border border-border/40 bg-muted/20 p-2.5 text-[10px] text-muted-foreground">
+                    Invoiced revenue (pre-tax) − actual direct costs. Fabric <span className="font-medium">consumed</span> basis (matching principle) — leftover stock asset mein jaata hai, cost mein nahi.
+                  </div>
+                  <div className="space-y-1.5 text-xs">
+                    <div className="flex justify-between"><span className="text-muted-foreground">Invoiced revenue (pre-tax)</span><span className="font-medium">{formatINR(data.productPnl.actual.revenue)}</span></div>
+                    <div className="flex justify-between text-[10px] text-muted-foreground"><span>gross incl. GST {formatINR(data.productPnl.actual.revenueGross)} · {data.productPnl.qty.dispatched} pcs dispatched</span><span></span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">Fabric consumed ({data.productPnl.actual.costs.fabricConsumed.meters}m × ₹{data.productPnl.actual.costs.fabricConsumed.rate})</span><span className="font-medium text-red-400">− {formatINR(data.productPnl.actual.costs.fabricConsumed.amount)}</span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">Job-work ({data.productPnl.actual.costs.jobWork.bills} vendor bills)</span><span className="font-medium text-red-400">− {formatINR(data.productPnl.actual.costs.jobWork.amount)}</span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">Broker commission</span><span className="font-medium text-red-400">− {formatINR(data.productPnl.actual.costs.broker)}</span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">Direct expenses (freight, packing…)</span><span className="font-medium text-red-400">− {formatINR(data.productPnl.actual.costs.directExpenses.amount)}</span></div>
+                    <div className="flex justify-between border-t border-border/40 pt-1.5"><span className="text-muted-foreground">Actual direct cost</span><span className="font-medium text-red-400">− {formatINR(data.productPnl.actual.totalDirectCost)}</span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">Actual gross profit</span><span className="font-bold text-emerald-400">{formatINR(data.productPnl.actual.grossProfit)} ({data.productPnl.actual.margin}%)</span></div>
+                    {data.productPnl.qty.defective > 0 && (
+                      <p className="text-[10px] text-amber-500">⚠ {data.productPnl.qty.defective} defective pcs ({formatINR(data.productPnl.qty.defectiveValue)}) invoiced nahi hue — revenue kam hua</p>
+                    )}
+                  </div>
                 </div>
-                <div className="rounded-lg border border-border/40 bg-muted/20 p-3">
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Est. Cost</p>
-                  <p className="text-lg font-bold tabular-nums text-red-400">{formatINR(data.profitAnalysis.estimatedTotalCost)}</p>
-                  <p className="text-[10px] text-muted-foreground">{formatINR(data.profitAnalysis.estimatedCostPerPiece)}/pc × {data.profitAnalysis.totalQtySold}</p>
+              )}
+
+              {/* ── NET view ── */}
+              {pnlView === 'net' && (
+                <div className="space-y-2">
+                  <div className="rounded-lg border border-border/40 bg-muted/20 p-2.5 text-[10px] text-muted-foreground">
+                    Actual GP − net GST (Sec 49(5)/Rule 88A cross-utilized) − allocated overheads. Rent/salary book hone pe ye aur girega.
+                  </div>
+                  <div className="space-y-1.5 text-xs">
+                    <div className="flex justify-between"><span className="text-muted-foreground">Actual gross profit</span><span className="font-medium text-emerald-400">{formatINR(data.productPnl.actual.grossProfit)}</span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">Net GST payable (output {formatINR(data.productPnl.net.gstDetail.output)} − ITC {formatINR(data.productPnl.net.gstDetail.input)})</span><span className="font-medium text-red-400">− {formatINR(data.productPnl.net.netGst)}</span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">Allocated overheads (indirect)</span><span className="font-medium text-red-400">− {formatINR(data.productPnl.net.indirectAllocated)}</span></div>
+                    <div className="flex justify-between border-t border-border/40 pt-1.5"><span className="text-muted-foreground">Net profit</span><span className="font-bold text-primary">{formatINR(data.productPnl.net.netProfit)} ({data.productPnl.net.margin}%)</span></div>
+                  </div>
                 </div>
-                <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3">
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Est. Profit</p>
-                  <p className="text-lg font-bold tabular-nums text-emerald-400">{formatINR(data.profitAnalysis.estimatedProfit)}</p>
-                  <p className="text-[10px] text-muted-foreground">{data.profitAnalysis.estimatedMargin}% margin</p>
+              )}
+
+              {/* ── CASH view ── */}
+              {pnlView === 'cash' && (
+                <div className="space-y-2">
+                  {data.productPnl.cash.redFlag ? (
+                    <div className="flex items-start gap-2 rounded-lg border border-red-500/40 bg-red-500/10 p-3">
+                      <AlertTriangle className="h-4 w-4 text-red-400 mt-0.5 shrink-0" />
+                      <div>
+                        <p className="text-xs font-semibold text-red-500 dark:text-red-400">Cash Gap {formatINR(data.productPnl.cash.cashGap)}</p>
+                        <p className="text-[10px] text-red-500/80 dark:text-red-400/80">Aaj sab dues (suppliers + broker + GST) chukane pe itna short pad jayega. Collection outstanding {formatINR(data.productPnl.cash.outstanding)} — pehle wahi chase karo.</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-2.5 text-[10px] text-emerald-600 dark:text-emerald-400">
+                      Cash position covered — dues poore chukane ke baad bhi {formatINR(data.productPnl.cash.cashGap)} bachenge.
+                    </div>
+                  )}
+                  <div className="space-y-1.5 text-xs">
+                    <div className="flex justify-between"><span className="text-muted-foreground">Cash collected</span><span className="font-medium text-emerald-400">+ {formatINR(data.productPnl.cash.collected)}</span></div>
+                    <div className="flex justify-between text-[10px] text-muted-foreground"><span>outstanding {formatINR(data.productPnl.cash.outstanding)} aana baaki hai</span><span></span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">Paid out (PO/bills/expenses)</span><span className="font-medium">− {formatINR(data.productPnl.cash.paidOut)}</span></div>
+                    <div className="flex justify-between text-[10px] font-semibold text-muted-foreground pt-1"><span>Committed dues (aana padega):</span><span></span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">Fabric supplier (PO unpaid)</span><span className="font-medium text-red-400">− {formatINR(data.productPnl.cash.dues.fabricSupplier)}</span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">Job-work vendors ({data.productPnl.actual.costs.jobWork.bills} bills)</span><span className="font-medium text-red-400">− {formatINR(data.productPnl.cash.dues.jobWorkVendors)}</span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">Broker (pay {formatINR(data.productPnl.cash.dues.brokerPayable)} + TDS 194H {formatINR(data.productPnl.cash.dues.brokerTds)})</span><span className="font-medium text-red-400">− {formatINR(data.productPnl.cash.dues.brokerGross)}</span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">GST to govt (net)</span><span className="font-medium text-red-400">− {formatINR(data.productPnl.cash.dues.gstPayable)}</span></div>
+                    <div className="flex justify-between border-t border-border/40 pt-1.5"><span className="text-muted-foreground">Total committed out</span><span className="font-medium text-red-400">− {formatINR(data.productPnl.cash.committedOut)}</span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground font-semibold">Cash gap</span><span className={`font-bold ${data.productPnl.cash.cashGap < 0 ? 'text-red-400' : 'text-emerald-400'}`}>{data.productPnl.cash.cashGap < 0 ? '' : '+'}{formatINR(data.productPnl.cash.cashGap)}</span></div>
+                  </div>
+                </div>
+              )}
+
+              {/* Component variance — target vs actual */}
+              <div>
+                <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">Variance — Plan vs Hua</p>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="text-[10px] text-muted-foreground border-b border-border/40">
+                        <th className="text-left py-1 pr-2 font-medium">Component</th>
+                        <th className="text-right py-1 px-2 font-medium">Plan</th>
+                        <th className="text-right py-1 px-2 font-medium">Actual</th>
+                        <th className="text-right py-1 px-2 font-medium">Δ</th>
+                        <th className="text-left py-1 pl-2 font-medium hidden sm:table-cell">Note</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.productPnl.variance.map((v: any) => (
+                        <tr key={v.component} className="border-b border-border/20">
+                          <td className="py-1.5 pr-2">{v.component}</td>
+                          <td className="text-right py-1.5 px-2 tabular-nums text-muted-foreground">{v.target ? formatINR(v.target) : '—'}</td>
+                          <td className="text-right py-1.5 px-2 tabular-nums font-medium">{v.actual ? formatINR(v.actual) : '—'}</td>
+                          <td className={`text-right py-1.5 px-2 tabular-nums ${v.delta > 0 ? 'text-emerald-400' : v.delta < 0 ? 'text-red-400' : 'text-muted-foreground'}`}>{v.delta > 0 ? '+' : ''}{v.delta ? formatINR(v.delta) : '0'}</td>
+                          <td className="py-1.5 pl-2 text-[10px] text-muted-foreground hidden sm:table-cell">{v.note}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Assets left in the order */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <div className="rounded-lg border border-border/40 bg-muted/20 p-2.5">
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Leftover fabric</p>
+                  <p className="text-sm font-bold tabular-nums">{data.productPnl.assets.leftoverFabric.meters}m <span className="text-[10px] text-muted-foreground font-normal">@ ₹{data.productPnl.assets.leftoverFabric.rate}/m</span></p>
+                  <p className="text-[10px] text-emerald-400">asset {formatINR(data.productPnl.assets.leftoverFabric.value)} — next order carry</p>
+                </div>
+                <div className="rounded-lg border border-border/40 bg-muted/20 p-2.5">
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Defective pcs</p>
+                  <p className="text-sm font-bold tabular-nums">{data.productPnl.assets.defective.qty} pcs</p>
+                  <p className="text-[10px] text-amber-400">value {formatINR(data.productPnl.assets.defective.value)} — rework/scrap/discount?</p>
+                </div>
+                <div className="rounded-lg border border-border/40 bg-muted/20 p-2.5">
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Receivable</p>
+                  <p className="text-sm font-bold tabular-nums text-amber-400">{formatINR(data.productPnl.assets.receivable)}</p>
+                  <p className="text-[10px] text-muted-foreground">customer se aana baaki</p>
                 </div>
               </div>
             </CardContent>
           </Card>
+          )}
         </>
       )}
     </div>

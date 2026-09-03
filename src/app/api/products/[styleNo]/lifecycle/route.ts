@@ -20,6 +20,11 @@ import { getActiveBom } from '@/lib/bom-requirement'
  *   - Dispatch records (shipped qty)
  *   - Invoices & Payments (billed, collected, outstanding)
  *   - Profit Analysis (estimated vs actual cost, actual profit)
+ *   - Product P&L — 4 views (Phase C.1): TARGET (cost-sheet plan) |
+ *     ACTUAL (invoiced pre-tax revenue − actual direct costs, matching
+ *     basis: fabric CONSUMED not purchased) | NET (− net GST − indirect) |
+ *     CASH (collected vs paid-out vs committed dues — the cash-gap red
+ *     flag) + component variance + leftover assets.
  */
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ styleNo: string }> }) {
@@ -48,7 +53,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ styl
     try {
       const { data, error } = await supabase
         .from('CostSheet')
-        .select('id, sheetNo, totalCost, sellingPrice, profitPercent, status, image')
+        .select('id, sheetNo, totalCost, sellingPrice, profitPercent, status, image, targetQty, brokerCommissionAmount, brokerCommissionPercent')
         .eq('styleNo', styleNo)
         .order('createdAt', { ascending: false })
         .limit(1)
@@ -61,7 +66,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ styl
     try {
       const { data, error } = await supabase
         .from('PurchaseOrder')
-        .select('id, poNumber, supplier:supplierId(name), fabricName, quantity, ratePerUnit, totalAmount, status, paymentStatus, paidAmount, receivedQty, expectedDelivery, createdAt')
+        .select('id, poNumber, supplier:supplierId(name), fabricName, quantity, ratePerUnit, totalAmount, taxableAmount, cgstAmount, sgstAmount, igstAmount, totalGst, status, paymentStatus, paidAmount, receivedQty, expectedDelivery, createdAt')
         .eq('styleNo', styleNo)
         .order('createdAt', { ascending: false })
       if (!error && data) purchaseOrders = data
@@ -327,7 +332,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ styl
       if (salesOrderIds.length > 0) {
         const { data, error } = await supabase
           .from('Invoice')
-          .select('id, invoiceNo, totalAmount, paidAmount, paymentStatus, paymentTerms, dueDate, invoiceDate')
+          .select('id, invoiceNo, totalAmount, taxableAmount, cgstAmount, sgstAmount, igstAmount, totalGst, paidAmount, paymentStatus, paymentTerms, dueDate, invoiceDate')
           .in('salesOrderId', salesOrderIds)
           .order('invoiceDate', { ascending: false })
         if (!error && data) invoices = data
@@ -390,6 +395,197 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ styl
       actualProfit: Math.round(totalRevenue - actualFabricCost), // simplified — will improve with actual labor cost
     }
 
+    // ── 10b. Product P&L — 4 views (Phase C.1) ──
+    // TARGET: cost-sheet plan (sell − cost). ACTUAL: invoiced pre-tax revenue
+    // − actual direct costs (fabric CONSUMED × receipt rate, job-work bills,
+    // broker, direct expenses). NET: − net GST (cross-utilized) − indirect.
+    // CASH: collected − paid-out − committed dues = the cash-gap red flag.
+    let styleVendorBills: any[] = []
+    try {
+      // bills link to this style's jobs via StageTracking.productionJobId
+      const { data: allStyleJobs } = await supabase
+        .from('ProductionJob')
+        .select('id, jobNo')
+        .eq('styleNo', styleNo)
+      const allJobIds = ((allStyleJobs || []) as any[]).map(j => j.id)
+      if (allJobIds.length > 0) {
+        const { data: stageRows } = await supabase
+          .from('StageTracking')
+          .select('id, productionJobId')
+          .in('productionJobId', allJobIds)
+        const stageIds = (((stageRows || []) as any[]).map(s => s.id)).filter(Boolean)
+        if (stageIds.length > 0) {
+          const { data: billRows } = await supabase
+            .from('VendorBill')
+            .select('id, billNo, totalAmount, taxableAmount, cgstAmount, sgstAmount, igstAmount, totalGst, paidAmount, status, billDate')
+            .in('stageTrackingId', stageIds)
+          styleVendorBills = ((billRows || []) as any[]).filter(b => b.status !== 'Cancelled')
+        }
+      }
+    } catch { /* bills are best-effort */ }
+
+    let orderExpenses: any[] = []
+    try {
+      const { data: expRows } = await supabase
+        .from('ExpenseVoucher')
+        .select('id, voucherNo, category, amount, gstAmount, directType, salesOrderId, styleNo, expenseDate')
+        .eq('styleNo', styleNo)
+      orderExpenses = ((expRows || []) as any[]).filter(e => e.directType !== 'INDIRECT')
+    } catch { /* ExpenseVoucher may be empty */ }
+
+    // fabric consumed cost — receipt rate per fabric stock (fallback: PO rate)
+    const r2p = (n: number) => Math.round((Number(n) || 0) * 100) / 100
+    const rateByStock: Record<string, number> = {}
+    for (const r of fabricReceipts) {
+      const cur = rateByStock[r.fabricStockId]
+      rateByStock[r.fabricStockId] = cur == null
+        ? (r.ratePerUnit || 0)
+        : (cur + (r.ratePerUnit || 0)) / 2
+    }
+    const poPreTax = purchaseOrders.reduce((s: number, p: any) => s + (Number(p.taxableAmount) || Number(p.totalAmount) || 0), 0)
+    const fallbackRate = purchaseOrders.length > 0 && poPreTax > 0
+      ? poPreTax / Math.max(1, purchaseOrders.reduce((s: number, p: any) => s + (Number(p.receivedQty) || Number(p.quantity) || 0), 0))
+      : 0
+    const consumedMeters = fabricConsumption.reduce((s: number, c: any) => s + (Number(c.consumedQty) || 0), 0)
+    const consumedCost = r2p(fabricConsumption.reduce(
+      (s: number, c: any) => s + (Number(c.consumedQty) || 0) * (rateByStock[c.fabricStockId] ?? fallbackRate), 0))
+    const fabricRate = consumedMeters > 0 ? r2p(consumedCost / consumedMeters) : r2p(fallbackRate)
+    const purchasedPreTax = r2p(poPreTax)
+    const leftoverMeters = r2p(fabricSummary.availableMeters || 0)
+    const leftoverValue = r2p(leftoverMeters * (fabricRate || fallbackRate))
+
+    // job-work + direct expenses
+    const jobWorkBilled = r2p(styleVendorBills.reduce((s: number, b: any) => s + (Number(b.totalAmount) || 0), 0))
+    const jobWorkPaid = r2p(styleVendorBills.reduce((s: number, b: any) => s + (Number(b.paidAmount) || 0), 0))
+    const jobWorkDue = r2p(Math.max(0, jobWorkBilled - jobWorkPaid))
+    const directExpenses = r2p(orderExpenses.reduce((s: number, e: any) => s + (Number(e.amount) || 0) - (Number(e.gstAmount) || 0), 0))
+
+    // revenue (pre-tax, invoiced)
+    const invoicedGross = invoices.reduce((s: number, i: any) => s + (Number(i.totalAmount) || 0), 0)
+    const invoicedTaxable = invoices.reduce(
+      (s: number, i: any) => s + (Number(i.taxableAmount) || Math.max(0, (Number(i.totalAmount) || 0) - (Number(i.totalGst) || 0))), 0)
+    const collected = r2p(totalCollected)
+    const outstanding = r2p(totalOutstanding)
+
+    // broker (latest cost sheet) + TDS 194H 5%
+    const brokerCommission = r2p(Number(costing?.brokerCommissionAmount) || 0)
+    const brokerTds = r2p(brokerCommission * 0.05)
+    const brokerPayable = r2p(brokerCommission - brokerTds)
+
+    // per-order GST with statutory cross-utilization (Sec 49(5) / Rule 88A)
+    let outC = 0, outS = 0, outI = 0
+    for (const i of invoices) { outC += Number(i.cgstAmount) || 0; outS += Number(i.sgstAmount) || 0; outI += Number(i.igstAmount) || 0 }
+    let inC = 0, inS = 0, inI = 0
+    for (const p of purchaseOrders) { inC += Number(p.cgstAmount) || 0; inS += Number(p.sgstAmount) || 0; inI += Number(p.igstAmount) || 0 }
+    for (const b of styleVendorBills) { inC += Number(b.cgstAmount) || 0; inS += Number(b.sgstAmount) || 0; inI += Number(b.igstAmount) || 0 }
+    let crI = inI, crC = inC, crS = inS
+    let liabI = Math.max(0, outI)
+    let use = Math.min(liabI, crI); liabI -= use; crI -= use
+    use = Math.min(liabI, crC); liabI -= use; crC -= use
+    use = Math.min(liabI, crS); liabI -= use; crS -= use
+    let liabC = Math.max(0, outC)
+    use = Math.min(liabC, crC); liabC -= use; crC -= use
+    use = Math.min(liabC, crI); liabC -= use; crI -= use
+    let liabS = Math.max(0, outS)
+    use = Math.min(liabS, crS); liabS -= use; crS -= use
+    use = Math.min(liabS, crI); liabS -= use; crI -= use
+    const netGst = r2p(liabI + liabC + liabS)
+
+    // cash committed-out (unpaid dues + GST + broker gross incl. TDS)
+    const fabricDue = r2p(purchaseOrders.reduce(
+      (s: number, p: any) => s + Math.max(0, (Number(p.totalAmount) || 0) - (Number(p.paidAmount) || 0)), 0))
+    const paidOut = r2p(
+      purchaseOrders.reduce((s: number, p: any) => s + (Number(p.paidAmount) || 0), 0)
+      + jobWorkPaid + orderExpenses.reduce((s: number, e: any) => s + (Number(e.amount) || 0), 0))
+    const committedOut = r2p(fabricDue + jobWorkDue + brokerCommission + netGst)
+    const cashGap = r2p(collected - paidOut - committedOut)
+
+    // views
+    const tSell = Number(costing?.sellingPrice) || 0
+    const tCost = Number(costing?.totalCost) || 0
+    const tQty = Number(costing?.targetQty) || totalQtySold
+    const targetGp = r2p(tSell - tCost)
+    const actualDirect = r2p(consumedCost + jobWorkBilled + brokerCommission + directExpenses)
+    const actualGp = r2p(invoicedTaxable - actualDirect)
+    const indirectAllocated = 0 // no indirect vouchers exist yet; shown as a labeled line
+    const netProfit = r2p(actualGp - netGst - indirectAllocated)
+
+    const producedQty = productionJobs.reduce((s: number, j: any) => s + (Number(j.completedQty) || 0), 0)
+    const dispatchedQty = dispatches.reduce((s: number, d: any) => s + (Number(d.totalDispatchedQty) || 0), 0)
+    const costPerPiece = producedQty > 0 ? r2p(actualDirect / producedQty) : 0
+    const defectiveQty = Math.max(0, (totalQtySold || producedQty) - producedQty)
+
+    const productPnl: any = {
+      qty: {
+        ordered: totalQtySold,
+        produced: producedQty,
+        dispatched: dispatchedQty,
+        defective: defectiveQty,
+        defectiveValue: r2p(defectiveQty * costPerPiece),
+      },
+      target: {
+        label: 'Cost-sheet plan at booking time',
+        qty: tQty,
+        sellPrice: r2p(tSell),
+        totalCost: r2p(tCost),
+        brokerCommission,
+        grossProfit: targetGp,
+        margin: tSell > 0 ? Math.round((targetGp / tSell) * 1000) / 10 : 0,
+      },
+      actual: {
+        label: 'Invoiced revenue (pre-tax) − actual direct costs (fabric consumed, matching basis)',
+        revenue: r2p(invoicedTaxable),
+        revenueGross: r2p(invoicedGross),
+        costs: {
+          fabricConsumed: { meters: r2p(consumedMeters), rate: fabricRate, amount: consumedCost },
+          fabricPurchased: purchasedPreTax,
+          jobWork: { bills: styleVendorBills.length, amount: jobWorkBilled },
+          broker: brokerCommission,
+          directExpenses: { vouchers: orderExpenses.length, amount: directExpenses },
+        },
+        totalDirectCost: actualDirect,
+        grossProfit: actualGp,
+        margin: invoicedTaxable > 0 ? Math.round((actualGp / invoicedTaxable) * 1000) / 10 : 0,
+      },
+      net: {
+        label: 'Actual gross profit − net GST − allocated overheads',
+        netGst,
+        gstDetail: { output: r2p(outC + outS + outI), input: r2p(inC + inS + inI), crossUtilized: true },
+        indirectAllocated,
+        netProfit,
+        margin: invoicedTaxable > 0 ? Math.round((netProfit / invoicedTaxable) * 1000) / 10 : 0,
+      },
+      cash: {
+        label: 'Paisa aya vs gaya vs jaana padega',
+        collected,
+        paidOut,
+        outstanding,
+        dues: {
+          fabricSupplier: fabricDue,
+          jobWorkVendors: jobWorkDue,
+          brokerGross: brokerCommission,
+          brokerTds,
+          brokerPayable,
+          gstPayable: netGst,
+        },
+        committedOut,
+        cashGap,
+        redFlag: cashGap < 0,
+      },
+      variance: [
+        { component: 'Revenue (pre-tax)', target: r2p(tSell), actual: r2p(invoicedTaxable), delta: r2p(invoicedTaxable - tSell), note: defectiveQty > 0 ? `${defectiveQty} defective pcs not invoiced` : '' },
+        { component: 'Fabric', target: purchasedPreTax, actual: consumedCost, delta: r2p(consumedCost - purchasedPreTax), note: leftoverMeters > 0 ? `${leftoverMeters}m leftover (asset ₹${leftoverValue})` : '' },
+        { component: 'Job-work (vendor bills)', target: 0, actual: jobWorkBilled, delta: jobWorkBilled, note: `${styleVendorBills.length} bills` },
+        { component: 'Broker commission', target: brokerCommission, actual: brokerCommission, delta: 0, note: costing?.brokerCommissionPercent ? `${costing.brokerCommissionPercent}% per cost sheet` : '' },
+        { component: 'Direct expenses', target: 0, actual: directExpenses, delta: directExpenses, note: orderExpenses.length > 0 ? `${orderExpenses.length} voucher(s)` : 'none booked' },
+      ],
+      assets: {
+        leftoverFabric: { meters: leftoverMeters, rate: fabricRate, value: leftoverValue },
+        defective: { qty: defectiveQty, value: r2p(defectiveQty * costPerPiece) },
+        receivable: outstanding,
+      },
+    }
+
     // ── 11. Pipeline Status ──
     // Production detail appends the distinct garment-color count (Phase 5b)
     const productionColorCount = new Set(
@@ -433,6 +629,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ styl
       invoices,
       payments,
       profitAnalysis,
+      productPnl,
       pipeline: stages,
     })
   } catch (error) {

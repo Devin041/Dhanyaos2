@@ -237,11 +237,13 @@
 **Test script**: EL-025 Sep-2026 return — output ₹1,57,338.48, ITC ₹23,400, **net ₹1,33,938.48** (F2 fixed), payment voucher, 2 defective Maroon credit note (₹5,486+GST reverse).
 
 ### 📊 PHASE C — EXACT PRODUCT P&L + ACCOUNTING REPORTS (owner ka "kitna kamaya")
-1. **Product P&L 4 views** (Product Tracker me):
-   - TARGET: ₹3,03,840 / 23.1% (cost-sheet basis) — already hai
-   - **ACTUAL-DIRECT**: revenue 478×2,743 = ₹13,11,154 − (fabric 3,024m×150 actual consumed + vendor bills 99,400 + in-house labor + broker 26,332.80 + freight 8,500) = ?
-   - **NET**: actual − allocated indirect (rent/salary proportion ya flat)
-   - **CASH**: in 7,00,000 − out 7,51,071 = −₹51,071 (collection gap highlight)
+1. **Product P&L 4 views** (Product Tracker me) — ✅ **DONE (Phase C.1, live-verified)**:
+   - TARGET: ₹3,03,840 / 23.1% (cost-sheet basis) — tab + summary card
+   - **ACTUAL-DIRECT**: revenue (invoiced pre-tax ₹13,11,154) − (fabric CONSUMED 3,024m×150 ₹4,53,600 + vendor bills 9 = ₹99,400 + broker ₹26,332.80 + direct expenses ₹0) = **GP ₹7,31,821.20 (55.8%)** — matching basis, leftover 89m asset mein
+   - **NET**: actual − net GST ₹1,33,938.48 (Rule 88A cross-utilized) − indirect ₹0 (abhi koi indirect voucher nahi) = **₹5,97,882.72 (45.6%)**
+   - **CASH**: in 7,00,000 − committed out 7,51,071.28 = **−₹51,071 RED FLAG** (Chirag 4,91,400 + bills 99,400 + broker gross 26,332.80 + GST 1,33,938.48) — banner + dues breakdown
+   - + Variance table (Plan vs Hua per component) + Assets left (89m ₹13,350 / 2 defective / receivable ₹7,68,492)
+   - EL-025 live numbers master ledger se EXACT match — browser E2E + VLM verified, screenshots docs/verify-product-pnl-*.png
 2. Variance per color (RED est 2,53,200 vs actual 1,88,200 — kyo sasta? Neha ₹175 vs Zari ₹180)
 3. Party ledgers (Patels/Chirag/PK running statement) + **Statement of Account PDF**
 4. Trial Balance → P&L → Balance Sheet, **drill-down** (number → voucher → INV-001)
@@ -313,10 +315,11 @@ PAYMENT SIDE (dues ₹7,51,071.28):
   GST govt.:       ₹1,33,938.48 (output 1,57,338.48 − ITC 23,400)
 
 PROFIT SIDE (4 views):
-  TARGET:    ₹3,03,840 / 23.1% (cost-sheet) — already live
-  ACTUAL:    revenue 13,11,154 − actual-direct (fabric consumed + vendors + labor + broker + freight) = Phase C me exact
-  NET:       ACTUAL − indirect allocation (rent+salary+...) = Phase C
-  CASH:      7,00,000 − 7,51,071.28 = −₹51,071.28 (THE red flag)
+  TARGET:    ₹3,03,840 / 23.1% (cost-sheet) — ✅ live (Product Tracker → Target tab)
+  ACTUAL:    revenue 13,11,154 − direct (fabric consumed 4,53,600 + vendors 99,400 + broker 26,332.80) = GP ₹7,31,821.20 (55.8%) — ✅ live
+             (in-house labor + freight abhi book nahi hue — voucher aane pe khud add honge)
+  NET:       ACTUAL − net GST 1,33,938.48 − indirect 0 = ₹5,97,882.72 — ✅ live (rent/salary book hone pe girega)
+  CASH:      7,00,000 − 7,51,071.28 = −₹51,071.28 — ✅ live (THE red flag — banner + dues breakdown)
 
 ASSETS LEFT:
   Fabric 89m (22+24+19+24) @ ₹150 ≈ ₹13,350 — next order asset
