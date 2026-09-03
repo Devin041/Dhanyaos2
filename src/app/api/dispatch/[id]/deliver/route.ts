@@ -122,6 +122,82 @@ export async function POST(
       }
     }
 
+    // ─── U5 FIX: close out linked production jobs ──────────────────────
+    // A job whose FG bins are drained (or whose delivered qty covers its
+    // target) becomes status=Completed / stage=Dispatched, so Inventory/WIP
+    // stops showing "Dispatch Ready / In Progress" rows for goods that already
+    // left the factory. Recomputed from ALL delivered dispatches of the order,
+    // so multi-dispatch orders and re-runs stay correct. Partial dispatches
+    // keep the job In Progress with a proportional completedQty.
+    try {
+      const soId = (updated as any).salesOrderId as string | null
+      if (soId) {
+        const { data: deliveredDispatches } = await supabase
+          .from('Dispatch')
+          .select('id, dispatchItems:DispatchItem(styleNo, color, dispatchedQty)')
+          .eq('salesOrderId', soId)
+          .eq('status', 'Delivered')
+
+        const byColor: Record<string, number> = {}
+        const byStyle: Record<string, number> = {}
+        for (const dd of (deliveredDispatches || []) as any[]) {
+          for (const di of (dd.dispatchItems || []) as any[]) {
+            const qty = Number(di.dispatchedQty) || 0
+            if (qty <= 0) continue
+            const ck = `${di.styleNo || ''}|${di.color || ''}`
+            byColor[ck] = (byColor[ck] || 0) + qty
+            byStyle[di.styleNo || ''] = (byStyle[di.styleNo || ''] || 0) + qty
+          }
+        }
+
+        const { data: jobs } = await supabase
+          .from('ProductionJob')
+          .select('id, jobNo, styleNo, color, targetQty, completedQty, status')
+          .eq('salesOrderId', soId)
+          .neq('status', 'Cancelled')
+
+        if (jobs && jobs.length > 0) {
+          // A job is DONE when every FG bin it produced from is drained —
+          // this handles QC-reduced outputs (target 120, 118 accepted+shipped).
+          const styleKeys = [...new Set(jobs.map((j: any) => j.styleNo).filter(Boolean))]
+          let binRows: any[] = []
+          if (styleKeys.length > 0) {
+            const { data: bins } = await supabase
+              .from('FGStockBin')
+              .select('styleNo, color, availableQty')
+              .in('styleNo', styleKeys)
+            binRows = bins || []
+          }
+          const jobBins = (styleNo: string | null, color: string | null) =>
+            binRows.filter((b) => b.styleNo === styleNo && (color ? b.color === color : true))
+
+          for (const job of jobs as any[]) {
+            const delivered = job.color
+              ? byColor[`${job.styleNo || ''}|${job.color}`] || 0
+              : byStyle[job.styleNo || ''] || 0
+            const target = Number(job.targetQty) || 0
+            const bins = jobBins(job.styleNo, job.color)
+            const producedAllGone = bins.length > 0 && bins.every((b) => (Number(b.availableQty) || 0) <= 0)
+            const fullyDelivered = producedAllGone || (target > 0 && delivered >= target)
+
+            const newCompleted = delivered
+            const newStatus = fullyDelivered ? 'Completed' : (delivered > 0 ? 'In Progress' : job.status)
+            if ((Number(job.completedQty) || 0) === newCompleted && job.status === newStatus) continue
+
+            const payload: Record<string, any> = {
+              completedQty: newCompleted,
+              status: newStatus,
+              updatedAt: new Date().toISOString(),
+            }
+            if (fullyDelivered) payload.stage = 'Dispatched'
+            await supabase.from('ProductionJob').update(payload).eq('id', job.id)
+          }
+        }
+      }
+    } catch (jobErr: any) {
+      warnings.push(`Production job close-out failed: ${jobErr?.message || 'unknown error'}`)
+    }
+
     return NextResponse.json({ dispatch: updated, warnings: warnings.length > 0 ? warnings : undefined })
   } catch (error) {
     console.error('POST /api/dispatch/[id]/deliver error:', error)

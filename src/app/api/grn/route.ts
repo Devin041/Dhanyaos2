@@ -113,7 +113,10 @@ export async function GET(req: NextRequest) {
     const grnsWithRelations = grns.map((g: any) => ({
       ...g,
       purchaseOrder: g.poId ? poMap[g.poId] || null : null,
-      _image: poMap[g.poId || '']?.styleNo ? imageMap[poMap[g.poId].styleNo] || null : null,
+      // NOTE: flatten to a plain string URL — frontend <img src> expects a
+      // string; the raw StyleImageResult object renders as [object Object].
+      _image: poMap[g.poId || '']?.styleNo ? imageMap[poMap[g.poId].styleNo]?.url || null : null,
+      _imageSource: poMap[g.poId || '']?.styleNo ? imageMap[poMap[g.poId].styleNo]?.source || null : null,
       grnItems: grnItemsMap[g.id] || [],
     }))
 

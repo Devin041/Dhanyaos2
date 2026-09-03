@@ -1,6 +1,7 @@
 import { supabase } from '@/lib/supabase-db'
 import { NextRequest, NextResponse } from 'next/server'
 import { format, startOfMonth, endOfMonth } from 'date-fns'
+import { batchResolveStyleImages } from '@/lib/style-image'
 
 // ─── GET: List purchase orders with filtering, search, pagination ─────────
 export async function GET(request: NextRequest) {
@@ -105,6 +106,14 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    // FIX (U1): resolve product images for POs so the list + detail views can
+    // show WHICH product a PO was raised against. styleNo comes from the PO
+    // header, falling back to the first line item's styleNo.
+    const effectivePoStyleNo = (o: any) =>
+      o.styleNo || (itemsByPo[o.id] || []).find((it: any) => it.styleNo)?.styleNo || null
+    const poStyleNos = [...new Set(ordersRaw.map(effectivePoStyleNo).filter(Boolean))] as string[]
+    const styleImageMap = poStyleNos.length > 0 ? await batchResolveStyleImages(poStyleNos) : {}
+
     // Summary KPIs
     const now = new Date()
     const monthStart = startOfMonth(now).toISOString()
@@ -147,8 +156,11 @@ export async function GET(request: NextRequest) {
         // Vendor linkage (for vendor-only POs)
         vendorId: o.vendorId || null,
         vendor: o.vendorId ? vendorMap[o.vendorId] || null : null,
-        styleNo: o.styleNo || null,
-        styleName: o.styleName || null,
+        styleNo: effectivePoStyleNo(o),
+        // flattened plain string URL (frontend <img src> expects a string)
+        _image: effectivePoStyleNo(o) ? styleImageMap[effectivePoStyleNo(o)]?.url || null : null,
+        _imageSource: effectivePoStyleNo(o) ? styleImageMap[effectivePoStyleNo(o)]?.source || null : null,
+        styleName: o.styleName || (itemsByPo[o.id] || []).find((it: any) => it.styleName)?.styleName || null,
         costSheetId: o.costSheetId || null,
         // Legacy single-fabric fields (kept for backward compat — old POs use these)
         fabricName: o.fabricName,
@@ -337,7 +349,14 @@ export async function POST(request: NextRequest) {
     // Legacy primary fields (for backward compat with old PO code paths)
     const firstItem = normalizedItems[0] || {}
     const primaryFabric = firstItem.name || fabricName || ''
-    const primaryQty = firstItem.quantity || Number(quantity) || 0
+    // FIX (U2): for multi-item POs the legacy header `quantity` must be the SUM
+    // of all line quantities (3×780m = 2,340 etc.) — the header `receivedQty`
+    // is also a total across lines, so quantity must match that scale, else
+    // progress math shows nonsense like 3113/780 = 399%.
+    const itemsTotalQty = normalizedItems.reduce((s: number, it: any) => s + (Number(it.quantity) || 0), 0)
+    const primaryQty = normalizedItems.length > 1
+      ? itemsTotalQty
+      : (firstItem.quantity || Number(quantity) || 0)
     const primaryRate = firstItem.ratePerUnit || Number(ratePerUnit) || 0
     const primaryUnit = firstItem.unit || unit || 'meters'
 

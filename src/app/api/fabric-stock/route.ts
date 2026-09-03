@@ -70,7 +70,10 @@ export async function GET(request: NextRequest) {
         fabricName: s.fabricName,
         color: s.color || null,                    // NEW — color-wise tracking
         styleNo: s.styleNo || null,                // product this stock arrived for
-        _image: s.styleNo ? imageMap[s.styleNo] || null : null,
+        // NOTE: flatten to a plain string URL — frontend <img src> expects a
+        // string; the raw StyleImageResult object renders as [object Object].
+        _image: s.styleNo ? imageMap[s.styleNo]?.url || null : null,
+        _imageSource: s.styleNo ? imageMap[s.styleNo]?.source || null : null,
         gsm: s.gsm,
         width: s.width,
         lotNumber: s.lotNumber,

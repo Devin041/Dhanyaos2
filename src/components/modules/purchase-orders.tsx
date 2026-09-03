@@ -89,6 +89,23 @@ interface CounterpartyOption {
   sub: string            // contact person or extra info
 }
 
+interface POItem {
+  id?: string
+  itemType?: string
+  name?: string | null
+  fabricName?: string | null
+  color?: string | null
+  size?: string | null
+  quantity: number
+  unit?: string
+  ratePerUnit: number
+  totalAmount?: number
+  styleNo?: string | null
+  styleName?: string | null
+  receivedQty?: number
+  status?: string
+}
+
 interface PurchaseOrder {
   id: string
   poNumber: string
@@ -110,6 +127,12 @@ interface PurchaseOrder {
   receivedQty: number
   createdAt: string
   updatedAt: string
+  // Product identity (U1) — flattened string URL from the API
+  styleNo?: string | null
+  styleName?: string | null
+  _image?: string | null
+  _imageSource?: string | null
+  items?: POItem[]
 }
 
 // PODetail is the same shape as PurchaseOrder — kept as a type alias for
@@ -894,7 +917,7 @@ export function PurchaseOrders() {
               <TableRow className="border-border/50 hover:bg-transparent">
                 <TableHead className="text-xs font-semibold text-muted-foreground">PO No</TableHead>
                 <TableHead className="text-xs font-semibold text-muted-foreground">Supplier</TableHead>
-                <TableHead className="text-xs font-semibold text-muted-foreground">Fabric</TableHead>
+                <TableHead className="text-xs font-semibold text-muted-foreground">Fabric / Product</TableHead>
                 <TableHead className="text-xs font-semibold text-muted-foreground text-right">Qty</TableHead>
                 <TableHead className="text-xs font-semibold text-muted-foreground hidden md:table-cell">Unit</TableHead>
                 <TableHead className="text-xs font-semibold text-muted-foreground text-right hidden lg:table-cell">Rate</TableHead>
@@ -986,9 +1009,35 @@ export function PurchaseOrders() {
                           })()}
                         </div>
                       </TableCell>
-                      <TableCell className="py-3 text-xs text-foreground/80">{po.fabricName}</TableCell>
+                      <TableCell className="py-3 text-xs text-foreground/80">
+                        <div className="flex items-center gap-2 min-w-0">
+                          {(po as any)._image ? (
+                            <img
+                              src={(po as any)._image}
+                              alt={(po as any).styleNo || po.fabricName}
+                              className="h-7 w-7 rounded-md object-cover border border-border/50 shrink-0"
+                            />
+                          ) : (
+                            <div className="h-7 w-7 rounded-md bg-muted/40 border border-border/30 shrink-0" />
+                          )}
+                          <div className="min-w-0">
+                            <p className="truncate">{po.fabricName}</p>
+                            {(po as any).styleNo && (
+                              <p className="text-[10px] text-primary font-medium">{(po as any).styleNo}{(po as any).styleName ? ` · ${(po as any).styleName}` : ''}</p>
+                            )}
+                          </div>
+                        </div>
+                      </TableCell>
                       <TableCell className="py-3 text-xs text-right tabular-nums text-foreground/80">
-                        {po.quantity}
+                        {(() => {
+                          // U2: list qty = sum of line items (multi-item POs),
+                          // falling back to the legacy header quantity
+                          const items = (po as any).items || []
+                          const qty = items.length > 0
+                            ? items.reduce((s: number, it: any) => s + (Number(it.quantity) || 0), 0)
+                            : po.quantity
+                          return qty.toLocaleString('en-IN')
+                        })()}
                         <span className="text-muted-foreground md:hidden"> {po.unit}</span>
                       </TableCell>
                       <TableCell className="py-3 text-xs text-muted-foreground hidden md:table-cell">{po.unit}</TableCell>
@@ -1688,6 +1737,39 @@ export function PurchaseOrders() {
                 </Badge>
               </div>
 
+              {/* U1: Product identity card — WHICH product this PO was raised for */}
+              {(selectedPO as any).styleNo && (
+                <Card className="glass-card border-border/40 p-4">
+                  <p className="text-xs font-semibold text-muted-foreground mb-2 flex items-center gap-1.5">
+                    <Package className="h-3 w-3" /> Product
+                  </p>
+                  <div className="flex items-center gap-3">
+                    {(selectedPO as any)._image ? (
+                      <img
+                        src={(selectedPO as any)._image}
+                        alt={(selectedPO as any).styleNo || 'product'}
+                        className="h-12 w-12 rounded-lg object-cover border border-border/50 shrink-0"
+                      />
+                    ) : (
+                      <div className="h-12 w-12 rounded-lg bg-muted/50 border border-border/30 flex items-center justify-center shrink-0">
+                        <Package className="h-5 w-5 text-muted-foreground/50" />
+                      </div>
+                    )}
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-foreground truncate">
+                        {(selectedPO as any).styleName || (selectedPO as any).styleNo}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Style: <span className="font-medium text-primary">{(selectedPO as any).styleNo}</span>
+                        {(selectedPO as any)._imageSource && (
+                          <span className="text-muted-foreground/70"> · photo: {(selectedPO as any)._imageSource}</span>
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                </Card>
+              )}
+
               {/* PO Info Grid */}
               <div className="grid grid-cols-2 gap-3">
                 <InfoBlock label="PO Number" value={selectedPO.poNumber} />
@@ -1836,27 +1918,38 @@ export function PurchaseOrders() {
                 </div>
               </Card>
 
-              {/* Quantity Progress */}
+              {/* Quantity Progress — U2 fix: use the SUM of line items when
+                  present. The legacy header `quantity` field only carries the
+                  first line's qty on older POs (e.g. 780) while `receivedQty`
+                  is the total across lines (3,113) — that division produced
+                  the infamous "399% received". */}
               <Card className="glass-card border-border/40 p-4">
                 <p className="text-xs font-semibold text-muted-foreground mb-3 flex items-center gap-1.5">
                   <PackageCheck className="h-3 w-3" /> Quantity
                 </p>
-                <div className="flex items-end justify-between mb-2">
-                  <div>
-                    <p className="text-2xl font-bold text-foreground tabular-nums">{selectedPO.receivedQty}</p>
-                    <p className="text-xs text-muted-foreground">of {selectedPO.quantity} {selectedPO.unit} ordered</p>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    {selectedPO.quantity > 0
-                      ? Math.round((selectedPO.receivedQty / selectedPO.quantity) * 100)
-                      : 0}
-                    % received
-                  </p>
-                </div>
-                <Progress
-                  value={selectedPO.quantity > 0 ? (selectedPO.receivedQty / selectedPO.quantity) * 100 : 0}
-                  className="h-2 bg-muted/50"
-                />
+                {(() => {
+                  const items = (selectedPO as any).items || []
+                  const totalOrdered = items.length > 0
+                    ? items.reduce((s: number, it: any) => s + (Number(it.quantity) || 0), 0)
+                    : (selectedPO.quantity || 0)
+                  const receivedQty = Number(selectedPO.receivedQty) || 0
+                  const pct = totalOrdered > 0 ? Math.min(100, Math.round((receivedQty / totalOrdered) * 100)) : 0
+                  return (
+                    <>
+                      <div className="flex items-end justify-between mb-2">
+                        <div>
+                          <p className="text-2xl font-bold text-foreground tabular-nums">{receivedQty.toLocaleString('en-IN')}</p>
+                          <p className="text-xs text-muted-foreground">
+                            of {totalOrdered.toLocaleString('en-IN')} {selectedPO.unit} ordered
+                            {items.length > 1 && <span className="text-muted-foreground/70"> · {items.length} lines</span>}
+                          </p>
+                        </div>
+                        <p className="text-xs text-muted-foreground">{pct}% received</p>
+                      </div>
+                      <Progress value={pct} className="h-2 bg-muted/50" />
+                    </>
+                  )
+                })()}
                 {selectedPO.expectedDelivery && (
                   <div className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
                     <CalendarDays className="h-3 w-3" />

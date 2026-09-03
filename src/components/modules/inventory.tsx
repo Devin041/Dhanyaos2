@@ -70,6 +70,8 @@ interface WIPJob {
   orderNo: string | null
   styleNo: string
   styleName: string
+  color?: string | null
+  _image?: string | null
   targetQty: number
   completedQty: number
   stage: string
@@ -617,11 +619,18 @@ export function InventoryModule() {
                       <Card key={job.id} className="glass-card border-border/50">
                         <CardContent className="p-3 space-y-2">
                           <div className="flex items-start justify-between">
-                            <div className="min-w-0 flex-1">
-                              <p className="text-sm font-medium text-primary">{job.jobNo}</p>
-                              <p className="truncate text-xs text-muted-foreground">
-                                {job.styleName} ({job.styleNo})
-                              </p>
+                            <div className="min-w-0 flex-1 flex items-center gap-2">
+                              {job._image ? (
+                                <img src={job._image} alt={job.styleNo} className="h-9 w-9 rounded-md object-cover border border-border/50 shrink-0" />
+                              ) : (
+                                <div className="h-9 w-9 rounded-md bg-muted/40 border border-border/30 shrink-0" />
+                              )}
+                              <div className="min-w-0">
+                                <p className="text-sm font-medium text-primary">{job.jobNo}</p>
+                                <p className="truncate text-xs text-muted-foreground">
+                                  {job.styleName} ({job.styleNo}){job.color ? ` · ${job.color}` : ''}
+                                </p>
+                              </div>
                             </div>
                             <Badge variant="outline" className="text-[10px] shrink-0">
                               {job.stage}
@@ -700,9 +709,16 @@ export function InventoryModule() {
                               {job.jobNo}
                             </TableCell>
                             <TableCell>
-                              <div>
-                                <p className="text-sm font-medium">{job.styleName}</p>
-                                <p className="text-xs text-muted-foreground">{job.styleNo}</p>
+                              <div className="flex items-center gap-2">
+                                {job._image ? (
+                                  <img src={job._image} alt={job.styleNo} className="h-8 w-8 rounded-md object-cover border border-border/50 shrink-0" />
+                                ) : (
+                                  <div className="h-8 w-8 rounded-md bg-muted/40 border border-border/30 shrink-0" />
+                                )}
+                                <div className="min-w-0">
+                                  <p className="text-sm font-medium truncate">{job.styleName}</p>
+                                  <p className="text-xs text-muted-foreground">{job.styleNo}{job.color ? ` · ${job.color}` : ''}</p>
+                                </div>
                               </div>
                             </TableCell>
                             <TableCell className="hidden md:table-cell">

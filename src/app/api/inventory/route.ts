@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabase-db'
 import { NextRequest, NextResponse } from 'next/server'
+import { batchResolveStyleImages } from '@/lib/style-image'
 
 // ─── GET: Full inventory overview (raw materials + finished goods + WIP) ──
 export async function GET() {
@@ -50,6 +51,14 @@ export async function GET() {
       }
     }
 
+    // U5 FIX: resolve product images for FG + WIP rows (flattened string URLs
+    // so <img src> works — the raw resolver returns {url, source} objects).
+    const invStyleNos = [...new Set([
+      ...finishedGoods.map((fg: any) => fg.styleNo),
+      ...wipJobs.map((j: any) => j.styleNo),
+    ].filter(Boolean))] as string[]
+    const invImageMap = invStyleNos.length > 0 ? await batchResolveStyleImages(invStyleNos) : {}
+
     // Calculate WIP value estimate
     const avgUnitCost =
       finishedGoods.length > 0
@@ -96,6 +105,7 @@ export async function GET() {
         unitCost: fg.unitCost,
         totalValue: fg.totalValue,
         status: fg.status,
+        _image: fg.styleNo ? invImageMap[fg.styleNo]?.url || null : null,
         createdAt: fg.createdAt,
         updatedAt: fg.updatedAt,
       })),
@@ -106,12 +116,14 @@ export async function GET() {
         orderNo: job.salesOrderId ? linkedOrders[job.salesOrderId] || null : null,
         styleNo: job.styleNo,
         styleName: job.styleName,
+        color: job.color || null,
         targetQty: job.targetQty,
         completedQty: job.completedQty,
         stage: job.stage,
         startDate: job.startDate,
         endDate: job.endDate || null,
         status: job.status,
+        _image: job.styleNo ? invImageMap[job.styleNo]?.url || null : null,
       })),
       stats: {
         totalRawMaterialValue,

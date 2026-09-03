@@ -1,6 +1,7 @@
 import { supabase } from '@/lib/supabase-db'
 import { NextRequest, NextResponse } from 'next/server'
 import { format } from 'date-fns'
+import { batchResolveStyleImages } from '@/lib/style-image'
 
 // ─── GET: Single PO with supplier/vendor details + universal line items ────
 export async function GET(
@@ -48,6 +49,13 @@ export async function GET(
       .eq('purchaseOrderId', id)
       .order('createdAt', { ascending: true })
 
+    // U1: product identity + image (header styleNo, falling back to the first
+    // line item that carries one) — flattened string URL for <img src>.
+    const effStyleNo = po.styleNo || (items || []).find((it: any) => it.styleNo)?.styleNo || null
+    const effStyleName = po.styleName || (items || []).find((it: any) => it.styleName)?.styleName || null
+    const imgRes = effStyleNo ? await batchResolveStyleImages([effStyleNo]) : null
+    const img = imgRes ? imgRes[effStyleNo!] : null
+
     return NextResponse.json({
       id: po.id,
       poNumber: po.poNumber,
@@ -78,6 +86,11 @@ export async function GET(
       netAmount: po.netAmount || 0,
       // Universal line items (each item has its own type)
       items: items || [],
+      // U1: product identity (flattened string URL — not the raw resolver object)
+      styleNo: effStyleNo,
+      styleName: effStyleName,
+      _image: img?.url || null,
+      _imageSource: img?.source || null,
       expectedDelivery: po.expectedDelivery
         ? format(new Date(po.expectedDelivery), 'yyyy-MM-dd')
         : null,
