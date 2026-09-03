@@ -107,6 +107,14 @@ export async function GET(request: NextRequest) {
 
 // --- POST /api/vendor-bills ------------------------------------------------
 // Create a new vendor bill (manual or auto-generated from stage tracking)
+//
+// F4 fix — GST computation:
+//   taxable base = totalQty × perPieceRate (when both given) else the entered
+//   amount is treated as the PRE-TAX (taxable) value.
+//   IntraState → CGST + SGST (half each) | InterState → IGST
+//   Unregistered vendor (no GSTIN) → tax forced to 0 (cannot charge GST, no ITC).
+
+const round2 = (n: number) => Math.round((Number(n) || 0) * 100) / 100
 
 export async function POST(request: NextRequest) {
   try {
@@ -118,17 +126,12 @@ export async function POST(request: NextRequest) {
       totalQty,
       perPieceRate,
       totalAmount,
+      gstType: gstTypeRaw,
+      gstPercent: gstPercentRaw,
       billDate,
       dueDate,
       notes,
     } = body
-
-    if (!vendorId || !totalAmount || totalAmount <= 0) {
-      return NextResponse.json(
-        { error: 'Vendor ID and valid total amount are required' },
-        { status: 400 }
-      )
-    }
 
     // Validate vendor
     const { data: vendor, error: vendorErr } = await supabase
@@ -139,6 +142,40 @@ export async function POST(request: NextRequest) {
     if (vendorErr || !vendor) {
       return NextResponse.json({ error: 'Vendor not found' }, { status: 400 })
     }
+
+    // ── GST computation (F4) ──
+    const qty = Number(totalQty) || 0
+    const rate = Number(perPieceRate) || 0
+    // Taxable base: qty × rate wins when both present (spec), else entered amount
+    const taxableAmount = qty > 0 && rate > 0 ? round2(qty * rate) : round2(totalAmount)
+
+    if (!vendorId || !taxableAmount || taxableAmount <= 0) {
+      return NextResponse.json(
+        { error: 'Vendor ID and a valid taxable amount (or qty × rate) are required' },
+        { status: 400 }
+      )
+    }
+
+    // Unregistered vendor cannot charge GST (no GSTIN → no tax invoice, no ITC)
+    const vendorRegistered = !!(vendor.gstNumber && String(vendor.gstNumber).trim())
+    const gstType: string = gstTypeRaw || 'IntraState'
+    let gstPercent = Number(gstPercentRaw)
+    if (Number.isNaN(gstPercent)) gstPercent = 5 // job-work on apparel = 5%
+    if (!vendorRegistered) gstPercent = 0
+    if (gstPercent < 0) gstPercent = 0
+
+    let cgstAmount = 0, sgstAmount = 0, igstAmount = 0
+    if (gstPercent > 0) {
+      if (gstType === 'InterState') {
+        igstAmount = round2((taxableAmount * gstPercent) / 100)
+      } else {
+        // IntraState (default): CGST + SGST split
+        cgstAmount = round2((taxableAmount * gstPercent) / 200)
+        sgstAmount = round2((taxableAmount * gstPercent) / 200)
+      }
+    }
+    const totalGst = round2(cgstAmount + sgstAmount + igstAmount)
+    const computedTotal = round2(taxableAmount + totalGst)
 
     // If linked to stage tracking, validate it
     if (stageTrackingId) {
@@ -182,9 +219,16 @@ export async function POST(request: NextRequest) {
         vendorId,
         stageTrackingId: stageTrackingId || null,
         description: description || `${vendor.vendorName} — Bill`,
-        totalQty: totalQty ? Number(totalQty) : 0,
-        perPieceRate: perPieceRate ? Number(perPieceRate) : 0,
-        totalAmount: Number(totalAmount),
+        totalQty: qty,
+        perPieceRate: rate,
+        gstType,
+        gstPercent,
+        taxableAmount,
+        cgstAmount,
+        sgstAmount,
+        igstAmount,
+        totalGst,
+        totalAmount: computedTotal,
         paidAmount: 0,
         billDate: billDate ? new Date(billDate).toISOString() : now,
         dueDate: effectiveDueDate,
@@ -201,8 +245,15 @@ export async function POST(request: NextRequest) {
     // Enrich with vendor and payments
     const enrichedBill = {
       ...bill,
-      vendor: { id: vendor.id, vendorName: vendor.vendorName },
+      vendor: { id: vendor.id, vendorName: vendor.vendorName, gstNumber: vendor.gstNumber || null },
       payments: [],
+      _gst: {
+        vendorRegistered,
+        gstApplied: totalGst > 0,
+        note: vendorRegistered
+          ? (totalGst > 0 ? `GST ${gstPercent}% ${gstType === 'InterState' ? 'IGST' : 'CGST+SGST'} applied` : 'Exempt / 0% bill')
+          : 'Vendor has no GSTIN — recorded without GST (no ITC)',
+      },
     }
 
     return NextResponse.json({ bill: enrichedBill }, { status: 201 })

@@ -60,6 +60,8 @@ interface Vendor {
   phone: string | null
   email: string | null
   address: string | null
+  gstNumber: string | null
+  state: string | null
   specialization: string
   paymentTerms: number
   status: string
@@ -77,7 +79,7 @@ interface VendorBill {
   id: string
   billNo: string
   vendorId: string
-  vendor: { id: string; vendorName: string; paymentTerms: number }
+  vendor: { id: string; vendorName: string; paymentTerms: number; gstNumber?: string | null }
   stageTrackingId: string | null
   stageTracking: {
     stageName: string
@@ -86,6 +88,13 @@ interface VendorBill {
   description: string
   totalQty: number
   perPieceRate: number
+  gstType: string
+  gstPercent: number
+  taxableAmount: number
+  cgstAmount: number
+  sgstAmount: number
+  igstAmount: number
+  totalGst: number
   totalAmount: number
   paidAmount: number
   billDate: string
@@ -317,6 +326,7 @@ function BillRow({
 }) {
   const balance = bill.totalAmount - bill.paidAmount
   const isExpanded = expandedBillId === bill.id
+  const hasGst = (bill.totalGst || 0) > 0
 
   return (
     <>
@@ -324,12 +334,21 @@ function BillRow({
         className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[auto_1fr_1fr_auto_auto_auto_auto_auto_1fr_auto] gap-x-4 gap-y-2 items-center px-4 py-3 border-b border-border/50 hover:bg-muted/30 transition-colors cursor-pointer"
         onClick={() => onToggleExpand(bill.id)}
       >
-        {/* Bill No */}
+        {/* Bill No + GST badge */}
         <div className="flex items-center gap-2 min-w-0">
           <FileText className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
           <span className="text-xs font-mono font-semibold text-foreground truncate">
             {bill.billNo}
           </span>
+          {hasGst ? (
+            <Badge variant="outline" className="text-[9px] px-1 py-0 bg-primary/10 text-primary border-primary/20 shrink-0">
+              {bill.gstType === 'InterState' ? `IGST ${bill.gstPercent}%` : `GST ${bill.gstPercent}%`}
+            </Badge>
+          ) : (
+            <Badge variant="outline" className="text-[9px] px-1 py-0 bg-muted/50 text-muted-foreground border-border/50 shrink-0">
+              No GST
+            </Badge>
+          )}
         </div>
 
         {/* Vendor */}
@@ -342,9 +361,12 @@ function BillRow({
           <p className="text-xs text-muted-foreground truncate">{bill.description || '—'}</p>
         </div>
 
-        {/* Amount */}
+        {/* Amount (total incl GST, taxable below) */}
         <div className="hidden lg:block text-right">
           <p className="text-xs font-semibold text-foreground">{formatCurrency(bill.totalAmount)}</p>
+          {(bill.taxableAmount || 0) > 0 && (bill.totalGst || 0) > 0 && (
+            <p className="text-[10px] text-muted-foreground">+{formatCurrency(bill.totalGst)} GST on {formatCurrency(bill.taxableAmount)}</p>
+          )}
         </div>
 
         {/* Paid */}
@@ -430,6 +452,37 @@ function BillRow({
             <Receipt className="h-3 w-3" />
             Payment History
           </p>
+          {(bill.totalGst || 0) > 0 && (
+            <div className="mb-3 rounded-md border border-border/50 bg-card/50 px-3 py-2 text-xs">
+              <p className="text-[10px] font-semibold uppercase text-muted-foreground mb-1">GST Breakdown</p>
+              <div className="flex justify-between text-muted-foreground">
+                <span>Taxable value</span>
+                <span className="tabular-nums font-medium text-foreground">{formatCurrency(bill.taxableAmount)}</span>
+              </div>
+              {(bill.cgstAmount || 0) > 0 && (
+                <div className="flex justify-between text-muted-foreground">
+                  <span>CGST {bill.gstPercent / 2}%</span>
+                  <span className="tabular-nums font-medium text-foreground">{formatCurrency(bill.cgstAmount)}</span>
+                </div>
+              )}
+              {(bill.sgstAmount || 0) > 0 && (
+                <div className="flex justify-between text-muted-foreground">
+                  <span>SGST {bill.gstPercent / 2}%</span>
+                  <span className="tabular-nums font-medium text-foreground">{formatCurrency(bill.sgstAmount)}</span>
+                </div>
+              )}
+              {(bill.igstAmount || 0) > 0 && (
+                <div className="flex justify-between text-muted-foreground">
+                  <span>IGST {bill.gstPercent}%</span>
+                  <span className="tabular-nums font-medium text-foreground">{formatCurrency(bill.igstAmount)}</span>
+                </div>
+              )}
+              <div className="flex justify-between font-semibold border-t border-border/40 mt-1 pt-1">
+                <span>Bill total</span>
+                <span className="tabular-nums text-primary">{formatCurrency(bill.totalAmount)}</span>
+              </div>
+            </div>
+          )}
           {bill.payments.length === 0 ? (
             <p className="text-xs text-muted-foreground py-2">No payments recorded yet.</p>
           ) : (
@@ -537,6 +590,8 @@ export function VendorsModule() {
     totalQty: '',
     perPieceRate: '',
     totalAmount: '',
+    gstType: 'IntraState',
+    gstPercent: '5',
     billDate: todayISO(),
     dueDate: '',
     notes: '',
@@ -738,6 +793,8 @@ export function VendorsModule() {
       totalQty: '',
       perPieceRate: '',
       totalAmount: '',
+      gstType: 'IntraState',
+      gstPercent: '5',
       billDate: todayISO(),
       dueDate: '',
       notes: '',
@@ -751,9 +808,21 @@ export function VendorsModule() {
   const autoAmount = billQty * billRate
   const selectedVendorForBill = vendors.find((v) => v.id === billForm.vendorId)
 
+  // Taxable base (F4): qty × rate wins when both present, else the entered
+  // amount is the PRE-TAX value. GST is computed on top of it.
   const effectiveBillAmount = billForm.totalAmount
     ? parseFloat(billForm.totalAmount) || 0
     : autoAmount
+
+  // ── GST preview (F4) ──
+  const vendorRegisteredForBill = !!(selectedVendorForBill?.gstNumber || '').trim()
+  const effGstType = billForm.gstType
+  const effGstPercent = vendorRegisteredForBill ? parseFloat(billForm.gstPercent) || 0 : 0
+  const previewCgst = effGstPercent > 0 && effGstType !== 'InterState' ? Math.round((effectiveBillAmount * effGstPercent) / 200 * 100) / 100 : 0
+  const previewSgst = previewCgst
+  const previewIgst = effGstPercent > 0 && effGstType === 'InterState' ? Math.round((effectiveBillAmount * effGstPercent) / 100 * 100) / 100 : 0
+  const previewGst = Math.round((previewCgst + previewSgst + previewIgst) * 100) / 100
+  const previewBillTotal = Math.round((effectiveBillAmount + previewGst) * 100) / 100
 
   // Auto-calc due date when vendor or bill date changes
   useEffect(() => {
@@ -785,7 +854,7 @@ export function VendorsModule() {
 
   const handleCreateBill = async () => {
     if (!billForm.vendorId || !effectiveBillAmount) {
-      toast.error('Please fill in vendor and amount')
+      toast.error('Please fill in vendor and taxable amount (or qty × rate)')
       return
     }
     setCreateBillSaving(true)
@@ -795,7 +864,11 @@ export function VendorsModule() {
         description: billForm.description.trim() || null,
         totalQty: billQty || 0,
         perPieceRate: billRate || 0,
+        // F4: the amount sent is the TAXABLE (pre-tax) value — the API
+        // computes CGST/SGST/IGST on top and stores the GST-inclusive total.
         totalAmount: effectiveBillAmount,
+        gstType: effGstType,
+        gstPercent: effGstPercent,
         billDate: billForm.billDate || todayISO(),
         dueDate: billForm.dueDate || null,
         notes: billForm.notes.trim() || null,
@@ -1760,9 +1833,9 @@ export function VendorsModule() {
               </div>
             </div>
 
-            {/* Total Amount (auto-calc) */}
+            {/* Total Amount (auto-calc, pre-tax) */}
             <div className="space-y-2">
-              <Label className="text-xs">Total Amount (₹)</Label>
+              <Label className="text-xs">Taxable Amount (₹, pre-GST)</Label>
               <div className="relative">
                 <IndianRupee className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
@@ -1782,6 +1855,92 @@ export function VendorsModule() {
                   Auto: {billQty} × {formatCurrency(billRate)} = {formatCurrency(autoAmount)}
                 </p>
               )}
+            </div>
+
+            {/* ── GST section (F4 fix) ── */}
+            <div className="rounded-lg border border-border/60 bg-muted/20 p-3 space-y-3">
+              <div className="flex items-center gap-2">
+                <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-primary/10 text-primary border-primary/20">
+                  GST
+                </Badge>
+                <p className="text-xs font-medium">Bill Tax</p>
+              </div>
+
+              {billForm.vendorId && !vendorRegisteredForBill && (
+                <p className="text-[11px] leading-relaxed text-amber-500 bg-amber-500/10 border border-amber-500/20 rounded-md px-2.5 py-2">
+                  Vendor has no GSTIN — this bill is recorded <b>without GST</b> (no input tax credit on it).
+                </p>
+              )}
+              {billForm.vendorId && vendorRegisteredForBill && (
+                <p className="text-[10px] text-muted-foreground">
+                  GSTIN: <span className="font-mono">{selectedVendorForBill?.gstNumber}</span>
+                </p>
+              )}
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Supply Type</Label>
+                  <Select
+                    value={billForm.gstType}
+                    onValueChange={(v) => setBillForm({ ...billForm, gstType: v })}
+                    disabled={!vendorRegisteredForBill}
+                  >
+                    <SelectTrigger className="bg-muted/50 border-border h-9">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="IntraState">Intra-State (CGST+SGST)</SelectItem>
+                      <SelectItem value="InterState">Inter-State (IGST)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">GST Rate</Label>
+                  <Select
+                    value={billForm.gstPercent}
+                    onValueChange={(v) => setBillForm({ ...billForm, gstPercent: v })}
+                    disabled={!vendorRegisteredForBill}
+                  >
+                    <SelectTrigger className="bg-muted/50 border-border h-9">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {[0, 5, 12, 18, 28].map((p) => (
+                        <SelectItem key={p} value={String(p)}>{p}%</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              {/* Computed preview */}
+              <div className="space-y-1 text-xs border-t border-border/40 pt-2">
+                <div className="flex justify-between text-muted-foreground">
+                  <span>Taxable value</span>
+                  <span className="tabular-nums font-medium text-foreground">{formatCurrency(effectiveBillAmount)}</span>
+                </div>
+                {effGstType === 'InterState' ? (
+                  <div className="flex justify-between text-muted-foreground">
+                    <span>+ IGST {effGstPercent}%</span>
+                    <span className="tabular-nums font-medium text-foreground">{formatCurrency(previewIgst)}</span>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex justify-between text-muted-foreground">
+                      <span>+ CGST {effGstPercent / 2}%</span>
+                      <span className="tabular-nums font-medium text-foreground">{formatCurrency(previewCgst)}</span>
+                    </div>
+                    <div className="flex justify-between text-muted-foreground">
+                      <span>+ SGST {effGstPercent / 2}%</span>
+                      <span className="tabular-nums font-medium text-foreground">{formatCurrency(previewSgst)}</span>
+                    </div>
+                  </>
+                )}
+                <div className="flex justify-between font-semibold pt-1 border-t border-border/40">
+                  <span>Bill Total (incl. GST)</span>
+                  <span className="tabular-nums text-primary">{formatCurrency(previewBillTotal)}</span>
+                </div>
+              </div>
             </div>
 
             {/* Bill Date + Due Date */}
