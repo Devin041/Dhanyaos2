@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabase, isMissingTableError } from '@/lib/supabase-db'
 
 // ─── GET: List bank accounts with balances ──────────────────────────────────
+// Balance is DERIVED: openingBalance + Σ Transaction.credit − Σ Transaction.debit
+// per account (single source of truth — money movements live in the cash book).
 export async function GET() {
   try {
     const { data: accounts, error } = await supabase
@@ -16,7 +18,26 @@ export async function GET() {
       throw error
     }
 
-    const all = accounts || []
+    // Aggregate cash-book movements per account (column may not exist yet
+    // before PHASE-A-MIGRATION.sql — degrade gracefully)
+    let movementMap = new Map<string, number>()
+    try {
+      const { data: txns, error: txnErr } = await supabase
+        .from('Transaction')
+        .select('bankAccountId, type, amount')
+        .not('bankAccountId', 'is', null)
+      if (!txnErr && txns) {
+        for (const t of txns as any[]) {
+          const cur = movementMap.get(t.bankAccountId) || 0
+          movementMap.set(t.bankAccountId, cur + (t.type === 'Credit' ? (t.amount || 0) : -(t.amount || 0)))
+        }
+      }
+    } catch { /* pre-migration */ }
+
+    const all = (accounts || []).map((a: any) => {
+      const derived = (a.openingBalance || 0) + (movementMap.get(a.id) || 0)
+      return { ...a, currentBalance: Math.round(derived * 100) / 100 }
+    })
     const totalBalance = all.reduce((s: number, a: any) => s + (a.currentBalance || 0), 0)
 
     return NextResponse.json({

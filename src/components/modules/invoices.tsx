@@ -100,8 +100,22 @@ export function InvoiceModule() {
     { styleNo: '', styleName: '', hsnCode: '6104', quantity: 0, unit: 'pcs', ratePerUnit: 0, discountPercent: 0, taxableAmount: 0, gstAmount: 0, totalAmount: 0 },
   ])
 
-  // Payment form
-  const [payForm, setPayForm] = useState({ amount: '', paymentMode: 'Cash', referenceNo: '', notes: '' })
+  // Payment form — Phase A: bank account, cheque details, TDS by customer,
+  // and short-payment adjustment (write-off) so invoices can fully settle.
+  const [payForm, setPayForm] = useState({ amount: '', paymentMode: 'Cash', referenceNo: '', notes: '', bankAccountId: '', chequeNo: '', chequeBank: '', tdsAmount: '', adjustmentAmount: '', adjustmentNote: '' })
+  const [bankAccounts, setBankAccounts] = useState<Array<{ id: string; accountName: string; currentBalance: number; accountType: string }>>([])
+
+  const fetchBankAccounts = useCallback(async () => {
+    try {
+      const res = await fetch('/api/bank-accounts')
+      if (res.ok) {
+        const d = await res.json()
+        setBankAccounts(d.accounts || [])
+      }
+    } catch { /* banking optional here */ }
+  }, [])
+
+  useEffect(() => { fetchBankAccounts() }, [fetchBankAccounts])
 
   const fetchInvoices = useCallback(async () => {
     try {
@@ -233,6 +247,8 @@ export function InvoiceModule() {
       return
     }
     try {
+      const isCheque = payForm.paymentMode === 'Cheque'
+      const isCash = payForm.paymentMode === 'Cash'
       const res = await fetch('/api/payments', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -242,22 +258,35 @@ export function InvoiceModule() {
           paymentMode: payForm.paymentMode,
           referenceNo: payForm.referenceNo || undefined,
           notes: payForm.notes || undefined,
+          bankAccountId: !isCash ? (payForm.bankAccountId || undefined) : undefined,
+          tdsAmount: payForm.tdsAmount ? parseFloat(payForm.tdsAmount) : undefined,
+          adjustmentAmount: payForm.adjustmentAmount ? parseFloat(payForm.adjustmentAmount) : undefined,
+          adjustmentNote: payForm.adjustmentNote || undefined,
+          ...(isCheque ? { cheque: { chequeNo: payForm.chequeNo, bankName: payForm.chequeBank || undefined } } : {}),
         }),
       })
+      const data = await res.json()
       if (res.ok) {
-        const data = await res.json()
-        toast.success(`Payment of ${formatINR(parseFloat(payForm.amount))} recorded — Status: ${data.invoiceUpdated?.paymentStatus}`)
+        toast.success(`Payment of ${formatINR(parseFloat(payForm.amount))} recorded — ${data.invoiceUpdated?.paymentStatus}`, {
+          description: [
+            data.glPosted ? `Ledger posted ✓ (${data.journal?.entryNo})` : 'GL pending (migration)',
+            data.cheque ? `Cheque ${data.cheque.chequeNo} in register (In Hand)` : null,
+          ].filter(Boolean).join(' · '),
+        })
         setPayOpen(false)
-        setPayForm({ amount: '', paymentMode: 'Cash', referenceNo: '', notes: '' })
+        setPayForm({ amount: '', paymentMode: 'Cash', referenceNo: '', notes: '', bankAccountId: '', chequeNo: '', chequeBank: '', tdsAmount: '', adjustmentAmount: '', adjustmentNote: '' })
         setSelectedInvoice(null)
         fetchInvoices()
+      } else {
+        toast.error(data.error || 'Failed to record payment')
       }
     } catch { toast.error('Failed to record payment') }
   }
 
   const openPayment = (inv: Invoice) => {
     setSelectedInvoice(inv)
-    setPayForm({ amount: String(inv.totalAmount - inv.paidAmount), paymentMode: 'Cash', referenceNo: '', notes: '' })
+    const outstanding = Math.max(0, inv.totalAmount - inv.paidAmount - ((inv as any).writeOffAmount || 0))
+    setPayForm({ amount: String(outstanding), paymentMode: 'Cash', referenceNo: '', notes: '', bankAccountId: '', chequeNo: '', chequeBank: '', tdsAmount: '', adjustmentAmount: '', adjustmentNote: '' })
     setPayOpen(true)
   }
 
@@ -489,10 +518,37 @@ export function InvoiceModule() {
             <div className="space-y-2"><Label className="text-xs">Payment Mode</Label>
               <Select value={payForm.paymentMode} onValueChange={(v) => setPayForm({ ...payForm, paymentMode: v })}>
                 <SelectTrigger className="bg-muted/50 border-border h-9"><SelectValue /></SelectTrigger>
-                <SelectContent><SelectItem value="Cash">Cash</SelectItem><SelectItem value="UPI">UPI</SelectItem><SelectItem value="Bank Transfer">Bank Transfer</SelectItem><SelectItem value="Cheque">Cheque</SelectItem><SelectItem value="Other">Other</SelectItem></SelectContent>
+                <SelectContent><SelectItem value="Cash">Cash</SelectItem><SelectItem value="UPI">UPI</SelectItem><SelectItem value="Bank Transfer">Bank Transfer</SelectItem><SelectItem value="NEFT">NEFT</SelectItem><SelectItem value="RTGS">RTGS</SelectItem><SelectItem value="Cheque">Cheque</SelectItem></SelectContent>
               </Select>
             </div>
-            <div className="space-y-2"><Label className="text-xs">Reference No</Label><Input placeholder="UPI ref, cheque no..." className="h-9 bg-muted/50 border-border" value={payForm.referenceNo} onChange={(e) => setPayForm({ ...payForm, referenceNo: e.target.value })} /></div>
+            {payForm.paymentMode !== 'Cash' && (
+              <div className="space-y-2"><Label className="text-xs">Bank Account {payForm.paymentMode === 'Cheque' ? '(deposit account)' : '*'}</Label>
+                <Select value={payForm.bankAccountId} onValueChange={(v) => setPayForm({ ...payForm, bankAccountId: v })}>
+                  <SelectTrigger className="bg-muted/50 border-border h-9"><SelectValue placeholder="Select account" /></SelectTrigger>
+                  <SelectContent>
+                    {bankAccounts.filter((a) => a.accountType !== 'Cash' && a.accountType !== 'Petty Cash').map((a) => (
+                      <SelectItem key={a.id} value={a.id}>{a.accountName} ({formatINR(a.currentBalance)})</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            {payForm.paymentMode === 'Cheque' && (
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2"><Label className="text-xs">Cheque No *</Label><Input placeholder="e.g. 445231" className="h-9 bg-muted/50 border-border" value={payForm.chequeNo} onChange={(e) => setPayForm({ ...payForm, chequeNo: e.target.value })} /></div>
+                <div className="space-y-2"><Label className="text-xs">Cheque Bank</Label><Input placeholder="e.g. HDFC" className="h-9 bg-muted/50 border-border" value={payForm.chequeBank} onChange={(e) => setPayForm({ ...payForm, chequeBank: e.target.value })} /></div>
+              </div>
+            )}
+            <div className="space-y-2"><Label className="text-xs">Reference No</Label><Input placeholder="UPI ref, NEFT UTR..." className="h-9 bg-muted/50 border-border" value={payForm.referenceNo} onChange={(e) => setPayForm({ ...payForm, referenceNo: e.target.value })} /></div>
+            <div className="space-y-2"><Label className="text-xs">TDS Deducted by Customer (₹) <span className="text-muted-foreground">— optional, 194C/194Q</span></Label><Input type="number" placeholder="0" className="h-9 bg-muted/50 border-border" value={payForm.tdsAmount} onChange={(e) => setPayForm({ ...payForm, tdsAmount: e.target.value })} /></div>
+            <div className="space-y-2 rounded-lg border border-border/40 bg-muted/20 p-2.5">
+              <Label className="text-xs">Short-payment Adjustment (write-off) <span className="text-muted-foreground">— freight cut, rate diff etc.</span></Label>
+              <div className="grid grid-cols-2 gap-3 mt-1.5">
+                <Input type="number" placeholder="0" className="h-9 bg-muted/50 border-border" value={payForm.adjustmentAmount} onChange={(e) => setPayForm({ ...payForm, adjustmentAmount: e.target.value })} />
+                <Input placeholder="Reason — e.g. freight deducted" className="h-9 bg-muted/50 border-border" value={payForm.adjustmentNote} onChange={(e) => setPayForm({ ...payForm, adjustmentNote: e.target.value })} />
+              </div>
+            </div>
+            <div className="space-y-2"><Label className="text-xs">Notes</Label><Input placeholder="optional" className="h-9 bg-muted/50 border-border" value={payForm.notes} onChange={(e) => setPayForm({ ...payForm, notes: e.target.value })} /></div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setPayOpen(false)}>Cancel</Button>

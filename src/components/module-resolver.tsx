@@ -53,6 +53,9 @@ export const viewLabels: Record<DashboardView, string> = {
   'banking': 'Banking & Cash Management',
   'gst-returns': 'GST Returns',
   'bom': 'Bill of Materials (BOM)',
+  'payments-out': 'Payments Out — Suppliers, Vendors, Broker & Expenses',
+  'chequebook': 'Cheque Book — Register & Lifecycle',
+  'ledger': 'Ledger & Trial Balance',
 }
 
 // ─── Module loader registry (import functions only, NOT evaluated at compile time) ──
@@ -107,6 +110,9 @@ const moduleLoaders: Record<DashboardView, ModuleLoaderFn> = {
   'banking': () => import('@/components/modules/banking').then(m => m.BankingModule),
   'gst-returns': () => import('@/components/modules/gst-returns').then(m => m.GSTReturnsModule),
   'bom': () => import('@/components/modules/bom').then(m => m.BomModule),
+  'payments-out': () => import('@/components/modules/payments-out').then(m => m.PaymentsOutModule),
+  'chequebook': () => import('@/components/modules/chequebook').then(m => m.ChequebookModule),
+  'ledger': () => import('@/components/modules/ledger').then(m => m.LedgerModule),
 }
 
 // ─── In-memory cache for loaded modules ───────────────────────────────────

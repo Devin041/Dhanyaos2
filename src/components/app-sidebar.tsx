@@ -18,6 +18,8 @@ import {
   ShoppingBag,
   Truck,
   Wallet,
+  Banknote,
+  BookCheck,
   Layers,
   Warehouse,
   IndianRupee,
@@ -138,9 +140,14 @@ const navGroups: NavGroup[] = [
     icon: IndianRupee,
     items: [
       { label: 'Accounts', icon: Receipt, view: 'accounts' },
+      { label: 'Payments Out', icon: Banknote, view: 'payments-out' },
+      { label: 'Cheque Book', icon: BookCheck, view: 'chequebook' },
+      { label: 'Ledger & Trial Balance', icon: BookOpen, view: 'ledger' },
       { label: 'Cash Flow', icon: TrendingUp, view: 'cashflow' },
+      { label: 'Banking', icon: Wallet, view: 'banking' },
       { label: 'Reports', icon: BarChart3, view: 'reports' },
       { label: 'GST Reports', icon: FileSpreadsheet, view: 'gst-reports' },
+      { label: 'GST Returns', icon: FileText, view: 'gst-returns' },
     ],
   },
   {

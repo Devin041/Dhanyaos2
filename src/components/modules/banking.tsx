@@ -18,7 +18,7 @@ import {
 } from '@/components/ui/table'
 import {
   Wallet, Plus, RefreshCw, Building2, Banknote, ArrowDownLeft, ArrowUpRight,
-  TrendingUp, TrendingDown, CreditCard,
+  TrendingUp, TrendingDown, CreditCard, ArrowLeftRight, Sparkles,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -61,17 +61,22 @@ export function BankingModule() {
   const [loading, setLoading] = useState(true)
   const [createAcctOpen, setCreateAcctOpen] = useState(false)
   const [txnOpen, setTxnOpen] = useState(false)
+  const [transferOpen, setTransferOpen] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [initializing, setInitializing] = useState(false)
+  const [ledgerReady, setLedgerReady] = useState<boolean | null>(null)
 
   const [acctForm, setAcctForm] = useState({ accountName: '', accountNumber: '', bankName: '', ifscCode: '', accountType: 'Current', openingBalance: '0' })
   const [txnForm, setTxnForm] = useState({ bankAccountId: '', type: 'Credit', amount: '', description: '', paymentMode: 'Cash', chequeNo: '' })
+  const [transferForm, setTransferForm] = useState({ fromAccountId: '', toAccountId: '', amount: '', notes: '' })
 
   const fetchData = useCallback(async () => {
     try {
       setLoading(true)
-      const [acctRes, txnRes] = await Promise.all([
+      const [acctRes, txnRes, glRes] = await Promise.all([
         fetch('/api/bank-accounts'),
         fetch('/api/bank-accounts/transactions?limit=50'),
+        fetch('/api/gl-accounts'),
       ])
       if (acctRes.ok) {
         const d = await acctRes.json()
@@ -83,11 +88,68 @@ export function BankingModule() {
         setTransactions(d.transactions || [])
         setTxnSummary(d.summary || null)
       }
+      if (glRes.ok) {
+        const d = await glRes.json()
+        setLedgerReady(!!(d.totals && d.totals.debit > 0))
+      } else {
+        setLedgerReady(false)
+      }
     } catch { toast.error('Failed to load banking data') }
     finally { setLoading(false) }
   }, [])
 
   useEffect(() => { fetchData() }, [fetchData])
+
+  const handleInitializeLedger = async () => {
+    setInitializing(true)
+    try {
+      const res = await fetch('/api/gl-setup', { method: 'POST' })
+      const d = await res.json()
+      if (res.ok) {
+        toast.success(`Ledger initialized — opening entry ${d.entryNo} posted ✓`, {
+          description: `Receivable ${formatINR(d.summary?.receivableTotal || 0)} · Payable ${formatINR((d.summary?.payableTotal || 0) + (d.summary?.vendorBillTotal || 0))} · Capital ${formatINR(d.summary?.ownerCapital || 0)}`,
+        })
+        setLedgerReady(true)
+        fetchData()
+      } else {
+        toast.error(d.error || 'Failed to initialize ledger')
+      }
+    } catch { toast.error('Failed to initialize ledger') }
+    finally { setInitializing(false) }
+  }
+
+  const handleTransfer = async () => {
+    const amt = parseFloat(transferForm.amount)
+    if (!transferForm.fromAccountId || !transferForm.toAccountId || !amt || amt <= 0) {
+      toast.error('Both accounts and amount required')
+      return
+    }
+    if (transferForm.fromAccountId === transferForm.toAccountId) {
+      toast.error('From and To accounts must differ')
+      return
+    }
+    setSaving(true)
+    try {
+      const res = await fetch('/api/bank-accounts/transfer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fromAccountId: transferForm.fromAccountId,
+          toAccountId: transferForm.toAccountId,
+          amount: amt,
+          notes: transferForm.notes || undefined,
+        }),
+      })
+      const d = await res.json()
+      if (res.ok) {
+        toast.success(`Transfer of ${formatINR(amt)} posted ✓ (${d.journal?.entryNo})`)
+        setTransferOpen(false)
+        setTransferForm({ fromAccountId: '', toAccountId: '', amount: '', notes: '' })
+        fetchData()
+      } else { toast.error(d.error || 'Transfer failed') }
+    } catch { toast.error('Transfer failed') }
+    finally { setSaving(false) }
+  }
 
   const handleCreateAccount = async () => {
     if (!acctForm.accountName) { toast.error('Account name required'); return }
@@ -161,6 +223,13 @@ export function BankingModule() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {ledgerReady === false && (
+            <Button variant="outline" size="sm" className="gap-1.5 border-amber-500/40 text-amber-600 dark:text-amber-400 hover:bg-amber-500/10" onClick={handleInitializeLedger} disabled={initializing}>
+              <Sparkles className="h-3.5 w-3.5" />
+              {initializing ? 'Initializing…' : 'Initialize Ledger'}
+            </Button>
+          )}
+          <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setTransferOpen(true)} disabled={accounts.length < 2}><ArrowLeftRight className="h-3.5 w-3.5" /> Transfer</Button>
           <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setTxnOpen(true)}><Plus className="h-3.5 w-3.5" /> Transaction</Button>
           <Button size="sm" className="gap-1.5 bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => setCreateAcctOpen(true)}><Building2 className="h-3.5 w-3.5" /> Add Account</Button>
         </div>
@@ -275,6 +344,33 @@ export function BankingModule() {
           )}
         </CardContent>
       </Card>
+
+      {/* Transfer Dialog */}
+      <Dialog open={transferOpen} onOpenChange={setTransferOpen}>
+        <DialogContent className="glass-card border-border/50 sm:max-w-md">
+          <DialogHeader><DialogTitle>Transfer Between Accounts</DialogTitle><DialogDescription>Bank ↔ Cash movements post a double-entry journal</DialogDescription></DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2"><Label className="text-xs">From Account *</Label>
+              <Select value={transferForm.fromAccountId} onValueChange={(v) => setTransferForm({ ...transferForm, fromAccountId: v })}>
+                <SelectTrigger className="bg-muted/50 border-border h-9"><SelectValue placeholder="Select account" /></SelectTrigger>
+                <SelectContent>{accounts.map((a) => <SelectItem key={a.id} value={a.id}>{a.accountName} ({formatINR(a.currentBalance)})</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2"><Label className="text-xs">To Account *</Label>
+              <Select value={transferForm.toAccountId} onValueChange={(v) => setTransferForm({ ...transferForm, toAccountId: v })}>
+                <SelectTrigger className="bg-muted/50 border-border h-9"><SelectValue placeholder="Select account" /></SelectTrigger>
+                <SelectContent>{accounts.filter((a) => a.id !== transferForm.fromAccountId).map((a) => <SelectItem key={a.id} value={a.id}>{a.accountName} ({formatINR(a.currentBalance)})</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2"><Label className="text-xs">Amount (₹) *</Label><Input type="number" placeholder="0" className="h-9 bg-muted/50 border-border" value={transferForm.amount} onChange={(e) => setTransferForm({ ...transferForm, amount: e.target.value })} /></div>
+            <div className="space-y-2"><Label className="text-xs">Notes</Label><Input placeholder="e.g. Cash deposit to bank" className="h-9 bg-muted/50 border-border" value={transferForm.notes} onChange={(e) => setTransferForm({ ...transferForm, notes: e.target.value })} /></div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setTransferOpen(false)}>Cancel</Button>
+            <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={handleTransfer} disabled={saving}>{saving ? 'Transferring...' : 'Transfer'}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Create Account Dialog */}
       <Dialog open={createAcctOpen} onOpenChange={setCreateAcctOpen}>
