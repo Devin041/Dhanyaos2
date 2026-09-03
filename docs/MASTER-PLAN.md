@@ -93,9 +93,9 @@
 
 ---
 
-## 4. 🐛 BUG REGISTER — USER's PDF REPORT (U-series, 2026-09-03)
+## 4. 🐛 BUG REGISTER — USER's PDF REPORT (U-series, 2026-09-03) — ✅ ALL FIXED (commit f405cfc)
 
-> Ye 5 bugs user ne UI me dekhe (PDF report). Maine **live API + code dono se root cause verify kiya** — har ek ka exact fix design neeche hai. Ye sab **Phase 0 (bug-fix sprint)** me jayenge.
+> Ye 5 bugs user ne UI me dekhe (PDF report). Root causes live-verified + **Phase 0 sprint me sab FIX ho chuke** (browser-verified on EL-025 data). Fix details neeche reference ke liye.
 
 ### U1 — PO me product photo/identity nahi dikh raha
 **User ka shikaya (original):** "PO me nai dikh rha hai ki jo product ke against me hmne PO release kiya hai vo konsi product hai, yha pe photo fetch nai ho rha hai product ki id ke sath"
@@ -185,7 +185,7 @@
 | # | Bug | Root Cause (verified) | Fix Design | Phase |
 |---|---|---|---|---|
 | **F1** | Payment → ledger post nahi hota | payments POST me AccountTransaction insert **hai hi nahi** | Har business event pe auto-journal: payment in (Dr Bank / Cr Receivable), payment out (Dr Payable / Cr Bank), invoice (Dr Receivable / Cr Sales + Cr GST-out), PO-bill (Dr Stock+ITC / Cr Payable), expense (Dr a/c / Cr Cash). **Double-entry Day-1** | **A** |
-| **F2** | GST net payable galat | cross-utilization missing, sirf same-head minus | IGST liability pehle CGST+SGST credit se kaato, phir IGST credit; formula: `netIGST = max(0, outIGST − inCGST − inSGST − inIGST)` → ₹1,33,938.48 | **B** |
+| **F2** | GST net payable galat | cross-utilization missing, sirf same-head minus | ✅ FIXED in Phase 0 (f405cfc) — Rule 88A sequential allocation live: 1,33,938 | IGST liability pehle CGST+SGST credit se kaato, phir IGST credit; formula: `netIGST = max(0, outIGST − inCGST − inSGST − inIGST)` → ₹1,33,938.48 | **B** |
 | **F3** | P&L target-based hai | revenue=SalesOrder.totalAmount, COGS=target, indirect=0 | 3 views clearly label: TARGET (abhi wala) / ACTUAL (invoice-revenue − actual direct costs) / NET (− indirect). Bina label ke target ko actual mat dikhao | **C** |
 | **F4** | Vendor bill GST 0 | compute nahi hota, excl-GST record | taxable = qty×rate; CGST/SGST ya IGST gstType ke hisab se; registered-vendor flag (unregistered = ITC nahi) | **B** |
 
