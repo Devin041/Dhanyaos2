@@ -54,8 +54,13 @@ CREATE TABLE IF NOT EXISTS "JournalLine" (
   "partyType"      text,                        -- CUSTOMER | SUPPLIER | VENDOR | BROKER | GOVT | OTHER
   "partyId"        text,
   "partyName"      text,
-  memo             text
+  memo             text,
+  "createdAt"      timestamptz NOT NULL DEFAULT now(),
+  "updatedAt"      timestamptz NOT NULL DEFAULT now()
 );
+
+-- (JournalLine createdAt/updatedAt were missing in v1 — patch also included
+--  below in section 7 for databases already migrated)
 
 CREATE INDEX IF NOT EXISTS idx_journalline_entry   ON "JournalLine"("journalEntryId");
 CREATE INDEX IF NOT EXISTS idx_journalline_account ON "JournalLine"("glAccountId");
@@ -164,6 +169,11 @@ ALTER TABLE "Invoice" ADD COLUMN IF NOT EXISTS "writeOffReason" text;
 
 -- Vendor bills: keep status in sync with payments
 -- (paidAmount already exists)
+
+-- JournalLine timestamps (was missing in v1 of this migration — harmless if
+-- you already created the table without them; ADD IF NOT EXISTS covers it)
+ALTER TABLE "JournalLine" ADD COLUMN IF NOT EXISTS "createdAt" timestamptz NOT NULL DEFAULT now();
+ALTER TABLE "JournalLine" ADD COLUMN IF NOT EXISTS "updatedAt" timestamptz NOT NULL DEFAULT now();
 
 -- ─── 8. Seed the SYSTEM chart of accounts (idempotent) ───────────────────
 INSERT INTO "GlAccount" (code, name, "accountType", "subType", "isSystem") VALUES
