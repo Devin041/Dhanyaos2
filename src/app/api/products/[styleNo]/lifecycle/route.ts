@@ -79,14 +79,21 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ styl
     } catch { /* ignore */ }
 
     // ── 5. Sales Orders ──
+    // E2E-test fix: the orders API writes line items to "OrderItem" (see
+    // src/app/api/orders/route.ts). The previous "SalesOrderItem" table does
+    // not exist in the live DB (PGRST205), so this whole section silently
+    // returned zero orders → dispatches/invoices/payments/profit all blank
+    // in the Product Tracker.
     let salesOrders: any[] = []
+    let orderItems: any[] = []
     try {
-      const { data: orderItems, error: oiErr } = await supabase
-        .from('SalesOrderItem')
+      const { data: oiRows, error: oiErr } = await supabase
+        .from('OrderItem')
         .select('id, salesOrderId, styleNo, quantity, unitPrice, unitCost, totalAmount')
         .eq('styleNo', styleNo)
+      orderItems = oiRows || []
 
-      if (!oiErr && orderItems && orderItems.length > 0) {
+      if (!oiErr && orderItems.length > 0) {
         const orderIds = [...new Set(orderItems.map((oi: any) => oi.salesOrderId))]
         const { data: orders } = await supabase
           .from('SalesOrder')
@@ -342,21 +349,37 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ styl
     } catch { /* table may not exist yet */ }
 
     // ── 10. Profit Analysis ──
-    const estimatedCost = costing?.totalCost || 0
-    const sellingPrice = costing?.sellingPrice || 0
+    // E2E-test fix: CostSheet.totalCost can be EITHER a total for targetQty
+    // (this app's convention for total-based sheets) or a per-piece figure
+    // (older legacy sheets). The order line items carry the REAL unitPrice /
+    // unitCost the business traded at — prefer those, fall back to the
+    // costing sheet divided by its targetQty.
     const totalQtySold = salesOrders.reduce((s: number, o: any) => s + (o.productQty || 0), 0)
     const totalRevenue = salesOrders.reduce((s: number, o: any) => s + (o.productRevenue || 0), 0)
     const totalCollected = payments.reduce((s: number, p: any) => s + (p.amount || 0), 0)
     const totalOutstanding = invoices.reduce((s: number, i: any) => s + ((i.totalAmount || 0) - (i.paidAmount || 0)), 0)
 
+    const orderCost = orderItems.reduce((s: number, oi: any) => s + (Number(oi.unitCost) || 0) * (Number(oi.quantity) || 0), 0)
+    const orderSell = orderItems.reduce((s: number, oi: any) => s + (Number(oi.unitPrice) || 0) * (Number(oi.quantity) || 0), 0)
+    const costingTargetQty = Number(costing?.targetQty) || 0
+    const costingPerPiece = costing && costingTargetQty > 0
+      ? (Number(costing.totalCost) || 0) / costingTargetQty
+      : (Number(costing?.totalCost) || 0)
+    const costingSellPerPiece = costing && costingTargetQty > 0
+      ? (Number(costing.sellingPrice) || 0) / costingTargetQty
+      : (Number(costing?.sellingPrice) || 0)
+
+    const estimatedCostPerPiece = totalQtySold > 0 ? orderCost / totalQtySold : costingPerPiece
+    const sellingPricePerPiece = totalQtySold > 0 ? orderSell / totalQtySold : costingSellPerPiece
+
     // Actual cost (from PO data — fabric cost)
     const actualFabricCost = purchaseOrders.reduce((s: number, po: any) => s + (po.totalAmount || 0), 0)
-    const estimatedTotalCost = estimatedCost * totalQtySold
+    const estimatedTotalCost = Math.round(estimatedCostPerPiece * totalQtySold)
 
     const profitAnalysis = {
-      estimatedCostPerPiece: estimatedCost,
-      sellingPricePerPiece: sellingPrice,
-      estimatedMargin: sellingPrice > 0 ? Math.round(((sellingPrice - estimatedCost) / sellingPrice) * 1000) / 10 : 0,
+      estimatedCostPerPiece: Math.round(estimatedCostPerPiece),
+      sellingPricePerPiece: Math.round(sellingPricePerPiece),
+      estimatedMargin: sellingPricePerPiece > 0 ? Math.round(((sellingPricePerPiece - estimatedCostPerPiece) / sellingPricePerPiece) * 1000) / 10 : 0,
       totalQtySold,
       totalRevenue: Math.round(totalRevenue),
       totalCollected: Math.round(totalCollected),
