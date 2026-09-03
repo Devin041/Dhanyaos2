@@ -2033,3 +2033,26 @@ Stage Summary:
 - Sales Order → Purchase Order linkage is fully operational.
 - User can now track: "Is sales order ke liye kitna kharch hua?" by viewing linked POs in the SO detail dialog.
 - Migration applied successfully. All columns in place.
+
+---
+Task ID: MIGRATION-FILE-ACCESS
+Agent: Main Agent (Z.ai Code)
+Task: User reported "Dhanyaos2/PHASE-A-MIGRATION.sql file nahi mil rahi" — make the SQL migration files accessible/downloadable.
+
+Work Log:
+- Verified file EXISTS at project root (11,545 bytes, 192 lines) — issue was access, not existence
+- Root cause: app error banners say "run PHASE-A-MIGRATION.sql in Supabase" but gave no way to GET the file
+- Confirmed GL tables missing in Supabase: GET /api/gl-accounts → "Could not find the table 'public.GlAccount'" (so the user genuinely needs to run this migration)
+- Copied ALL 16 migration SQL files (PHASE-A-MIGRATION, FINANCE-MIGRATION, SUPABASE-MIGRATION-*) to public/migrations/ — now statically served
+- Updated ErrorBanner in ledger.tsx, payments-out.tsx, chequebook.tsx:
+  * Text now includes exact steps: "run PHASE-A-MIGRATION.sql in Supabase SQL Editor (sql.supabase.com → your project → New query)"
+  * Added amber "Download PHASE-A-MIGRATION.sql" button (Download icon) → href="/migrations/PHASE-A-MIGRATION.sql" with download attribute
+- Verified via curl: HTTP 200, 11,545 bytes, content-type application/x-sql
+- Browser E2E: navigated to Ledger & Trial Balance → download link renders [ref=e13] → href correct → click works → page stays functional
+- Lint: 0 errors (2 pre-existing warnings)
+
+Stage Summary:
+- All migration SQL files now downloadable from the app at /migrations/<filename>.sql
+- Ledger / Payments Out / Chequebook error banners show a working download button
+- User flow: see error banner → click Download → open file → paste into Supabase SQL Editor → run → then app Banking → Initialize Ledger
+- Remaining for user: run the SQL in Supabase, then click "Initialize Ledger" in Banking module

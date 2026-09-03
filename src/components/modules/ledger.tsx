@@ -16,7 +16,7 @@ import {
 } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
-  BookOpen, Scale, Users, ChevronDown, CheckCircle2, AlertTriangle, Search, FileText,
+  BookOpen, Scale, Users, ChevronDown, CheckCircle2, AlertTriangle, Search, FileText, Download,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -105,9 +105,19 @@ function ErrorBanner({ message }: { message: string }) {
         <p className="text-xs font-semibold text-amber-700 dark:text-amber-400">Ledger data unavailable</p>
         <p className="text-xs text-muted-foreground break-words">
           {migration
-            ? 'Ledger not initialized yet — ask admin to run PHASE-A-MIGRATION.sql in Supabase'
+            ? 'Ledger not initialized yet — run PHASE-A-MIGRATION.sql in Supabase SQL Editor (sql.supabase.com → your project → New query)'
             : message}
         </p>
+        {migration && (
+          <a
+            href="/migrations/PHASE-A-MIGRATION.sql"
+            download
+            className="mt-2 inline-flex items-center gap-1.5 rounded-md bg-amber-600 px-2.5 py-1.5 text-xs font-medium text-white transition-colors hover:bg-amber-700 focus:outline-none focus:ring-2 focus:ring-amber-500/50"
+          >
+            <Download className="h-3.5 w-3.5" aria-hidden="true" />
+            Download PHASE-A-MIGRATION.sql
+          </a>
+        )}
       </div>
     </div>
   )
