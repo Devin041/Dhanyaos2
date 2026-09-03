@@ -62,6 +62,7 @@ import {
   PolarAngleAxis,
 } from 'recharts'
 import { toast } from 'sonner'
+import { colorNameToClasses, isColorJob } from '@/lib/color-badge'
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -106,6 +107,8 @@ interface ProductionJobRef {
   jobNo: string
   styleNo: string
   styleName: string
+  // Phase 5a — job color (from /api/production) for the row color badge
+  color?: string | null
 }
 
 interface QualityCheck {
@@ -229,6 +232,19 @@ function fmtDate(d: string): string {
   })
 }
 
+// Phase 5a — color pill on QC rows when the linked job's color is known
+// ('Free' suppressed). Classes come from the shared color-badge lib.
+function QcColorBadge({ color }: { color?: string | null }) {
+  if (!isColorJob(color)) return null
+  return (
+    <span
+      className={`inline-flex items-center rounded-full border px-1.5 py-0.5 text-[9px] font-semibold leading-none ${colorNameToClasses(color)}`}
+    >
+      {color}
+    </span>
+  )
+}
+
 function passRateColor(rate: number): string {
   if (rate >= 95) return 'text-emerald-400'
   if (rate >= 85) return 'text-amber-400'
@@ -348,11 +364,12 @@ export function QualityControlModule() {
       const res = await fetch('/api/production')
       if (res.ok) {
         const json = await res.json()
-        setJobs(json.jobs.map((j: { id: string; jobNo: string; styleNo: string; styleName: string }) => ({
+        setJobs(json.jobs.map((j: { id: string; jobNo: string; styleNo: string; styleName: string; color?: string | null }) => ({
           id: j.id,
           jobNo: j.jobNo,
           styleNo: j.styleNo,
           styleName: j.styleName,
+          color: j.color ?? null,
         })))
       }
     } catch (err) {
@@ -718,7 +735,10 @@ export function QualityControlModule() {
                           <tr key={check.id} className="border-b border-border/50 last:border-0 hover:bg-muted/20 transition-colors">
                             <td className="py-2.5 px-4 font-mono text-primary font-medium">{check.checkNo}</td>
                             <td className="py-2.5 px-4">
-                              <p className="font-medium">{check.productionJob.jobNo}</p>
+                              <p className="font-medium flex items-center gap-1.5">
+                                {check.productionJob.jobNo}
+                                <QcColorBadge color={jobs.find((j) => j.id === check.productionJobId)?.color} />
+                              </p>
                               <p className="text-[11px] text-muted-foreground">{check.productionJob.styleName}</p>
                             </td>
                             <td className="py-2.5 px-4">
@@ -783,7 +803,11 @@ export function QualityControlModule() {
                         <div className="flex items-start justify-between">
                           <div>
                             <p className="font-mono text-primary font-medium text-sm">{check.checkNo}</p>
-                            <p className="text-[11px] text-muted-foreground">{check.productionJob.jobNo} · {check.productionJob.styleName}</p>
+                            <p className="text-[11px] text-muted-foreground flex items-center gap-1 flex-wrap">
+                              {check.productionJob.jobNo}
+                              <QcColorBadge color={jobs.find((j) => j.id === check.productionJobId)?.color} />
+                              <span>· {check.productionJob.styleName}</span>
+                            </p>
                           </div>
                           <Badge variant="outline" className={`text-[10px] ${statusBadge(check.status)}`}>{check.status}</Badge>
                         </div>
@@ -1046,7 +1070,10 @@ export function QualityControlModule() {
               <div className="grid grid-cols-2 gap-3 text-xs">
                 <div className="space-y-1">
                   <p className="text-muted-foreground">Production Job</p>
-                  <p className="font-medium">{selected.productionJob.jobNo}</p>
+                  <p className="font-medium flex items-center gap-1.5">
+                    {selected.productionJob.jobNo}
+                    <QcColorBadge color={jobs.find((j) => j.id === selected.productionJobId)?.color} />
+                  </p>
                   <p className="text-muted-foreground">{selected.productionJob.styleName}</p>
                 </div>
                 <div className="space-y-1">

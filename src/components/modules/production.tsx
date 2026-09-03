@@ -17,6 +17,8 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Switch } from '@/components/ui/switch'
 import {
   Select,
   SelectContent,
@@ -29,6 +31,7 @@ import {
   Factory,
   ChevronRight,
   ChevronLeft,
+  ChevronDown,
   AlertTriangle,
   CheckCircle2,
   TrendingUp,
@@ -57,6 +60,7 @@ import {
   Target,
   AlertCircle,
   TrendingDown,
+  Palette,
 } from 'lucide-react'
 import {
   BarChart,
@@ -74,6 +78,7 @@ import {
 import { useDashboardStore } from '@/store/dashboard-store'
 import { toast } from 'sonner'
 import { FabricIssueDialog } from '@/components/modules/production-fabric-issue'
+import { colorNameToClasses, isColorJob } from '@/lib/color-badge'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -113,6 +118,9 @@ interface EligibleOrder {
     style: { styleNo: string; category: string | null } | null
     quantity: number
     unitPrice: number
+    // Phase 5a: per-item color rows from OrderItemColor (batch-fetched by
+    // eligible-orders) — drives the New Job color matrix
+    colorBreakdown?: { id: string; color: string; size: string; quantity: number }[]
   }[]
   productionJobs: { id: string; styleNo: string }[]
 }
@@ -131,9 +139,23 @@ interface ProductionJob {
   endDate: string | null
   status: string
   color?: string | null
+  // Phase 5a: color-group linkage + derived metadata from GET /api/production
+  parentJobId?: string | null
+  orderItemColorId?: string | null
+  _childCount?: number
+  _parentJobNo?: string | null
   createdAt: string
   updatedAt: string
   _image?: string | null
+}
+
+// Phase 5a: editable row of the New Job color matrix (one per OrderItemColor)
+interface ColorSplitRow {
+  orderItemColorId: string | null
+  color: string
+  size: string
+  quantity: string
+  included: boolean
 }
 
 interface StageTracking {
@@ -277,6 +299,35 @@ function getJobBorderColor(job: ProductionJob): string {
   return 'border-emerald-500/30'
 }
 
+// ─── Color badge (Phase 5a) ───────────────────────────────────────────────
+// Rounded pill for real garment colors — hidden for 'Free'/null jobs.
+// Class strings come from the SHARED lib (@/lib/color-badge) so production,
+// QC and the tracker all render identical pills.
+
+function ColorBadge({ color, className }: { color?: string | null; className?: string }) {
+  if (!isColorJob(color)) return null
+  return (
+    <span
+      className={`inline-flex items-center rounded-full border px-1.5 py-0.5 text-[9px] font-semibold leading-none ${colorNameToClasses(color)} ${className || ''}`}
+    >
+      {color}
+    </span>
+  )
+}
+
+// Color chip used on group headers: color pill + qty ('Red 150')
+function GroupColorChip({ color, qty }: { color?: string | null; qty: number }) {
+  if (!isColorJob(color)) return null
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[9px] font-semibold leading-none ${colorNameToClasses(color)}`}
+    >
+      {color}
+      <span className="tabular-nums opacity-80">{formatNumber(qty)}</span>
+    </span>
+  )
+}
+
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export function ProductionModule() {
@@ -307,12 +358,19 @@ export function ProductionModule() {
   const [jobDueDates, setJobDueDates] = useState<Record<string, string>>({})
   const [createMode, setCreateMode] = useState<'order' | 'manual'>('order')
 
+  // Phase 5a — COLOR-WISE JOB SPLIT: "Split by color" toggle + editable
+  // color matrix (one row per OrderItemColor, prefilled from the item's
+  // colorBreakdown)
+  const [splitByColor, setSplitByColor] = useState(true)
+  const [colorMatrix, setColorMatrix] = useState<Record<string, ColorSplitRow[]>>({})
+
   // Manual job form
   const [manualJob, setManualJob] = useState({
     styleNo: '',
     styleName: '',
     targetQty: '',
     endDate: '',
+    color: 'Free',             // NEW — optional free-text color for manual jobs
     fabricStockId: '',        // NEW — link to FabricStock row (auto-suggest)
     plannedFabricMeters: '',  // NEW — how much fabric will be consumed
     consumptionPerPiece: '2.5', // NEW — meters of fabric per garment (auto-calc)
@@ -392,6 +450,11 @@ export function ProductionModule() {
   // Edit completed qty
   const [editQty, setEditQty] = useState('')
   const [editQtyId, setEditQtyId] = useState<string | null>(null)
+
+  // Phase 5a — color-group state: collapsed groups on the kanban + sibling
+  // jobs for the detail dialog (fetched via /api/production?parentId=)
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
+  const [siblingJobs, setSiblingJobs] = useState<ProductionJob[]>([])
 
   // Stage tracking
   const [stageTrackings, setStageTrackings] = useState<StageTracking[]>([])
@@ -548,10 +611,40 @@ export function ProductionModule() {
     setSelectedOrder(null)
     setJobDueDates({})
     setJobStartDate(new Date().toISOString().split('T')[0])
-    setManualJob({ styleNo: '', styleName: '', targetQty: '', endDate: '' })
+    setManualJob({
+      styleNo: '',
+      styleName: '',
+      targetQty: '',
+      endDate: '',
+      color: 'Free',
+      fabricStockId: '',
+      plannedFabricMeters: '',
+      consumptionPerPiece: '2.5',
+    })
+    setSplitByColor(true)
+    setColorMatrix({})
     setCreateMode('order')
     setNewJobOpen(true)
     fetchEligibleOrders()
+  }
+
+  // Derive the per-item color matrix from the selected order's items
+  // (colorBreakdown comes from eligible-orders). Re-derives whenever the
+  // order selection changes.
+  const deriveColorMatrix = (order: EligibleOrder): Record<string, ColorSplitRow[]> => {
+    const matrix: Record<string, ColorSplitRow[]> = {}
+    for (const item of order.items) {
+      if (item.colorBreakdown && item.colorBreakdown.length > 0) {
+        matrix[item.id] = item.colorBreakdown.map((cb) => ({
+          orderItemColorId: cb.id,
+          color: cb.color,
+          size: cb.size || '-',
+          quantity: String(cb.quantity),
+          included: true,
+        }))
+      }
+    }
+    return matrix
   }
 
   const selectOrder = (orderId: string) => {
@@ -559,6 +652,9 @@ export function ProductionModule() {
     if (order) {
       setSelectedOrderId(orderId)
       setSelectedOrder(order)
+      // Reset split toggle (default ON) + re-derive the color matrix
+      setSplitByColor(true)
+      setColorMatrix(deriveColorMatrix(order))
       // Set default due dates from order delivery date
       const defaultDue = order.deliveryDate
         ? new Date(order.deliveryDate).toISOString().split('T')[0]
@@ -572,32 +668,94 @@ export function ProductionModule() {
     }
   }
 
+  const updateMatrixRow = (itemId: string, idx: number, patch: Partial<ColorSplitRow>) => {
+    setColorMatrix((prev) => {
+      const rows = [...(prev[itemId] || [])]
+      rows[idx] = { ...rows[idx], ...patch }
+      return { ...prev, [itemId]: rows }
+    })
+  }
+
   const handleCreateJobsFromOrder = async () => {
     if (!selectedOrder) return
     try {
       setSaving(true)
+      // Row-level validation BEFORE any POST (all-or-nothing per item —
+      // the server validates the whole colorSplits array too)
+      for (const item of selectedOrder.items) {
+        const rows = splitByColor ? (colorMatrix[item.id] || []) : []
+        if (splitByColor && (item.colorBreakdown?.length ?? 0) > 0) {
+          const included = rows.filter((r) => r.included)
+          if (included.length === 0) {
+            toast.error(`Select at least one color row for ${item.styleName}`)
+            setSaving(false)
+            return
+          }
+          for (const r of included) {
+            if (!r.color.trim()) {
+              toast.error(`Color is required for every included row (${item.styleName})`)
+              setSaving(false)
+              return
+            }
+            if (!(Number(r.quantity) > 0)) {
+              toast.error(`Quantity must be > 0 for color "${r.color || '—'}" (${item.styleName})`)
+              setSaving(false)
+              return
+            }
+          }
+        }
+      }
       // Create jobs sequentially to avoid SQLite write-lock conflicts
       const results: { ok: boolean; style: string; error?: string }[] = []
+      let colorJobsCreated = 0
+      let groupsCreated = 0
       for (const item of selectedOrder.items) {
         const styleKey = item.style?.styleNo || item.styleName
+        const rows = splitByColor ? (colorMatrix[item.id] || []) : []
+        const useSplit = splitByColor && (item.colorBreakdown?.length ?? 0) > 0
+        const includedRows = useSplit ? rows.filter((r) => r.included) : []
         try {
+          const body = useSplit
+            ? {
+                salesOrderId: selectedOrder.id,
+                styleNo: item.style?.styleNo || item.styleName,
+                styleName: item.styleName,
+                orderItemId: item.id,
+                // color-split mode: one parent group job + one child per color
+                colorSplits: includedRows.map((r) => ({
+                  orderItemColorId: r.orderItemColorId || null,
+                  color: r.color.trim(),
+                  size: r.size || null,
+                  quantity: Number(r.quantity),
+                })),
+                startDate: jobStartDate,
+                endDate: jobDueDates[styleKey] || undefined,
+              }
+            : {
+                salesOrderId: selectedOrder.id,
+                styleNo: item.style?.styleNo || item.styleName,
+                styleName: item.styleName,
+                targetQty: item.quantity,
+                startDate: jobStartDate,
+                endDate: jobDueDates[styleKey] || undefined,
+              }
           const r = await fetch('/api/production', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              salesOrderId: selectedOrder.id,
-              styleNo: item.style?.styleNo || item.styleName,
-              styleName: item.styleName,
-              targetQty: item.quantity,
-              startDate: jobStartDate,
-              endDate: jobDueDates[styleKey] || undefined,
-            }),
+            body: JSON.stringify(body),
           })
           if (!r.ok) {
             const err = await r.json().catch(() => ({}))
             results.push({ ok: false, style: item.styleName, error: err.error || r.statusText })
           } else {
             results.push({ ok: true, style: item.styleName })
+            if (useSplit) {
+              const json = await r.json().catch(() => ({}))
+              colorJobsCreated += Array.isArray(json.jobs) ? json.jobs.length : 1
+              groupsCreated += 1
+            } else {
+              colorJobsCreated += 1
+            }
           }
         } catch {
           results.push({ ok: false, style: item.styleName, error: 'Network error' })
@@ -605,10 +763,15 @@ export function ProductionModule() {
       }
       const failures = results.filter((r) => !r.ok)
       if (failures.length === 0) {
-        toast.success(`${results.length} production job(s) created successfully`)
+        if (groupsCreated > 0) {
+          toast.success(`${colorJobsCreated} color jobs created (${groupsCreated} group${groupsCreated > 1 ? 's' : ''})`)
+        } else {
+          toast.success(`${results.length} production job(s) created successfully`)
+        }
         setNewJobOpen(false)
         setSelectedOrderId(null)
         setSelectedOrder(null)
+        setColorMatrix({})
         fetchData()
       } else if (failures.length < results.length) {
         toast.warning(`${results.length - failures.length} job(s) created, ${failures.length} failed`)
@@ -643,6 +806,8 @@ export function ProductionModule() {
           targetQty: Number(manualJob.targetQty),
           startDate: jobStartDate,
           endDate: manualJob.endDate || undefined,
+          // NEW — optional free-text color ('Free' default = one-color job)
+          color: manualJob.color.trim() || 'Free',
           // NEW — fabric stock linkage (auto-suggest from available stock)
           fabricStockId: manualJob.fabricStockId || undefined,
           plannedFabricMeters: manualJob.plannedFabricMeters ? Number(manualJob.plannedFabricMeters) : undefined,
@@ -652,7 +817,7 @@ export function ProductionModule() {
         toast.success('Production job created successfully')
         setNewJobOpen(false)
         // Reset fabric-related fields too
-        setManualJob({ styleNo: '', styleName: '', targetQty: '', endDate: '', fabricStockId: '', plannedFabricMeters: '', consumptionPerPiece: '2.5' })
+        setManualJob({ styleNo: '', styleName: '', targetQty: '', endDate: '', color: 'Free', fabricStockId: '', plannedFabricMeters: '', consumptionPerPiece: '2.5' })
         fetchData()
       } else {
         const err = await res.json().catch(() => ({}))
@@ -792,7 +957,30 @@ export function ProductionModule() {
     setDetailOpen(true)
     fetchStageTracking(job.id)
     fetchVendors()
+    // Phase 5a — color-group siblings: child → fetch its group's children,
+    // parent → fetch its children (via ?parentId=)
+    fetchSiblings(job)
   }
+
+  // Sibling/children lookup for the detail dialog's COLOR GROUP JOBS section
+  const fetchSiblings = useCallback(async (job: ProductionJob) => {
+    const pid = job.parentJobId || ((job._childCount ?? 0) > 0 ? job.id : null)
+    if (!pid) {
+      setSiblingJobs([])
+      return
+    }
+    try {
+      const res = await fetch(`/api/production?parentId=${pid}`)
+      if (res.ok) {
+        const json = await res.json()
+        setSiblingJobs(json.jobs || [])
+      } else {
+        setSiblingJobs([])
+      }
+    } catch {
+      setSiblingJobs([])
+    }
+  }, [])
 
   // ─── Fabric Issue dialog (Phase 4) ────────────────────────────────
   const openFabricIssue = (job: ProductionJob) => {
@@ -823,19 +1011,387 @@ export function ProductionModule() {
 
   // ─── Computed ──────────────────────────────────────────────────────────
 
-  const activeJobs = data?.jobs.filter((j) => j.status === 'In Progress' || j.status === 'Delayed') ?? []
-  const overdueCount = data?.jobs.filter((j) => isOverdue(j.endDate, j.status)).length ?? 0
-  const todayOutput = data?.jobs
+  // Phase 5a — leaf jobs only for the stat cards (parents are group headers
+  // whose values are Σ children; counting both would double-count)
+  const leafJobs = (data?.jobs ?? []).filter((j) => (j._childCount ?? 0) === 0)
+  const activeJobs = leafJobs.filter((j) => j.status === 'In Progress' || j.status === 'Delayed')
+  const overdueCount = leafJobs.filter((j) => isOverdue(j.endDate, j.status)).length
+  const todayOutput = leafJobs
     .filter((j) => {
       const today = new Date().toDateString()
       return new Date(j.updatedAt).toDateString() === today && j.completedQty > 0
     })
-    .reduce((sum, j) => sum + j.completedQty, 0) ?? 0
+    .reduce((sum, j) => sum + j.completedQty, 0)
 
-  // Group jobs by stage for kanban
+  // Group jobs by stage for kanban (parents sit at their DERIVED stage —
+  // GET computes it server-side)
   const stageGroups: Record<string, ProductionJob[]> = {}
   for (const s of PRODUCTION_STAGES) {
     stageGroups[s] = (data?.jobs ?? []).filter((j) => j.stage === s)
+  }
+
+  // Color-group helpers for the kanban
+  const jobsById = new Map<string, ProductionJob>((data?.jobs ?? []).map((j) => [j.id, j]))
+  const childrenOf = (parentId: string) => (data?.jobs ?? []).filter((j) => j.parentJobId === parentId)
+  const toggleGroup = (parentId: string) => {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev)
+      if (next.has(parentId)) next.delete(parentId)
+      else next.add(parentId)
+      return next
+    })
+  }
+  const isGroupCollapsed = (parentId: string) => collapsedGroups.has(parentId)
+
+  // Phase 5a — live job count for the Create button: per split item the
+  // included rows + 1 group header; other items count as 1 legacy job.
+  const orderModeJobCount = selectedOrder
+    ? selectedOrder.items.reduce((sum, item) => {
+        if (splitByColor && (item.colorBreakdown?.length ?? 0) > 0) {
+          const included = (colorMatrix[item.id] || []).filter((r) => r.included)
+          return sum + included.length + (included.length > 0 ? 1 : 0)
+        }
+        return sum + 1
+      }, 0)
+    : 0
+
+  // ─── Kanban render helpers (Phase 5a) ───────────────────────────────
+  // Unified for desktop + mobile: children render indented under their
+  // group header (same column) or with a tiny ↳ group chip (other columns);
+  // parents render as collapsible group headers. Existing Free/leaf jobs
+  // render exactly as before.
+
+  const renderGroupHeader = (parent: ProductionJob, variant: 'desktop' | 'mobile') => {
+    const children = childrenOf(parent.id)
+    const collapsed = isGroupCollapsed(parent.id)
+    const done = parent.completedQty
+    const total = parent.targetQty
+    const pct = total ? Math.round((done / total) * 100) : 0
+    return (
+      <div className={`rounded-lg border border-primary/30 bg-primary/5 ${variant === 'mobile' ? 'p-3' : 'p-2.5'}`}>
+        <button
+          onClick={() => toggleGroup(parent.id)}
+          className="w-full flex items-start justify-between gap-1 text-left"
+        >
+          <div className="flex items-center gap-2 min-w-0">
+            {parent._image ? (
+              <img src={parent._image} alt={parent.styleNo} className="h-10 w-10 rounded-lg object-cover flex-shrink-0" />
+            ) : (
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 flex-shrink-0">
+                <Layers className="h-4 w-4 text-primary/60" />
+              </div>
+            )}
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5">
+                <span className="text-[11px] font-mono font-semibold text-primary">{parent.jobNo}</span>
+                <Badge
+                  variant="outline"
+                  className={`text-[9px] px-1 py-0 ${getStatusColor(parent.status)} flex-shrink-0`}
+                >
+                  {parent.status === 'In Progress' ? 'IP' : parent.status === 'Delayed' ? 'DL' : parent.status === 'Completed' ? 'OK' : 'CN'}
+                </Badge>
+              </div>
+              <p className="text-[11px] text-foreground mt-0.5 truncate">{parent.styleName}</p>
+              <p className="text-[10px] text-muted-foreground mt-0.5">
+                {formatNumber(children.length)} color job{children.length !== 1 ? 's' : ''}
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-col items-center gap-1 flex-shrink-0">
+            {collapsed ? (
+              <Badge className="bg-primary/15 text-primary border-primary/30 text-[9px] px-1.5 py-0">
+                +{children.length} jobs
+              </Badge>
+            ) : null}
+            <ChevronDown
+              className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${collapsed ? '' : 'rotate-180'}`}
+            />
+          </div>
+        </button>
+
+        <div className="mt-2">
+          <div className="flex items-center justify-between text-[10px] text-muted-foreground mb-1">
+            <span>{formatNumber(done)}/{formatNumber(total)}</span>
+            <span>{pct}%</span>
+          </div>
+          <Progress value={pct} className="h-1.5" />
+        </div>
+
+        {/* color chips per child (capped 6) */}
+        <div className="flex flex-wrap gap-1 mt-1.5">
+          {children.slice(0, 6).map((c) => (
+            <GroupColorChip key={c.id} color={c.color} qty={c.targetQty} />
+          ))}
+          {children.length > 6 && (
+            <span className="text-[9px] text-muted-foreground">+{children.length - 6}</span>
+          )}
+        </div>
+
+        <button
+          onClick={() => openDetail(parent)}
+          className="mt-1.5 text-[10px] text-primary hover:underline"
+        >
+          Group details
+        </button>
+      </div>
+    )
+  }
+
+  const renderJobCard = (
+    job: ProductionJob,
+    variant: 'desktop' | 'mobile',
+    opts: { isChild?: boolean; indent?: boolean; showParentChip?: boolean } = {}
+  ) => {
+    const childIndent = opts.isChild && opts.indent ? 'ml-2 border-l-2 border-primary/25 pl-2' : ''
+    const parentChip =
+      opts.isChild && opts.showParentChip && job._parentJobNo ? (
+        <span className="inline-flex items-center gap-0.5 text-[9px] text-muted-foreground/80 font-mono mt-0.5">
+          ↳ group {job._parentJobNo}
+        </span>
+      ) : null
+
+    if (variant === 'desktop') {
+      return (
+        <div className={`space-y-1 ${childIndent}`}>
+          <button
+            onClick={() => openDetail(job)}
+            className={`w-full rounded-lg border p-2.5 text-left transition-colors hover:bg-muted/50 ${getJobBorderColor(job)}`}
+          >
+            <div className="flex items-start justify-between gap-1">
+              <div className="flex items-center gap-2 min-w-0">
+                {job._image ? (
+                  <img src={job._image} alt={job.styleNo} className="h-10 w-10 rounded-lg object-cover flex-shrink-0" />
+                ) : (
+                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-muted flex-shrink-0">
+                    <Shirt className="h-4 w-4 text-muted-foreground/30" />
+                  </div>
+                )}
+                <div className="min-w-0">
+                  <span className="text-[11px] font-mono font-semibold text-primary">
+                    {job.jobNo}
+                  </span>
+                  <p className="text-[11px] text-foreground mt-0.5 truncate">{job.styleName}</p>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">{job.styleNo}</p>
+                </div>
+              </div>
+              <Badge
+                variant="outline"
+                className={`text-[9px] px-1 py-0 ${getStatusColor(job.status)} flex-shrink-0`}
+              >
+                {job.status === 'In Progress' ? 'IP' : job.status === 'Delayed' ? 'DL' : job.status === 'Completed' ? 'OK' : 'CN'}
+              </Badge>
+            </div>
+            {job.salesOrder && (
+              <p className="text-[10px] text-primary/70 mt-0.5 font-mono flex items-center gap-1">
+                <ShoppingCart className="h-2.5 w-2.5" />
+                {job.salesOrder.orderNo}
+                <span className="text-muted-foreground/50">· {job.salesOrder.customer.companyName}</span>
+              </p>
+            )}
+            {parentChip}
+            <div className="mt-2">
+              <div className="flex items-center justify-between text-[10px] text-muted-foreground mb-1">
+                <span className="flex items-center gap-1.5">
+                  {formatNumber(job.completedQty)}/{formatNumber(job.targetQty)}
+                  <ColorBadge color={job.color} />
+                </span>
+                <span>{Math.round((job.targetQty ? job.completedQty / job.targetQty : 0) * 100)}%</span>
+              </div>
+              <Progress value={(job.targetQty ? job.completedQty / job.targetQty : 0) * 100} className="h-1.5" />
+            </div>
+            {job.endDate && (
+              <div className="flex items-center justify-between mt-1.5">
+                <span className="flex items-center gap-1 text-[10px]">
+                  <CalendarDays className="h-2.5 w-2.5" />
+                  <span
+                    className={
+                      isOverdue(job.endDate, job.status)
+                        ? 'text-red-400 font-medium'
+                        : isNearDue(job.endDate, job.status)
+                        ? 'text-amber-400'
+                        : 'text-muted-foreground'
+                    }
+                  >
+                    {new Date(job.endDate).toLocaleDateString('en-IN', {
+                      day: '2-digit',
+                      month: 'short',
+                    })}
+                  </span>
+                </span>
+                {(() => {
+                  const dr = daysRemaining(job.endDate)
+                  if (dr === null) return null
+                  if (isOverdue(job.endDate, job.status)) {
+                    return (
+                      <Badge className="bg-red-500/20 text-red-400 border-red-500/30 text-[8px] px-1 py-0 gap-0.5">
+                        <AlertTriangle className="h-2 w-2" />
+                        {Math.abs(dr)}d late
+                      </Badge>
+                    )
+                  }
+                  if (dr <= 3) {
+                    return (
+                      <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30 text-[8px] px-1 py-0">
+                        {dr}d left
+                      </Badge>
+                    )
+                  }
+                  return (
+                    <span className="text-[9px] text-muted-foreground">{dr}d left</span>
+                  )
+                })()}
+              </div>
+            )}
+          </button>
+          {job.stage === 'Fabric Issue' && job.status !== 'Cancelled' && (
+            <button
+              onClick={() => openFabricIssue(job)}
+              className="w-full flex items-center justify-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-2 py-1.5 text-[11px] font-medium text-emerald-600 dark:text-emerald-400 transition-colors hover:bg-emerald-500/20"
+            >
+              <Scissors className="h-3 w-3" />
+              Issue Fabric
+            </button>
+          )}
+        </div>
+      )
+    }
+
+    // mobile variant
+    return (
+      <div className={`space-y-1.5 ${childIndent}`}>
+        <button
+          onClick={() => openDetail(job)}
+          className={`w-full rounded-lg border p-3 text-left transition-colors hover:bg-muted/50 ${getJobBorderColor(job)}`}
+        >
+          <div className="flex items-center gap-3">
+            {job._image ? (
+              <img src={job._image} alt={job.styleNo} className="h-10 w-10 rounded-lg object-cover flex-shrink-0" />
+            ) : (
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-muted flex-shrink-0">
+                <Shirt className="h-4 w-4 text-muted-foreground/30" />
+              </div>
+            )}
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-mono font-semibold text-primary">{job.jobNo}</span>
+                <Badge
+                  variant="outline"
+                  className={`text-[9px] px-1.5 py-0 ${getStatusColor(job.status)}`}
+                >
+                  {job.status}
+                </Badge>
+              </div>
+              <p className="text-xs text-foreground mt-1">{job.styleName}</p>
+              <p className="text-[11px] text-muted-foreground">{job.styleNo}</p>
+            </div>
+          </div>
+          {job.salesOrder && (
+            <p className="text-[11px] text-primary/70 mt-1 font-mono flex items-center gap-1">
+              <ShoppingCart className="h-3 w-3" />
+              {job.salesOrder.orderNo}
+              <span className="text-muted-foreground/50">· {job.salesOrder.customer.companyName}</span>
+            </p>
+          )}
+          {parentChip}
+          <div className="mt-2">
+            <div className="flex items-center justify-between text-[10px] text-muted-foreground mb-1">
+              <span className="flex items-center gap-1.5">
+                {formatNumber(job.completedQty)}/{formatNumber(job.targetQty)} pcs
+                <ColorBadge color={job.color} />
+              </span>
+              <span>{Math.round((job.targetQty ? job.completedQty / job.targetQty : 0) * 100)}%</span>
+            </div>
+            <Progress value={(job.targetQty ? job.completedQty / job.targetQty : 0) * 100} className="h-2" />
+          </div>
+          {job.endDate && (
+            <div className="flex items-center justify-between mt-2">
+              <span className="flex items-center gap-1 text-[11px]">
+                <CalendarDays className="h-3 w-3" />
+                <span
+                  className={
+                    isOverdue(job.endDate, job.status)
+                      ? 'text-red-400 font-medium'
+                      : isNearDue(job.endDate, job.status)
+                      ? 'text-amber-400'
+                      : 'text-muted-foreground'
+                  }
+                >
+                  {new Date(job.endDate).toLocaleDateString('en-IN', {
+                    day: '2-digit',
+                    month: 'short',
+                    year: 'numeric',
+                  })}
+                </span>
+              </span>
+              {(() => {
+                const dr = daysRemaining(job.endDate)
+                if (dr === null) return null
+                if (isOverdue(job.endDate, job.status)) {
+                  return (
+                    <Badge className="bg-red-500/20 text-red-400 border-red-500/30 text-[9px] px-1.5 py-0 gap-0.5">
+                      <AlertTriangle className="h-2.5 w-2.5" />
+                      {Math.abs(dr)}d late
+                    </Badge>
+                  )
+                }
+                if (dr <= 3) {
+                  return (
+                    <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30 text-[9px] px-1.5 py-0">
+                      {dr}d left
+                    </Badge>
+                  )
+                }
+                return (
+                  <span className="text-[10px] text-muted-foreground">{dr}d left</span>
+                )
+              })()}
+            </div>
+          )}
+        </button>
+        {job.stage === 'Fabric Issue' && job.status !== 'Cancelled' && (
+          <button
+            onClick={() => openFabricIssue(job)}
+            className="w-full flex items-center justify-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-2 py-2 text-xs font-medium text-emerald-600 dark:text-emerald-400 transition-colors hover:bg-emerald-500/20"
+          >
+            <Scissors className="h-3.5 w-3.5" />
+            Issue Fabric
+          </button>
+        )}
+      </div>
+    )
+  }
+
+  // One stage column's job list: parents → collapsible group headers (with
+  // same-column children indented under them), children → indented / chip'd
+  // (hidden while the group is collapsed), leaf jobs → plain cards.
+  const renderStageJobList = (jobsInStage: ProductionJob[], variant: 'desktop' | 'mobile') => {
+    return jobsInStage.map((job) => {
+      if ((job._childCount ?? 0) > 0) {
+        const children = childrenOf(job.id)
+        const collapsed = isGroupCollapsed(job.id)
+        const sameStageChildren = children.filter((c) => c.stage === job.stage)
+        return (
+          <div key={job.id} className="space-y-2">
+            {renderGroupHeader(job, variant)}
+            {!collapsed &&
+              sameStageChildren.map((c) =>
+                renderJobCard(c, variant, { isChild: true, indent: true })
+              )}
+          </div>
+        )
+      }
+      if (job.parentJobId) {
+        const parent = jobsById.get(job.parentJobId)
+        if (parent && isGroupCollapsed(parent.id)) return null // hidden while collapsed
+        if (parent && parent.stage === job.stage) return null // rendered under its group header
+        return (
+          <div key={job.id}>
+            {renderJobCard(job, variant, { isChild: true, showParentChip: true })}
+          </div>
+        )
+      }
+      return <div key={job.id}>{renderJobCard(job, variant)}</div>
+    })
   }
 
   // ─── Render ────────────────────────────────────────────────────────────
@@ -967,12 +1523,29 @@ export function ProductionModule() {
                             variant="ghost"
                             size="sm"
                             className="h-6 text-xs px-2"
-                            onClick={() => { setSelectedOrderId(null); setSelectedOrder(null) }}
+                            onClick={() => { setSelectedOrderId(null); setSelectedOrder(null); setColorMatrix({}) }}
                           >
                             Change
                           </Button>
                         </div>
                       </div>
+
+                      {/* Phase 5a — Split by color toggle (shown only when the
+                          order's items carry a color breakdown) */}
+                      {selectedOrder.items.some((it) => (it.colorBreakdown?.length ?? 0) > 0) && (
+                        <div className="flex items-center justify-between rounded-lg border border-primary/25 bg-primary/5 p-3">
+                          <div className="flex items-center gap-2">
+                            <Palette className="h-4 w-4 text-primary shrink-0" />
+                            <div>
+                              <p className="text-xs font-medium text-foreground">Split by color</p>
+                              <p className="text-[10px] text-muted-foreground">
+                                One child job per color, grouped under a parent job
+                              </p>
+                            </div>
+                          </div>
+                          <Switch checked={splitByColor} onCheckedChange={setSplitByColor} />
+                        </div>
+                      )}
 
                       {/* Start Date */}
                       <div className="flex items-center gap-2">
@@ -1028,6 +1601,78 @@ export function ProductionModule() {
                                   className="h-8 bg-muted/50 border-border text-xs"
                                 />
                               </div>
+
+                              {/* Phase 5a — COLOR MATRIX: one editable row per
+                                  OrderItemColor (prefilled from colorBreakdown).
+                                  Shown while "Split by color" is ON. */}
+                              {splitByColor && (item.colorBreakdown?.length ?? 0) > 0 && (
+                                <div className="rounded-lg border border-border/70 bg-muted/30 p-2 space-y-2">
+                                  <div className="flex items-center justify-between">
+                                    <p className="text-[10px] font-semibold text-primary uppercase tracking-wide">
+                                      Color split
+                                    </p>
+                                    {(() => {
+                                      const rows = colorMatrix[item.id] || []
+                                      const includedQty = rows
+                                        .filter((r) => r.included)
+                                        .reduce((s, r) => s + (Number(r.quantity) || 0), 0)
+                                      const mismatch = includedQty !== item.quantity
+                                      return (
+                                        <span className={`text-[10px] tabular-nums ${mismatch ? 'text-amber-500 font-semibold' : 'text-muted-foreground'}`}>
+                                          Σ {formatNumber(includedQty)} / {formatNumber(item.quantity)}
+                                        </span>
+                                      )
+                                    })()}
+                                  </div>
+                                  {(colorMatrix[item.id] || []).map((row, idx) => (
+                                    <div key={row.orderItemColorId || idx} className="flex items-center gap-1.5">
+                                      <Checkbox
+                                        checked={row.included}
+                                        onCheckedChange={(v) =>
+                                          updateMatrixRow(item.id, idx, { included: v === true })
+                                        }
+                                        className="h-3.5 w-3.5 shrink-0"
+                                      />
+                                      <ColorBadge color={row.color} className="shrink-0" />
+                                      <Input
+                                        value={row.color}
+                                        onChange={(e) =>
+                                          updateMatrixRow(item.id, idx, { color: e.target.value })
+                                        }
+                                        className="h-7 bg-muted/50 border-border text-xs flex-1 min-w-0"
+                                        placeholder="Color"
+                                      />
+                                      {row.size && row.size !== '-' && (
+                                        <Badge variant="outline" className="text-[9px] px-1.5 py-0 border-border text-muted-foreground shrink-0">
+                                          {row.size}
+                                        </Badge>
+                                      )}
+                                      <Input
+                                        type="number"
+                                        value={row.quantity}
+                                        onChange={(e) =>
+                                          updateMatrixRow(item.id, idx, { quantity: e.target.value })
+                                        }
+                                        className="h-7 bg-muted/50 border-border text-xs w-16 shrink-0"
+                                        min={0}
+                                      />
+                                    </div>
+                                  ))}
+                                  {(() => {
+                                    const rows = colorMatrix[item.id] || []
+                                    const includedQty = rows
+                                      .filter((r) => r.included)
+                                      .reduce((s, r) => s + (Number(r.quantity) || 0), 0)
+                                    if (includedQty === item.quantity) return null
+                                    return (
+                                      <p className="text-[10px] text-amber-500 flex items-center gap-1">
+                                        <AlertTriangle className="h-3 w-3" />
+                                        Σ colors ({formatNumber(includedQty)}) ≠ ordered ({formatNumber(item.quantity)})
+                                      </p>
+                                    )
+                                  })()}
+                                </div>
+                              )}
                             </div>
                           )
                         })}
@@ -1093,6 +1738,32 @@ export function ProductionModule() {
                       onChange={(e) => setManualJob({ ...manualJob, styleName: e.target.value })}
                       className="bg-muted/50 border-border"
                     />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label className="text-xs text-muted-foreground">
+                        Color <span className="text-[10px] text-muted-foreground/70">— optional</span>
+                      </Label>
+                      <Input
+                        placeholder="e.g. Red"
+                        value={manualJob.color}
+                        onChange={(e) => setManualJob({ ...manualJob, color: e.target.value })}
+                        className="bg-muted/50 border-border"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs text-muted-foreground">Preview</Label>
+                      <div className="h-9 flex items-center gap-2 rounded-md border border-border bg-muted/30 px-3">
+                        {manualJob.color.trim().toLowerCase() === 'free' || !manualJob.color.trim() ? (
+                          <span className="text-xs text-muted-foreground">Free (no color)</span>
+                        ) : (
+                          <>
+                            <ColorBadge color={manualJob.color} />
+                            <span className="text-[10px] text-muted-foreground">color job</span>
+                          </>
+                        )}
+                      </div>
+                    </div>
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
@@ -1226,7 +1897,7 @@ export function ProductionModule() {
                 >
                   {saving && <Loader2 className="h-4 w-4 animate-spin" />}
                   {createMode === 'order'
-                    ? `Create ${selectedOrder ? selectedOrder.items.length : 0} Job${selectedOrder && selectedOrder.items.length > 1 ? 's' : ''}`
+                    ? `Create ${orderModeJobCount} Job${orderModeJobCount > 1 ? 's' : ''}`
                     : 'Create Job'}
                 </Button>
               </div>
@@ -1262,7 +1933,7 @@ export function ProductionModule() {
                 <Package className="h-4 w-4 text-primary" />
                 <span className="text-xs text-muted-foreground">Total Jobs</span>
               </div>
-              <p className="mt-1 text-xl font-bold text-foreground">{formatNumber(data.total)}</p>
+              <p className="mt-1 text-xl font-bold text-foreground">{formatNumber(leafJobs.length)}</p>
             </CardContent>
           </Card>
           <Card className="glass-card border-border">
@@ -1482,105 +2153,7 @@ export function ProductionModule() {
 
                     {/* Job list */}
                     <div className="space-y-2 max-h-[420px] overflow-y-auto">
-                      {jobs.map((job) => (
-                        <div key={job.id} className="space-y-1">
-                        <button
-                          onClick={() => openDetail(job)}
-                          className={`w-full rounded-lg border p-2.5 text-left transition-colors hover:bg-muted/50 ${getJobBorderColor(job)}`}
-                        >
-                          <div className="flex items-start justify-between gap-1">
-                            <div className="flex items-center gap-2 min-w-0">
-                              {job._image ? (
-                                <img src={job._image} alt={job.styleNo} className="h-10 w-10 rounded-lg object-cover flex-shrink-0" />
-                              ) : (
-                                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-muted flex-shrink-0">
-                                  <Shirt className="h-4 w-4 text-muted-foreground/30" />
-                                </div>
-                              )}
-                              <div className="min-w-0">
-                                <span className="text-[11px] font-mono font-semibold text-primary">
-                                  {job.jobNo}
-                                </span>
-                                <p className="text-[11px] text-foreground mt-0.5 truncate">{job.styleName}</p>
-                                <p className="text-[10px] text-muted-foreground mt-0.5">{job.styleNo}</p>
-                              </div>
-                            </div>
-                            <Badge
-                              variant="outline"
-                              className={`text-[9px] px-1 py-0 ${getStatusColor(job.status)} flex-shrink-0`}
-                            >
-                              {job.status === 'In Progress' ? 'IP' : job.status === 'Delayed' ? 'DL' : job.status === 'Completed' ? 'OK' : 'CN'}
-                            </Badge>
-                          </div>
-                          {job.salesOrder && (
-                            <p className="text-[10px] text-primary/70 mt-0.5 font-mono flex items-center gap-1">
-                              <ShoppingCart className="h-2.5 w-2.5" />
-                              {job.salesOrder.orderNo}
-                              <span className="text-muted-foreground/50">· {job.salesOrder.customer.companyName}</span>
-                            </p>
-                          )}
-                          <div className="mt-2">
-                            <div className="flex items-center justify-between text-[10px] text-muted-foreground mb-1">
-                              <span>{formatNumber(job.completedQty)}/{formatNumber(job.targetQty)}</span>
-                              <span>{Math.round((job.targetQty ? job.completedQty / job.targetQty : 0) * 100)}%</span>
-                            </div>
-                            <Progress value={(job.targetQty ? job.completedQty / job.targetQty : 0) * 100} className="h-1.5" />
-                          </div>
-                          {job.endDate && (
-                            <div className="flex items-center justify-between mt-1.5">
-                              <span className="flex items-center gap-1 text-[10px]">
-                                <CalendarDays className="h-2.5 w-2.5" />
-                                <span
-                                  className={
-                                    isOverdue(job.endDate, job.status)
-                                      ? 'text-red-400 font-medium'
-                                      : isNearDue(job.endDate, job.status)
-                                      ? 'text-amber-400'
-                                      : 'text-muted-foreground'
-                                  }
-                                >
-                                  {new Date(job.endDate).toLocaleDateString('en-IN', {
-                                    day: '2-digit',
-                                    month: 'short',
-                                  })}
-                                </span>
-                              </span>
-                              {(() => {
-                                const dr = daysRemaining(job.endDate)
-                                if (dr === null) return null
-                                if (isOverdue(job.endDate, job.status)) {
-                                  return (
-                                    <Badge className="bg-red-500/20 text-red-400 border-red-500/30 text-[8px] px-1 py-0 gap-0.5">
-                                      <AlertTriangle className="h-2 w-2" />
-                                      {Math.abs(dr)}d late
-                                    </Badge>
-                                  )
-                                }
-                                if (dr <= 3) {
-                                  return (
-                                    <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30 text-[8px] px-1 py-0">
-                                      {dr}d left
-                                    </Badge>
-                                  )
-                                }
-                                return (
-                                  <span className="text-[9px] text-muted-foreground">{dr}d left</span>
-                                )
-                              })()}
-                            </div>
-                          )}
-                        </button>
-                        {job.stage === 'Fabric Issue' && job.status !== 'Cancelled' && (
-                          <button
-                            onClick={() => openFabricIssue(job)}
-                            className="w-full flex items-center justify-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-2 py-1.5 text-[11px] font-medium text-emerald-600 dark:text-emerald-400 transition-colors hover:bg-emerald-500/20"
-                          >
-                            <Scissors className="h-3 w-3" />
-                            Issue Fabric
-                          </button>
-                        )}
-                        </div>
-                      ))}
+                      {renderStageJobList(jobs, 'desktop')}
                       {jobs.length === 0 && (
                         <p className="text-[10px] text-muted-foreground text-center py-4">No jobs</p>
                       )}
@@ -1644,106 +2217,7 @@ export function ProductionModule() {
                   {stageGroups[PRODUCTION_STAGES[mobileStageIdx]]?.length ?? 0} jobs
                 </Badge>
               </div>
-              {(stageGroups[PRODUCTION_STAGES[mobileStageIdx]] ?? []).map((job) => (
-                <div key={job.id} className="space-y-1.5">
-                <button
-                  onClick={() => openDetail(job)}
-                  className={`w-full rounded-lg border p-3 text-left transition-colors hover:bg-muted/50 ${getJobBorderColor(job)}`}
-                >
-                  <div className="flex items-center gap-3">
-                    {job._image ? (
-                      <img src={job._image} alt={job.styleNo} className="h-10 w-10 rounded-lg object-cover flex-shrink-0" />
-                    ) : (
-                      <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-muted flex-shrink-0">
-                        <Shirt className="h-4 w-4 text-muted-foreground/30" />
-                      </div>
-                    )}
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-mono font-semibold text-primary">{job.jobNo}</span>
-                        <Badge
-                          variant="outline"
-                          className={`text-[9px] px-1.5 py-0 ${getStatusColor(job.status)}`}
-                        >
-                          {job.status}
-                        </Badge>
-                      </div>
-                      <p className="text-xs text-foreground mt-1">{job.styleName}</p>
-                      <p className="text-[11px] text-muted-foreground">{job.styleNo}</p>
-                    </div>
-                  </div>
-                  {job.salesOrder && (
-                    <p className="text-[11px] text-primary/70 mt-1 font-mono flex items-center gap-1">
-                      <ShoppingCart className="h-3 w-3" />
-                      {job.salesOrder.orderNo}
-                      <span className="text-muted-foreground/50">· {job.salesOrder.customer.companyName}</span>
-                    </p>
-                  )}
-                  <div className="mt-2">
-                    <div className="flex items-center justify-between text-[10px] text-muted-foreground mb-1">
-                      <span>
-                        {formatNumber(job.completedQty)}/{formatNumber(job.targetQty)} pcs
-                      </span>
-                      <span>{Math.round((job.targetQty ? job.completedQty / job.targetQty : 0) * 100)}%</span>
-                    </div>
-                    <Progress value={(job.targetQty ? job.completedQty / job.targetQty : 0) * 100} className="h-2" />
-                  </div>
-                  {job.endDate && (
-                    <div className="flex items-center justify-between mt-2">
-                      <span className="flex items-center gap-1 text-[11px]">
-                        <CalendarDays className="h-3 w-3" />
-                        <span
-                          className={
-                            isOverdue(job.endDate, job.status)
-                              ? 'text-red-400 font-medium'
-                              : isNearDue(job.endDate, job.status)
-                              ? 'text-amber-400'
-                              : 'text-muted-foreground'
-                          }
-                        >
-                          {new Date(job.endDate).toLocaleDateString('en-IN', {
-                            day: '2-digit',
-                            month: 'short',
-                            year: 'numeric',
-                          })}
-                        </span>
-                      </span>
-                      {(() => {
-                        const dr = daysRemaining(job.endDate)
-                        if (dr === null) return null
-                        if (isOverdue(job.endDate, job.status)) {
-                          return (
-                            <Badge className="bg-red-500/20 text-red-400 border-red-500/30 text-[9px] px-1.5 py-0 gap-0.5">
-                              <AlertTriangle className="h-2.5 w-2.5" />
-                              {Math.abs(dr)}d late
-                            </Badge>
-                          )
-                        }
-                        if (dr <= 3) {
-                          return (
-                            <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30 text-[9px] px-1.5 py-0">
-                              {dr}d left
-                            </Badge>
-                          )
-                        }
-                        return (
-                          <span className="text-[10px] text-muted-foreground">{dr}d left</span>
-                        )
-                      })()}
-                    </div>
-                  )}
-                </button>
-                {job.stage === 'Fabric Issue' && job.status !== 'Cancelled' && (
-                  <button
-                    onClick={() => openFabricIssue(job)}
-                    className="w-full flex items-center justify-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-2 py-2 text-xs font-medium text-emerald-600 dark:text-emerald-400 transition-colors hover:bg-emerald-500/20"
-                  >
-                    <Scissors className="h-3.5 w-3.5" />
-                    Issue Fabric
-                  </button>
-                )}
-                </div>
-              ))}
+              {renderStageJobList(stageGroups[PRODUCTION_STAGES[mobileStageIdx]] ?? [], 'mobile')}
               {(stageGroups[PRODUCTION_STAGES[mobileStageIdx]] ?? []).length === 0 && (
                 <p className="text-xs text-muted-foreground text-center py-6">No jobs in this stage</p>
               )}
@@ -1768,9 +2242,18 @@ export function ProductionModule() {
                   )}
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center justify-between">
-                      <DialogTitle className="text-lg text-foreground">
-                        {selectedJob.jobNo}
-                      </DialogTitle>
+                      <div className="flex items-center gap-2 min-w-0">
+                        <DialogTitle className="text-lg text-foreground">
+                          {selectedJob.jobNo}
+                        </DialogTitle>
+                        <ColorBadge color={selectedJob.color} />
+                        {(selectedJob._childCount ?? 0) > 0 && (
+                          <Badge variant="outline" className="text-[9px] px-1.5 py-0 border-primary/30 text-primary shrink-0">
+                            <Layers className="h-2.5 w-2.5 mr-0.5" />
+                            Group
+                          </Badge>
+                        )}
+                      </div>
                       <Badge variant="outline" className={`${getStatusColor(selectedJob.status)} text-xs flex-shrink-0`}>
                     {selectedJob.status}
                   </Badge>
@@ -1786,6 +2269,12 @@ export function ProductionModule() {
                   <div className="glass-card border-border rounded-lg p-3">
                     <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Style No</p>
                     <p className="text-sm font-semibold text-foreground mt-0.5">{selectedJob.styleNo}</p>
+                    {isColorJob(selectedJob.color) && (
+                      <p className="mt-1 flex items-center gap-1.5">
+                        <ColorBadge color={selectedJob.color} />
+                        <span className="text-[10px] text-muted-foreground">color job</span>
+                      </p>
+                    )}
                   </div>
                   <div className="glass-card border-border rounded-lg p-3">
                     <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Linked Order</p>
@@ -1845,6 +2334,7 @@ export function ProductionModule() {
                     ) : (
                       <button
                         onClick={() => {
+                          if ((selectedJob._childCount ?? 0) > 0) return
                           setEditQtyId(selectedJob.id)
                           setEditQty(String(selectedJob.completedQty))
                         }}
@@ -1853,9 +2343,11 @@ export function ProductionModule() {
                         <p className="text-sm font-semibold text-foreground">
                           {formatNumber(selectedJob.completedQty)} pcs
                         </p>
-                        <span className="text-[10px] text-primary opacity-0 group-hover:opacity-100 transition-opacity">
-                          edit
-                        </span>
+                        {(selectedJob._childCount ?? 0) === 0 && (
+                          <span className="text-[10px] text-primary opacity-0 group-hover:opacity-100 transition-opacity">
+                            edit
+                          </span>
+                        )}
                       </button>
                     )}
                   </div>
@@ -1912,6 +2404,52 @@ export function ProductionModule() {
                     )}
                   </div>
                 </div>
+
+                {/* Phase 5a — COLOR GROUP JOBS: child job → clickable sibling
+                    rows (switches the dialog); parent → children list */}
+                {siblingJobs.length > 0 && (
+                  <div className="glass-card border-border rounded-lg p-3 space-y-2">
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
+                      {(selectedJob._childCount ?? 0) > 0
+                        ? `Color group header — ${siblingJobs.length} child job${siblingJobs.length !== 1 ? 's' : ''}`
+                        : 'Color group jobs'}
+                    </p>
+                    <div className="space-y-1">
+                      {siblingJobs.map((sib) => {
+                        const isCurrent = sib.id === selectedJob.id
+                        return (
+                          <button
+                            key={sib.id}
+                            onClick={() => { if (!isCurrent) openDetail(sib) }}
+                            className={`w-full flex items-center justify-between gap-2 rounded-lg border p-2 text-left transition-colors ${
+                              isCurrent
+                                ? 'border-primary/40 bg-primary/10'
+                                : 'border-border/60 hover:bg-muted/50 hover:border-primary/30'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="text-[11px] font-mono font-semibold text-primary truncate">{sib.jobNo}</span>
+                              <ColorBadge color={sib.color} />
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <span className="text-[10px] text-muted-foreground tabular-nums">
+                                {formatNumber(sib.completedQty)}/{formatNumber(sib.targetQty)} · {sib.stage}
+                              </span>
+                              <Badge variant="outline" className={`text-[8px] px-1 py-0 ${getStatusColor(sib.status)}`}>
+                                {sib.status === 'In Progress' ? 'IP' : sib.status === 'Delayed' ? 'DL' : sib.status === 'Completed' ? 'OK' : 'CN'}
+                              </Badge>
+                            </div>
+                          </button>
+                        )
+                      })}
+                    </div>
+                    {(selectedJob._childCount ?? 0) > 0 && (
+                      <p className="text-[10px] text-muted-foreground">
+                        Group values are derived (Σ children). Actions live on the child jobs.
+                      </p>
+                    )}
+                  </div>
+                )}
 
                 <Separator className="bg-border" />
 
@@ -2059,8 +2597,9 @@ export function ProductionModule() {
                   </p>
                 </div>
 
-                {/* Action buttons */}
-                {selectedJob.status !== 'Completed' && selectedJob.status !== 'Cancelled' && (
+                {/* Action buttons — hidden for color-group headers (their
+                    values are derived; actions live on leaf jobs) */}
+                {selectedJob.status !== 'Completed' && selectedJob.status !== 'Cancelled' && (selectedJob._childCount ?? 0) === 0 && (
                   <div className="flex flex-wrap gap-2">
                     {selectedJob.stage === 'Fabric Issue' && (
                       <Button
