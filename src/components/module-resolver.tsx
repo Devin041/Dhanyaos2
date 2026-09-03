@@ -241,6 +241,11 @@ export function ModuleResolver() {
   }, [])
 
   useEffect(() => {
+    // Lazy-loader pattern: this effect's whole job is synchronizing React state
+    // with the external dynamic-import/moduleCache system whenever the active
+    // view changes. The synchronous setState on cache-hit is intended (it
+    // publishes the already-loaded module); the fresh-load path settles async.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadModule(activeView)
   }, [activeView, loadModule])
 

@@ -54,6 +54,36 @@ BEGIN
   END IF;
 END $$;
 
+-- SECTION 2b: Drop the bare UNIQUE INDEX form of the same key.
+-- Prisma db push (from a checkout whose schema still has @@unique) creates a
+-- UNIQUE INDEX named "StageTracking_productionJobId_stageName_key" — NOT a
+-- constraint — so the DO block above no-ops on it and `ALTER TABLE DROP
+-- CONSTRAINT IF EXISTS` silently succeeds without removing anything. Postgres
+-- still raises 23505 with that exact name on duplicate inserts. Kill both
+-- forms; also drop any UNIQUE index over exactly (productionJobId, stageName).
+DROP INDEX IF EXISTS public."StageTracking_productionJobId_stageName_key";
+DO $$
+DECLARE
+  v_idxname text;
+BEGIN
+  SELECT i.indexname::text
+  INTO v_idxname
+  FROM pg_indexes i
+  WHERE i.tablename = 'StageTracking'
+    AND i.schemaname = 'public'
+    AND i.indexdef ILIKE '%UNIQUE%'
+    AND i.indexdef ~* '"productionJobId"'
+    AND i.indexdef ~* '"stageName"'
+  LIMIT 1;
+
+  IF v_idxname IS NOT NULL THEN
+    EXECUTE format('DROP INDEX public.%I', v_idxname);
+    RAISE NOTICE 'Dropped unique index: %', v_idxname;
+  ELSE
+    RAISE NOTICE 'StageTracking: no unique(productionJobId, stageName) index — already clean';
+  END IF;
+END $$;
+
 -- SECTION 3: Dedupe OrderItemColor (keep lowest id per orderItemId+color+size)
 -- NOTE: same color with DIFFERENT sizes (S/M/L/XL/XXL) are NOT duplicates.
 DELETE FROM "OrderItemColor" a

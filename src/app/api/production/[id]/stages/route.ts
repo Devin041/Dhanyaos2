@@ -57,13 +57,16 @@ function isUniqueViolation(error: unknown): boolean {
     String(e?.message || error || '').includes('duplicate key value violates unique constraint')
 }
 
-// Graded 400 for the live unique(jobId, stageName) constraint — explains
-// exactly what to run so multi-row inserts start working. Kept as a defensive
-// path even after the migration ran (belt-and-braces for restored backups).
+// Graded 400 for the live unique(jobId, stageName) object — explains exactly
+// what to run so multi-row inserts start working. IMPORTANT: the uniqueness
+// can exist as a CONSTRAINT *or* as a bare UNIQUE INDEX (Prisma db push from
+// old local code creates a UNIQUE INDEX with the constraint-style name, which
+// `ALTER TABLE DROP CONSTRAINT` silently no-ops on). The message below gives
+// BOTH statements so either form is removed.
 function uniqueViolationResponse(error: unknown): NextResponse {
   const detail = String((error as { message?: string })?.message || error || '')
   return NextResponse.json({
-    error: `Saving multiple rows for one stage hit the live database constraint "StageTracking_productionJobId_stageName_key" — the multi-vendor splits feature needs it dropped. Run Section 2 of SUPABASE-MIGRATION-COLOR-PRODUCTION.sql in the Supabase SQL Editor: ALTER TABLE "StageTracking" DROP CONSTRAINT IF EXISTS "StageTracking_productionJobId_stageName_key"; CREATE INDEX IF NOT EXISTS "StageTracking_job_stage_idx" ON "StageTracking"("productionJobId","stageName"); — then retry. No code change is required. (${detail})`,
+    error: `Saving multiple rows for one stage hit the live database unique key "StageTracking_productionJobId_stageName_key" — the multi-vendor splits feature needs it dropped. The uniqueness may exist as an INDEX (created by an old prisma db push) or as a CONSTRAINT, so run BOTH of these lines in the Supabase SQL Editor: DROP INDEX IF EXISTS public."StageTracking_productionJobId_stageName_key"; ALTER TABLE public."StageTracking" DROP CONSTRAINT IF EXISTS "StageTracking_productionJobId_stageName_key"; — then retry. No code change is required. Also: do not run prisma db push against this database from an old checkout, it re-creates the unique key. (${detail})`,
   }, { status: 400 })
 }
 
