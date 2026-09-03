@@ -2079,3 +2079,30 @@ Stage Summary:
 - gl-setup idempotency guard now works correctly; orphan-entry cleanup script at /tmp/clean-je.ts pattern
 - Note: receivables include 2 customers (EL-025 + one more); supplier payable showed 0 (PO paidAmount data state) — actual vs target reconciliation is part of F-series work
 - NEXT: Phase 0 bug-fix sprint (U1–U5) as approved — order: U3+U4 (image flatten in fabric-stock/grn) → U2 (PO progress cap) → U1 (PO product card) → U5 (dispatch backfill + FG images)
+
+---
+Task ID: PHASE0-BUGFIX-SPRINT
+Agent: Main Agent (Z.ai Code)
+Task: Phase 0 bug-fix sprint (U1–U5) per MASTER-PLAN §6 — verify + fix all user-reported PDF bugs on EL-025 real data.
+
+Work Log:
+- U3+U4 (broken images in fabric-stock & GRN): verified ALREADY FIXED (prior commit 1a2568f) — APIs return `_image` as plain string URLs; browser-confirmed cloudinary images render (naturalWidth > 0) in both modules
+- U2 (PO progress 399%): verified ALREADY FIXED — live data PO-20260903-001: itemsSum=3,120, recv=3,113 → 100% capped (was 3113/780=399%); both list + detail views use items sum + Math.min(100, ...)
+- U1 (PO no product card): verified ALREADY FIXED — PO list has image+styleNo column, detail dialog has Product identity card (photo, style, name)
+- U5 (EL-025 stuck in WIP + no FG images): TWO parts found:
+  * EL-025 ProductionJobs already Completed (5 jobs: main 480→478 + 4 color jobs) — verified WIP tab shows 12 jobs, NONE is EL-025 ✓
+  * REAL GAP: /api/fg-stock GET had NO image resolution (bins' own image column + no fallback to sample/cost-sheet photos) — FIXED:
+    - fg-stock/route.ts: added batchResolveStyleImages, `_image` = bin.image || resolved URL, `_imageSource`
+    - fg-stock/matrix/route.ts: same fallback for matrix view
+    - fg-inventory.tsx: FGStockBin interface + _image/_imageSource fields; StyleGroupRow, mobile cards, bin detail dialog all use image || _image fallback with proper alt text
+- Verified via curl: EL-025 bins now return _image=YES(bin); matrix EL-025 image=YES
+- Browser E2E: FG Inventory shows EL-025 — Anarkali with photo (ok:true), lastDispatch "03 Sep 26 · Petals · DSP-20260903-001" visible; WIP tab: EL-025 NOT present (12 other-style jobs, 834 pcs — legit active WIP)
+- Lint: 0 errors
+- Screenshots: docs/verify-fg-images.png, docs/verify-inventory-wip.png
+
+Stage Summary:
+- ALL Phase 0 bugs (U1–U5) are now closed on EL-025 real data
+- U1/U2/U3/U4 were already fixed in prior commit; U5 FG-image gap found + fixed in this sprint (fg-stock, fg-stock/matrix, fg-inventory frontend)
+- EL-025 lifecycle now fully visible: fabric (with photos) → GRN (photo) → production Completed 478/480 → FG bins (photo, qty 0 after dispatch) → Dispatch Delivered 478 to Petals
+- ELY-* demo FG styles have no photos anywhere (no Sample/CostSheet records) — data gap, not code; placeholder shows instead
+- NEXT per MASTER-PLAN: F2 (GST cross-utilization fix) + fabric-stock timeout monitoring, then F1/F3/F4 finance work

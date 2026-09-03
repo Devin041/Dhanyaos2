@@ -84,6 +84,9 @@ interface FGStockBin {
   color: string
   size: string
   image: string | null
+  // U5: server-resolved product photo (bin image || sample/cost-sheet photo)
+  _image?: string | null
+  _imageSource?: string | null
   availableQty: number
   reservedQty: number
   qcPendingQty: number
@@ -902,7 +905,7 @@ export function FGInventoryModule() {
                         key={styleNo}
                         styleNo={styleNo}
                         styleName={styleBins[0]?.styleName || ''}
-                        image={styleBins[0]?.image || null}
+                        image={styleBins[0]?.image || styleBins[0]?._image || null}
                         bins={styleBins}
                         expanded={expandedStyles.has(styleNo)}
                         onToggle={() => toggleStyleExpand(styleNo)}
@@ -934,8 +937,8 @@ export function FGInventoryModule() {
                 >
                   <CardContent className="p-4">
                     <div className="flex items-center gap-3">
-                      {styleBins[0]?.image && (
-                        <img src={styleBins[0].image} alt="" className="h-12 w-12 rounded-lg object-cover" />
+                      {(styleBins[0]?.image || styleBins[0]?._image) && (
+                        <img src={styleBins[0]?.image || styleBins[0]?._image || undefined} alt={styleNo} className="h-12 w-12 rounded-lg object-cover" />
                       )}
                       <div className="flex-1">
                         <p className="font-semibold">{styleNo} — {styleBins[0]?.styleName}</p>
@@ -1629,8 +1632,8 @@ export function FGInventoryModule() {
             <div className="mt-6 space-y-6">
               {/* Photo + Basic Info */}
               <div className="flex items-start gap-4">
-                {selectedBin.image ? (
-                  <img src={selectedBin.image} alt="" className="h-24 w-24 rounded-xl border object-cover" />
+                {selectedBin.image || selectedBin._image ? (
+                  <img src={selectedBin.image || selectedBin._image || undefined} alt={selectedBin.styleNo} className="h-24 w-24 rounded-xl border object-cover" />
                 ) : (
                   <div className="flex h-24 w-24 items-center justify-center rounded-xl border bg-muted">
                     <Package className="h-8 w-8 text-muted-foreground/30" />

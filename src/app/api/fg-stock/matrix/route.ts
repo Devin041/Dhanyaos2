@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabase-db'
 import { NextRequest, NextResponse } from 'next/server'
+import { batchResolveStyleImages } from '@/lib/style-image'
 
 // ─── GET: Color×Size matrix view ──
 export async function GET(request: NextRequest) {
@@ -21,10 +22,15 @@ export async function GET(request: NextRequest) {
       styleMap[b.styleNo].push(b)
     }
 
+    // U5: resolve product photos (bin image || sample/cost-sheet photo),
+    // flattened to a plain string URL for <img src>.
+    const styleNos = Object.keys(styleMap).filter(Boolean)
+    const imgMap = styleNos.length > 0 ? await batchResolveStyleImages(styleNos) : {}
+
     const styles = Object.entries(styleMap).map(([sNo, sBins]) => {
       const colors = [...new Set(sBins.map((b: any) => b.color))].sort()
       const sizes = [...new Set(sBins.map((b: any) => b.size))].sort()
-      const image = sBins[0]?.image || null
+      const image = sBins[0]?.image || imgMap[sNo]?.url || null
 
       // Build color×size matrix with full data per cell
       const matrix: Record<string, any> = {}

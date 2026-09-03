@@ -1,6 +1,7 @@
 import { supabase } from '@/lib/supabase-db'
 import { NextRequest, NextResponse } from 'next/server'
 import { generateColorCode, generateMovementNo, withComputedFields, computeBinHealth, type StockBinWithComputed } from '@/lib/fg-color-code'
+import { batchResolveStyleImages } from '@/lib/style-image'
 
 // ─── GET: List all FG stock bins with KPI stats + health indicators ──
 export async function GET(request: NextRequest) {
@@ -101,6 +102,17 @@ export async function GET(request: NextRequest) {
       lastDispatch: lastDispatchByBin[b.id] || null,
     }))
 
+    // ── U5 FIX: resolve product photos for bins that have no own image —
+    // sample/cost-sheet photos via the shared resolver, flattened to a plain
+    // string URL so frontend <img src> works (raw resolver gives {url,source}).
+    const binStyleNos = [...new Set(binsWithLastDispatch.map(b => b.styleNo).filter(Boolean))] as string[]
+    const binImageMap = binStyleNos.length > 0 ? await batchResolveStyleImages(binStyleNos) : {}
+    const binsWithImages = binsWithLastDispatch.map(b => ({
+      ...b,
+      _image: b.image || (b.styleNo ? binImageMap[b.styleNo]?.url || null : null),
+      _imageSource: b.image ? 'bin' : (b.styleNo ? binImageMap[b.styleNo]?.source || null : null),
+    }))
+
     // ── Global stats (across ALL bins) ──
     const { data: allBins } = await supabase.from('FGStockBin').select('*')
     const totalStyles = new Set((allBins || []).map((b: any) => b.styleNo)).size
@@ -157,7 +169,7 @@ export async function GET(request: NextRequest) {
     }
 
     return NextResponse.json({
-      bins: binsWithLastDispatch,
+      bins: binsWithImages,
       stats,
       healthDist: healthCounts,
       pagination: {
