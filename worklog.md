@@ -2165,3 +2165,31 @@ Stage Summary:
 - 3 pre-migration payments now visible in GL/cashbook; ledger fully live
 - Note: /api/financial-statements (orphan, no frontend consumer) still has old booking-based math — dead code, not user-visible; cleanup candidate for later
 - Remaining from earlier session note: user can optionally run 1-line Supabase patch ALTER TABLE "Payment" ADD COLUMN IF NOT EXISTS "tdsSection" text; (app degrades gracefully without)
+
+---
+Task ID: PHASE-C1-PRODUCT-PNL
+Agent: Main Agent (Z.ai Code)
+Task: Founder-mode next step — Phase C.1: Product P&L 4 views (Target | Actual | Net | Cash) in Product Tracker, per MASTER-PLAN §6-C. "EL-025 pe kitna kamaya?" — the owner's #1 question.
+
+Work Log:
+- Verified F3/F4/backfill already complete (commits c0926c9, ec208e8) — F-series fully closed
+- Founder reflection → next lever = per-order honest P&L (monthly P&L F3 was month-level; product-level still showed old 'simplified' actualProfit = revenue − fabricCost)
+- Data audit (live): invoice GST fields (taxableAmount 13,11,154 / IGST 1,57,338.48), VendorBills 9 = 99,400 linked via StageTracking.productionJobId → EL-025 jobs, CostSheet broker 26,332.80 (2%), fabric consumed 3,024m @ ₹150 (receipt rate), payments-out 0, ExpenseVoucher 0
+- Backend (lifecycle route): added productPnl — TARGET (cost-sheet sell − cost) / ACTUAL (invoiced pre-tax − fabric CONSUMED + jobWork bills + broker + direct vouchers; matching basis, leftover = asset) / NET (− net GST Sec 49(5)+Rule 88A per-order cross-utilization − indirect) / CASH (collected − paidOut − committedOut dues incl. broker gross + TDS 194H 5% + net GST) + variance rows + assets; selects extended (Invoice/PO GST fields, CostSheet broker/targetQty)
+- Frontend (product-tracker.tsx): 'Order P&L — Kitna Kamaya?' card — 4 summary cards (Target amber / Actual emerald / Net primary / Cash red) + 4-tab switcher (default ACTUAL), CASH tab red banner with founder nudge (collections pehle chase karo), variance table (Plan vs Hua), assets strip (89m ₹13,350 / 2 defective ₹2,424 / receivable ₹7,68,492); header card relabeled 'Target Profit (plan)' + actual GP/cash chips
+- EL-025 live validation — EVERY number matches master ledger §9 EXACTLY:
+  * TARGET ₹3,03,840 / 23.1%
+  * ACTUAL GP ₹7,31,821.20 / 55.8% (13,11,154 − 4,53,600 − 99,400 − 26,332.80)
+  * NET ₹5,97,882.72 / 45.6% (GST 1,33,938.48 cross-utilized EXACT, indirect 0)
+  * CASH GAP −₹51,071.28 redFlag (committed 7,51,071.28 = 4,91,400 + 99,400 + 26,332.80 + 1,33,938.48)
+- Browser E2E (agent-browser): EL-025 selected → 4 tabs clicked through (Target/Actual/Net/Cash all render correct), 0 console errors, 0 page errors
+- VLM visual review (cash screenshot): no overlap, red banner visible, 4 cards aligned, no [object Object]/NaN
+- Screenshots: docs/verify-product-pnl-cash.png, verify-product-pnl-net.png, verify-product-pnl-mobile.png
+- Lint: 0 errors (2 pre-existing warnings) | Commit 36657c2 pushed to main
+
+Stage Summary:
+- PHASE C.1 CLOSED — Product Tracker ab owner ka sawaal 'kitna kamaya' 4 honest views mein answered karta hai (target kabhi actual ki tarah label nahi hota)
+- Cash-gap red flag feature live: −₹51,071 banner + dues breakdown + collection-first nudge — founder's #1 insight ab system mein built-in
+- Variance table reveals: actual direct 5,79,333 vs cost-sheet 10,12,800 — target conservative tha (in-house labor/overhead est.) — NET view mein GST/indirect subtract hote hain
+- Remaining Phase C: C.2 color variance, C.3 party ledgers + statement PDF, C.4 TB→P&L→BS drill-down, C.5 aging/month-close/closing-stock
+- Founder NEXT candidates: Collections engine (AR aging + follow-up — ₹7.68L outstanding), ya Phase A test-script steps 1-9 live run (Patels settle + payments-out + expenses book → NET view realistic banega)
