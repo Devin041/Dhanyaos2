@@ -12,7 +12,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     const { id } = await params
     const { data: job, error } = await supabase
       .from('ProductionJob')
-      .select('*, salesOrder:salesOrderId(id, orderNo, status, customer:customerId(companyName))')
+      .select('*, salesOrder:salesOrderId(id, orderNo, status, customer:customerId(id, companyName))')
       .eq('id', id)
       .single()
     if (!job || error) return NextResponse.json({ error: 'Production job not found' }, { status: 404 })
@@ -95,7 +95,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (autoComplete) { updateData.status = 'Completed'; updateData.completedQty = ex.targetQty }
 
     const { data: updated, error } = await supabase.from('ProductionJob').update(updateData).eq('id', id)
-      .select('*, salesOrder:salesOrderId(id, orderNo, status, customer:customerId(companyName))').single()
+      .select('*, salesOrder:salesOrderId(id, orderNo, status, customer:customerId(id, companyName))').single()
     if (error) throw error
 
     // NEW: Fabric consumption automation

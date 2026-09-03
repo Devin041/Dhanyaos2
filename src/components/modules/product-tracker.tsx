@@ -11,7 +11,7 @@ import {
 } from '@/components/ui/select'
 import {
   Search, Shirt, IndianRupee, Package, Factory, Truck, FileText, CheckCircle2,
-  TrendingUp, ArrowRight, Circle, AlertCircle,
+  TrendingUp, ArrowRight, Circle, AlertCircle, ClipboardList, Layers,
 } from 'lucide-react'
 import { colorNameToClasses, isColorJob } from '@/lib/color-badge'
 
@@ -22,6 +22,26 @@ interface LifecycleData {
   sample: any
   costing: any
   purchaseOrders: any[]
+  // Phase 6 — BOM + fabric flow sections
+  bom: {
+    id: string
+    version: number
+    isActive: boolean
+    lineCount: number
+    notes?: string | null
+  } | null
+  grns: any[]
+  fabricReceipts: any[]
+  fabricConsumption: any[]
+  fabricSummary: {
+    received: number
+    issued: number
+    consumed: number
+    receiptCount: number
+    consumptionCount: number
+    stockCount: number
+    availableMeters: number
+  }
   samplings: any[]
   salesOrders: any[]
   productionJobs: any[]
@@ -38,6 +58,7 @@ function formatINR(v: number) {
 
 const STAGE_ICONS: Record<string, React.ElementType> = {
   sample: Shirt, costing: IndianRupee, po: Package, sampling: Shirt,
+  bom: ClipboardList, fabric: Layers,
   sales: FileText, production: Factory, dispatch: Truck, invoice: FileText, payment: CheckCircle2,
 }
 
@@ -109,7 +130,7 @@ export function ProductTrackerModule() {
         </div>
         <div>
           <h1 className="text-lg font-bold">Product Lifecycle Tracker</h1>
-          <p className="text-xs text-muted-foreground">Track a product from Sample → Costing → PO → Production → Dispatch → Invoice → Payment → Profit</p>
+          <p className="text-xs text-muted-foreground">Track a product from Sample → Costing → PO → BOM → GRN/Fabric → Production → Dispatch → Invoice → Payment → Profit</p>
         </div>
       </div>
 
@@ -288,6 +309,121 @@ export function ProductTrackerModule() {
                     {data.productionJobs.length > 4 && <p className="text-[10px] text-muted-foreground">+{data.productionJobs.length - 4} more</p>}
                   </div>
                 ) : <p className="text-xs text-muted-foreground">No production jobs</p>}
+              </CardContent>
+            </Card>
+
+            {/* BOM & Fabric Flow (Phase 6) */}
+            <Card className="glass-card lg:col-span-2">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-xs font-medium flex items-center gap-1.5">
+                  <ClipboardList className="h-3.5 w-3.5 text-primary" /> BOM &amp; Fabric Flow
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {/* BOM header line */}
+                <div className="flex flex-wrap items-center gap-2 mb-3">
+                  {data.bom ? (
+                    <>
+                      <Badge variant="outline" className="text-[9px] px-1.5 py-0.5 border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                        BOM v{data.bom.version}
+                      </Badge>
+                      <span className="text-xs">{data.bom.lineCount} line(s)</span>
+                      {data.bom.isActive && (
+                        <Badge variant="outline" className="text-[9px] px-1.5 py-0">Active</Badge>
+                      )}
+                      {data.bom.notes && (
+                        <span className="text-[10px] text-muted-foreground truncate max-w-[200px]" title={data.bom.notes}>
+                          {data.bom.notes}
+                        </span>
+                      )}
+                    </>
+                  ) : (
+                    <span className="text-xs text-muted-foreground">No active BOM</span>
+                  )}
+                </div>
+
+                {/* Fabric summary chips */}
+                {(data.fabricSummary?.received > 0 || data.fabricSummary?.issued > 0 || data.fabricSummary?.consumed > 0) ? (
+                  <div className="grid grid-cols-3 gap-2 mb-3">
+                    <div className="rounded-lg border border-border/40 bg-muted/20 p-2 text-center">
+                      <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Received</p>
+                      <p className="text-sm font-bold tabular-nums text-emerald-400">{data.fabricSummary.received}m</p>
+                    </div>
+                    <div className="rounded-lg border border-border/40 bg-muted/20 p-2 text-center">
+                      <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Issued</p>
+                      <p className="text-sm font-bold tabular-nums text-amber-400">{data.fabricSummary.issued}m</p>
+                    </div>
+                    <div className="rounded-lg border border-border/40 bg-muted/20 p-2 text-center">
+                      <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Consumed</p>
+                      <p className="text-sm font-bold tabular-nums text-red-400">{data.fabricSummary.consumed}m</p>
+                    </div>
+                  </div>
+                ) : null}
+
+                {/* GRN rows */}
+                {data.grns.length > 0 && (
+                  <div className="space-y-1.5 mb-2">
+                    <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">GRNs</p>
+                    {data.grns.slice(0, 3).map((g: any) => (
+                      <div key={g.id} className="flex items-center justify-between text-xs">
+                        <div className="min-w-0">
+                          <span className="font-mono font-medium">{g.grnNo}</span>
+                          <span className="text-muted-foreground ml-2 truncate">{g.supplierName || '?'}</span>
+                        </div>
+                        <span className="text-muted-foreground whitespace-nowrap">
+                          {g.receivedDate ? new Date(g.receivedDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '—'} · {g.acceptedQty ?? g.totalReceivedQty ?? 0}m
+                        </span>
+                      </div>
+                    ))}
+                    {data.grns.length > 3 && <p className="text-[10px] text-muted-foreground">+{data.grns.length - 3} more</p>}
+                  </div>
+                )}
+
+                {/* Fabric receipts */}
+                {data.fabricReceipts.length > 0 && (
+                  <div className="space-y-1.5 mb-2">
+                    <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Fabric Receipts</p>
+                    {data.fabricReceipts.slice(0, 3).map((r: any) => (
+                      <div key={r.id} className="flex items-center justify-between text-xs gap-2">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span className="font-medium truncate">{r.receivedQty}m {r.fabricName}</span>
+                          {isColorJob(r.color) && (
+                            <span className={`inline-flex items-center rounded-full border px-1.5 py-0.5 text-[9px] font-semibold leading-none ${colorNameToClasses(r.color)}`}>
+                              {r.color}
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-muted-foreground whitespace-nowrap">
+                          {r.grnNo ? `GRN ${r.grnNo}` : r.poNumber ? r.poNumber : 'manual'} · {r.receivedDate ? new Date(r.receivedDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '—'}
+                        </span>
+                      </div>
+                    ))}
+                    {data.fabricReceipts.length > 3 && <p className="text-[10px] text-muted-foreground">+{data.fabricReceipts.length - 3} more</p>}
+                  </div>
+                )}
+
+                {/* Fabric consumption */}
+                {data.fabricConsumption.length > 0 && (
+                  <div className="space-y-1.5">
+                    <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Consumed by Jobs</p>
+                    {data.fabricConsumption.slice(0, 3).map((c: any) => (
+                      <div key={c.id} className="flex items-center justify-between text-xs gap-2">
+                        <div className="min-w-0">
+                          <span className="font-medium">{c.issuedQty}m {c.fabricName}</span>
+                          <span className="text-muted-foreground ml-2 font-mono text-[10px]">{c.jobNo || ''}</span>
+                        </div>
+                        <span className="text-muted-foreground whitespace-nowrap">
+                          {c.consumptionDate ? new Date(c.consumptionDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '—'}
+                        </span>
+                      </div>
+                    ))}
+                    {data.fabricConsumption.length > 3 && <p className="text-[10px] text-muted-foreground">+{data.fabricConsumption.length - 3} more</p>}
+                  </div>
+                )}
+
+                {!data.bom && data.grns.length === 0 && data.fabricReceipts.length === 0 && data.fabricConsumption.length === 0 && (
+                  <p className="text-xs text-muted-foreground">No BOM or fabric activity for this style yet</p>
+                )}
               </CardContent>
             </Card>
 

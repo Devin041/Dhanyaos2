@@ -138,7 +138,7 @@ export async function GET(req: NextRequest) {
     // Fetch all jobs with salesOrder relation
     const { data: allJobsRaw, error } = await supabase
       .from('ProductionJob')
-      .select('*, salesOrder:salesOrderId(id, orderNo, status, customer:customerId(companyName))')
+      .select('*, salesOrder:salesOrderId(id, orderNo, status, customer:customerId(id, companyName))')
       .order('createdAt', { ascending: false })
     if (error) throw error
 
@@ -506,7 +506,7 @@ export async function POST(req: NextRequest) {
       const allIds = [parent.id, ...children.map((c: any) => c.id)]
       const { data: finalRows } = await supabase
         .from('ProductionJob')
-        .select('*, salesOrder:salesOrderId(id, orderNo, status, customer:customerId(companyName))')
+        .select('*, salesOrder:salesOrderId(id, orderNo, status, customer:customerId(id, companyName))')
         .in('id', allIds)
       const finalById = new Map(((finalRows || []) as any[]).map((r: any) => [r.id, r]))
       const parentFinal = finalById.get(parent.id) || parent
@@ -565,7 +565,7 @@ export async function POST(req: NextRequest) {
       startDate: startIso,
       endDate: endIso,
       createdAt: ts, updatedAt: ts,
-    }).select('*, salesOrder:salesOrderId(id, orderNo, status, customer:customerId(companyName))').single()
+    }).select('*, salesOrder:salesOrderId(id, orderNo, status, customer:customerId(id, companyName))').single()
 
     if (error) throw error
 

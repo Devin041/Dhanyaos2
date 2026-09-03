@@ -104,7 +104,7 @@ interface SalesOrderRef {
   id: string
   orderNo: string
   status: string
-  customer: { companyName: string }
+  customer: { id: string; companyName: string }
 }
 
 interface EligibleOrder {
@@ -2810,6 +2810,20 @@ export function ProductionModule() {
                         variant="outline"
                         className="gap-2 border-sky-500/30 text-sky-400 hover:bg-sky-500/10"
                         onClick={() => {
+                          // Phase 6 — hand the order/customer to the dispatch
+                          // module (sessionStorage 'dispatch-prefill') so its
+                          // create dialog auto-selects this job's order.
+                          try {
+                            if (selectedJob.salesOrderId) {
+                              sessionStorage.setItem(
+                                'dispatch-prefill',
+                                JSON.stringify({
+                                  salesOrderId: selectedJob.salesOrderId,
+                                  customerId: selectedJob.salesOrder?.customer?.id || null,
+                                }),
+                              )
+                            }
+                          } catch { /* storage unavailable — plain navigation */ }
                           setDetailOpen(false)
                           useDashboardStore.getState().setActiveView('dispatch')
                         }}

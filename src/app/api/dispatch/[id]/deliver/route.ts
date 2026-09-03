@@ -107,6 +107,10 @@ export async function POST(
             .update({
               availableQty: newQty,
               lastMovementDate: new Date().toISOString(),
+              // Phase 6: stamp the delivery date on the bin so FG inventory
+              // can show "last dispatched" even before/without the movement
+              // ledger being queried.
+              lastDispatchDate: new Date().toISOString(),
               updatedAt: new Date().toISOString(),
             })
             .eq('id', bin.id)

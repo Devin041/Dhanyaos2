@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -57,8 +57,10 @@ import {
   Clock,
   BoxesIcon,
   Shirt,
+  AlertTriangle,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { colorNameToClasses, isColorJob } from '@/lib/color-badge'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -68,6 +70,10 @@ interface DispatchItemRow {
   styleName: string
   orderedQty: number
   dispatchedQty: number
+  // Phase 6 — color-wise dispatch rows (null on legacy style-level items)
+  color?: string | null
+  colorCode?: string | null
+  size?: string | null
 }
 
 interface Dispatch {
@@ -97,7 +103,39 @@ interface SalesOrderOption {
   customerId: string
   customer: { companyName: string; shippingAddress: string | null }
   shippingAddress: string | null
-  items: { styleNo: string | null; styleName: string; quantity: number }[]
+  items: {
+    id?: string
+    styleNo: string | null
+    styleName: string
+    quantity: number
+    // Phase 2 FIX 5 — per-item color×size rows (drives the dispatch matrix)
+    colorBreakdown?: { id: string; color: string; size: string; quantity: number }[]
+  }[]
+}
+
+// Phase 6 — one dispatchable COLOR×SIZE row (built from an order item's
+// colorBreakdown). fgAvailable mirrors the FGStockBin availability for the
+// exact styleNo+color+size combo (null = unknown: no style linkage / no bins
+// fetched — advisory only, never blocks).
+interface ColorSizeRow {
+  key: string
+  orderItemId: string
+  styleNo: string
+  styleName: string
+  color: string
+  size: string
+  orderedQty: number
+  fgAvailable: number | null
+  qty: string
+}
+
+// Phase 6 — FG bins for a style (from /api/fg-stock?styleNo=…)
+interface FGBinLite {
+  id: string
+  styleNo: string
+  color: string | null
+  size: string | null
+  availableQty: number
 }
 
 interface KPIData {
@@ -115,11 +153,13 @@ function printDeliveryChallan(d: Dispatch) {
   const dateStr = new Date(d.dispatchDate).toLocaleDateString('en-IN', {
     day: '2-digit', month: 'short', year: 'numeric',
   })
+  const hasColorRows = d.dispatchItems.some(it => it.color || it.size)
   const itemRows = d.dispatchItems.map((it, i) => `
     <tr>
       <td style="text-align:center">${i + 1}</td>
       <td>${it.styleNo}</td>
       <td>${it.styleName}</td>
+      ${hasColorRows ? `<td>${it.color || '—'}${it.size && it.size !== '-' ? ` · ${it.size}` : ''}</td>` : ''}
       <td style="text-align:center">${it.orderedQty}</td>
       <td style="text-align:center">${it.dispatchedQty}</td>
     </tr>`).join('')
@@ -161,10 +201,10 @@ function printDeliveryChallan(d: Dispatch) {
   <div><dt>Status</dt><dd>${d.status}</dd></div>
 </dl>
 <table>
-  <thead><tr><th style="text-align:center">#</th><th>Style No</th><th>Style Name</th><th style="text-align:center">Ordered Qty</th><th style="text-align:center">Dispatched Qty</th></tr></thead>
+  <thead><tr><th style="text-align:center">#</th><th>Style No</th><th>Style Name</th>${hasColorRows ? '<th>Color · Size</th>' : ''}<th style="text-align:center">Ordered Qty</th><th style="text-align:center">Dispatched Qty</th></tr></thead>
   <tbody>
     ${itemRows}
-    <tr class="total-row"><td colspan="4" style="text-align:right"><strong>Total Pieces</strong></td><td style="text-align:center"><strong>${totalQty}</strong></td></tr>
+    <tr class="total-row"><td colspan="${hasColorRows ? 5 : 4}" style="text-align:right"><strong>Total Pieces</strong></td><td style="text-align:center"><strong>${totalQty}</strong></td></tr>
   </tbody>
 </table>
 ${d.notes ? `<p style="margin-top:8px;font-size:12px;color:#666"><strong>Notes:</strong> ${d.notes}</p>` : ''}
@@ -212,6 +252,18 @@ export function DispatchModule() {
   const [formItems, setFormItems] = useState<DispatchItemRow[]>([])
   const [formCustomerName, setFormCustomerName] = useState('')
 
+  // Phase 6 — color×size dispatch matrix + FG availability
+  const [colorRows, setColorRows] = useState<ColorSizeRow[]>([])
+  const [fgBinsByStyle, setFgBinsByStyle] = useState<Record<string, FGBinLite[]>>({})
+  const [fgLoading, setFgLoading] = useState(false)
+  // Phase 6 — handoff from production ("Create Delivery Challan"):
+  // sessionStorage 'dispatch-prefill' {salesOrderId, customerId} → auto-open
+  // the create dialog, select that order, toast — then it is consumed. Refs
+  // (not state) so the eligible-orders effect below reads the pending id on
+  // its very first run and doesn't refetch-and-narrow the list afterwards.
+  const prefillOrderIdRef = useRef<string | null>(null)
+  const usedPrefillRef = useRef(false)
+
   // Eligible sales orders
   const [eligibleOrders, setEligibleOrders] = useState<SalesOrderOption[]>([])
 
@@ -254,17 +306,64 @@ export function DispatchModule() {
 
   useEffect(() => { fetchDispatches() }, [fetchDispatches])
 
+  // ─── Phase 6 prefill handoff (production "Create Delivery Challan") ──
+  // sessionStorage 'dispatch-prefill' {salesOrderId, customerId} → open the
+  // create dialog; the order itself is auto-selected once the orders list
+  // has loaded (see the eligible-orders effect below). Consumed immediately.
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem('dispatch-prefill')
+      if (raw) {
+        sessionStorage.removeItem('dispatch-prefill')
+        const parsed = JSON.parse(raw)
+        if (parsed?.salesOrderId) {
+          prefillOrderIdRef.current = String(parsed.salesOrderId)
+          setDialogOpen(true)
+        }
+      }
+    } catch {
+      try { sessionStorage.removeItem('dispatch-prefill') } catch { /* ignore */ }
+    }
+  }, [])
+
   // ─── Fetch eligible orders (Confirmed/In Production) ───────────────
+  // With a prefill pending/used we fetch ALL statuses — the order behind a
+  // dispatch-ready production job is often 'In Progress' by then, and the
+  // list must keep containing it after the auto-selection.
   useEffect(() => {
     if (!dialogOpen) return
+    let cancelled = false
     const fetchOrders = async () => {
+      const wantAll = !!prefillOrderIdRef.current || usedPrefillRef.current
       try {
+        if (wantAll) {
+          const resAll = await fetch('/api/orders?limit=200')
+          if (!resAll.ok) throw new Error()
+          const dataAll = await resAll.json()
+          const allOrders = (dataAll.orders || []) as SalesOrderOption[]
+          if (cancelled) return
+          setEligibleOrders(allOrders)
+          const pending = prefillOrderIdRef.current
+          if (pending) {
+            prefillOrderIdRef.current = null
+            usedPrefillRef.current = true
+            const prefillOrder = allOrders.find(o => o.id === pending)
+            if (prefillOrder) {
+              await handleOrderSelect(prefillOrder.id, allOrders)
+              toast.success(`Order ${prefillOrder.orderNo} pre-selected from production`)
+            } else {
+              toast.info('Pre-selected order was not found — pick one below')
+            }
+          }
+          return
+        }
         const res = await fetch('/api/orders?status=Confirmed')
         if (!res.ok) throw new Error()
         const data = await res.json()
         const orders = (data.orders || []).filter((o: { status: string }) =>
           o.status === 'Confirmed' || o.status === 'In Production'
         )
+        if (cancelled) return
         setEligibleOrders(orders)
       } catch {
         // Try fetching all and filtering client-side
@@ -275,12 +374,14 @@ export function DispatchModule() {
             const orders = (data2.orders || []).filter((o: { status: string }) =>
               o.status === 'Confirmed' || o.status === 'In Production'
             )
+            if (cancelled) return
             setEligibleOrders(orders)
           }
         } catch { /* silent */ }
       }
     }
     fetchOrders()
+    return () => { cancelled = true }
   }, [dialogOpen])
 
   // ─── Reset form ───────────────────────────────────────────────────
@@ -296,6 +397,10 @@ export function DispatchModule() {
     setFormNotes('')
     setFormItems([])
     setFormCustomerName('')
+    setColorRows([])
+    setFgBinsByStyle({})
+    prefillOrderIdRef.current = null
+    usedPrefillRef.current = false
   }
 
   const openCreate = () => {
@@ -323,24 +428,107 @@ export function DispatchModule() {
     setDetailOpen(true)
   }
 
-  // ─── Handle sales order selection (auto-fill) ─────────────────────
-  const handleOrderSelect = (orderId: string) => {
+  // ─── Handle sales order selection (auto-fill + color×size matrix) ──
+  // Phase 6: items WITH a colorBreakdown expand into per COLOR×SIZE rows
+  // (dispatched per color/size against FG bin availability); items without
+  // keep the legacy style-level behavior.
+  const handleOrderSelect = async (orderId: string, orderList: SalesOrderOption[] = eligibleOrders) => {
     setFormSalesOrderId(orderId)
-    const order = eligibleOrders.find(o => o.id === orderId)
-    if (order) {
-      setFormCustomerId(order.customerId)
-      setFormCustomerName(order.customer.companyName)
-      setFormShippingAddress(order.shippingAddress || order.customer?.shippingAddress || '')
-      setFormItems(
-        (order.items || []).map(it => ({
-          styleNo: it.styleNo || '',
-          styleName: it.styleName || '',
+    const order = orderList.find(o => o.id === orderId)
+    if (!order) return
+    setFormCustomerId(order.customerId)
+    setFormCustomerName(order.customer.companyName)
+    setFormShippingAddress(order.shippingAddress || order.customer?.shippingAddress || '')
+
+    const nextColorRows: ColorSizeRow[] = []
+    const legacyItems: DispatchItemRow[] = []
+    for (const it of order.items || []) {
+      const styleNo = it.styleNo || ''
+      const styleName = it.styleName || ''
+      if (Array.isArray(it.colorBreakdown) && it.colorBreakdown.length > 0) {
+        for (const c of it.colorBreakdown) {
+          nextColorRows.push({
+            key: `${it.id || styleName}-${c.id}-${c.color}-${c.size}`,
+            orderItemId: it.id || '',
+            styleNo,
+            styleName,
+            color: c.color,
+            size: c.size || '-',
+            orderedQty: Number(c.quantity) || 0,
+            fgAvailable: null,
+            qty: String(Number(c.quantity) || 0),
+          })
+        }
+      } else {
+        legacyItems.push({
+          styleNo,
+          styleName,
           orderedQty: it.quantity || 0,
           dispatchedQty: it.quantity || 0,
-        }))
+        })
+      }
+    }
+    setFormItems(legacyItems)
+    setColorRows(nextColorRows)
+
+    // ── FG availability (one /api/fg-stock?styleNo= per unique style) ──
+    const styleNos = [...new Set(nextColorRows.map(r => r.styleNo).filter(Boolean))]
+    if (styleNos.length === 0) {
+      setFgBinsByStyle({})
+      return
+    }
+    setFgLoading(true)
+    try {
+      const results = await Promise.all(
+        styleNos.map(sn =>
+          fetch(`/api/fg-stock?styleNo=${encodeURIComponent(sn)}&limit=100`)
+            .then(r => (r.ok ? r.json() : null))
+            .catch(() => null)
+        )
       )
+      const binsMap: Record<string, FGBinLite[]> = {}
+      styleNos.forEach((sn, i) => {
+        binsMap[sn] = ((results[i]?.bins) || []) as FGBinLite[]
+      })
+      setFgBinsByStyle(binsMap)
+      setColorRows(prev =>
+        prev.map(r => {
+          if (!r.styleNo) return r // no style linkage → unknown, advisory only
+          const bins = binsMap[r.styleNo] || []
+          const exact = bins.filter(
+            b =>
+              String(b.color || '').toLowerCase() === r.color.toLowerCase() &&
+              String(b.size || '').toLowerCase() === r.size.toLowerCase()
+          )
+          return { ...r, fgAvailable: exact.reduce((s, b) => s + (Number(b.availableQty) || 0), 0) }
+        })
+      )
+    } catch {
+      // FG lookup is advisory — rows keep fgAvailable null on failure
+    } finally {
+      setFgLoading(false)
     }
   }
+
+  // ─── Update a color×size row's dispatch qty ────────────────────────
+  const updateColorRowQty = (key: string, qty: string) => {
+    const clean = String(Math.max(0, parseInt(qty, 10) || 0))
+    setColorRows(prev => prev.map(r => (r.key === key ? { ...r, qty: clean } : r)))
+  }
+
+  // ─── Row stock status ─────────────────────────────────────────────
+  // short     → amber:  qty exceeds FG availability (stock exists)
+  // insufficient → red:  qty > 0 while FG has nothing for this color×size
+  type RowStockStatus = 'ok' | 'short' | 'insufficient' | 'unknown'
+  const rowStatus = (r: ColorSizeRow): RowStockStatus => {
+    const qty = parseInt(r.qty, 10) || 0
+    if (r.fgAvailable === null) return 'unknown'
+    if (qty > 0 && r.fgAvailable === 0) return 'insufficient'
+    if (qty > r.fgAvailable) return 'short'
+    return 'ok'
+  }
+  const insufficientRows = colorRows.filter(r => rowStatus(r) === 'insufficient')
+  const shortRows = colorRows.filter(r => rowStatus(r) === 'short')
 
   // ─── Update item dispatched qty ────────────────────────────────────
   const updateItemQty = (index: number, qty: number) => {
@@ -349,14 +537,41 @@ export function DispatchModule() {
 
   // ─── Save (create or update) ──────────────────────────────────────
   const handleSave = async () => {
-    if (!formSalesOrderId || !formCustomerId || formItems.length === 0) {
+    if (!formSalesOrderId || !formCustomerId || (formItems.length === 0 && colorRows.length === 0)) {
       toast.error('Sales order, customer, and items are required')
+      return
+    }
+    // Phase 6 — color×size rows: qty 0 means "not dispatched now" (skipped);
+    // rows with qty but zero FG stock are hard-blocked (see rowStatus).
+    const activeColorRows = colorRows.filter(r => (parseInt(r.qty, 10) || 0) > 0)
+    if (formItems.length === 0 && activeColorRows.length === 0) {
+      toast.error('Add at least one item with a dispatched quantity > 0')
+      return
+    }
+    if (activeColorRows.length > 0 && insufficientRows.length > 0) {
+      toast.error(
+        `${insufficientRows.length} color×size row(s) have no FG stock — finish production or set the qty to 0`,
+      )
       return
     }
     if (formItems.some(it => it.dispatchedQty <= 0)) {
       toast.error('All items must have a dispatched quantity > 0')
       return
     }
+
+    // Per COLOR×SIZE dispatch rows (Phase 6) + legacy style-level items.
+    // colorCode is omitted here — POST /api/dispatch derives it per row.
+    const submitItems = [
+      ...activeColorRows.map(r => ({
+        styleNo: r.styleNo,
+        styleName: r.styleName,
+        orderedQty: r.orderedQty,
+        dispatchedQty: parseInt(r.qty, 10) || 0,
+        color: r.color,
+        size: r.size === '-' ? null : r.size,
+      })),
+      ...formItems,
+    ]
 
     setSaving(true)
     try {
@@ -390,11 +605,15 @@ export function DispatchModule() {
             vehicleNo: formVehicleNo,
             notes: formNotes,
             status: formStatus,
-            items: formItems,
+            items: submitItems,
           }),
         })
         if (!res.ok) throw new Error('Create failed')
-        toast.success('Dispatch created')
+        const created = await res.json().catch(() => null)
+        if (created?.warning) toast.warning(created.warning)
+        toast.success(activeColorRows.length > 0
+          ? `Dispatch created — ${activeColorRows.length} color×size row(s)`
+          : 'Dispatch created')
       }
       setDialogOpen(false)
       resetForm()
@@ -719,15 +938,160 @@ export function DispatchModule() {
               <Textarea value={formNotes} onChange={(e) => setFormNotes(e.target.value)} placeholder="Optional notes..." rows={2} />
             </div>
 
+            {/* ── COLOR×SIZE dispatch matrix (Phase 6, create only) ── */}
+            {!editingId && colorRows.length > 0 && (
+              <div className="space-y-2">
+                <Label className="text-sm font-medium flex items-center gap-1.5">
+                  Color-wise Dispatch
+                  {fgLoading && <span className="size-3 animate-spin border-2 border-current border-t-transparent rounded-full" />}
+                  <span className="text-xs font-normal text-muted-foreground">
+                    ({colorRows.length} color×size rows · FG availability checked per row)
+                  </span>
+                </Label>
+                <div className="rounded-md border overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Color</TableHead>
+                        <TableHead>Size</TableHead>
+                        <TableHead className="text-center">Ordered</TableHead>
+                        <TableHead className="text-center">FG Available</TableHead>
+                        <TableHead className="text-center">Dispatch Qty</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {(() => {
+                        // Group rows per order item → one header row per style
+                        const groups: Array<{ header: ColorSizeRow; rows: ColorSizeRow[] }> = []
+                        for (const r of colorRows) {
+                          const last = groups[groups.length - 1]
+                          if (last && last.header.orderItemId === r.orderItemId && last.header.styleNo === r.styleNo) {
+                            last.rows.push(r)
+                          } else {
+                            groups.push({ header: r, rows: [r] })
+                          }
+                        }
+                        return groups.flatMap(g => [
+                          <TableRow key={`grp-${g.header.key}`} className="bg-muted/40 hover:bg-muted/40">
+                            <TableCell colSpan={5} className="py-1.5">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-xs font-semibold">
+                                  <span className="font-mono">{g.header.styleNo || '(no style)'}</span>
+                                  <span className="text-muted-foreground font-normal"> — {g.header.styleName}</span>
+                                </span>
+                                <span className="text-xs text-muted-foreground">
+                                  {g.rows.reduce((s, r) => s + r.orderedQty, 0)} pcs ordered · dispatching{' '}
+                                  {g.rows.reduce((s, r) => s + (parseInt(r.qty, 10) || 0), 0)} pcs
+                                </span>
+                              </div>
+                            </TableCell>
+                          </TableRow>,
+                          ...g.rows.map(r => {
+                            const st = rowStatus(r)
+                            return (
+                              <TableRow
+                                key={r.key}
+                                className={
+                                  st === 'insufficient'
+                                    ? 'bg-red-50 dark:bg-red-950/20'
+                                    : st === 'short'
+                                      ? 'bg-amber-50 dark:bg-amber-950/20'
+                                      : ''
+                                }
+                              >
+                                <TableCell>
+                                  <span
+                                    className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold leading-none ${colorNameToClasses(r.color)}`}
+                                    title={r.color}
+                                  >
+                                    {r.color}
+                                  </span>
+                                </TableCell>
+                                <TableCell className="text-sm">{r.size}</TableCell>
+                                <TableCell className="text-center tabular-nums text-sm">{r.orderedQty}</TableCell>
+                                <TableCell className="text-center text-sm">
+                                  {r.fgAvailable === null ? (
+                                    <span className="text-muted-foreground" title="No style linkage / stock unknown">—</span>
+                                  ) : (
+                                    <span
+                                      className={
+                                        st === 'insufficient'
+                                          ? 'text-red-600 dark:text-red-400 font-semibold'
+                                          : st === 'short'
+                                            ? 'text-amber-600 dark:text-amber-400 font-semibold'
+                                            : 'tabular-nums'
+                                      }
+                                    >
+                                      {r.fgAvailable}
+                                    </span>
+                                  )}
+                                </TableCell>
+                                <TableCell className="text-center">
+                                  <div className="flex flex-col items-center gap-0.5">
+                                    <Input
+                                      type="number"
+                                      min={0}
+                                      max={r.orderedQty}
+                                      value={r.qty}
+                                      onChange={(e) => updateColorRowQty(r.key, e.target.value)}
+                                      className={`w-20 text-center mx-auto ${
+                                        st === 'insufficient'
+                                          ? 'border-red-400 focus-visible:ring-red-400'
+                                          : st === 'short'
+                                            ? 'border-amber-400'
+                                            : ''
+                                      }`}
+                                      aria-label={`Dispatch qty for ${r.color} ${r.size}`}
+                                    />
+                                    {st === 'insufficient' && (
+                                      <span className="flex items-center gap-0.5 text-[10px] text-red-600 dark:text-red-400 font-medium">
+                                        <AlertTriangle className="size-3" /> No FG stock
+                                      </span>
+                                    )}
+                                    {st === 'short' && (
+                                      <span className="flex items-center gap-0.5 text-[10px] text-amber-600 dark:text-amber-400 font-medium">
+                                        <AlertTriangle className="size-3" /> SHORT — only {r.fgAvailable} in FG
+                                      </span>
+                                    )}
+                                  </div>
+                                </TableCell>
+                              </TableRow>
+                            )
+                          }),
+                        ])
+                      })()}
+                    </TableBody>
+                  </Table>
+                </div>
+                {insufficientRows.length > 0 && (
+                  <p className="text-xs text-red-600 dark:text-red-400 flex items-center gap-1">
+                    <AlertTriangle className="size-3.5" />
+                    {insufficientRows.length} row(s) have no FG stock — set their qty to 0 or finish production to submit.
+                  </p>
+                )}
+                {shortRows.length > 0 && (
+                  <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1">
+                    <AlertTriangle className="size-3.5" />
+                    {shortRows.length} row(s) exceed FG availability — stock will be partially deducted on delivery.
+                  </p>
+                )}
+              </div>
+            )}
+
             {/* Items Table */}
             <div className="space-y-2">
-              <Label className="text-sm font-medium">Items ({formItems.length})</Label>
+              <Label className="text-sm font-medium">
+                {colorRows.length > 0 && !editingId
+                  ? `Other Items (${formItems.length})`
+                  : `Items (${formItems.length})`}
+              </Label>
               <div className="rounded-md border overflow-hidden">
                 <Table>
                   <TableHeader>
                     <TableRow>
                       <TableHead>Style No</TableHead>
                       <TableHead>Style Name</TableHead>
+                      {formItems.some(it => it.color || it.size) && <TableHead>Color · Size</TableHead>}
                       <TableHead className="text-center">Ordered</TableHead>
                       <TableHead className="text-center">Dispatched</TableHead>
                     </TableRow>
@@ -735,8 +1099,13 @@ export function DispatchModule() {
                   <TableBody>
                     {formItems.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={4} className="text-center text-sm text-muted-foreground py-6">
-                          Select a sales order to auto-fill items
+                        <TableCell
+                          colSpan={formItems.some(it => it.color || it.size) ? 5 : 4}
+                          className="text-center text-sm text-muted-foreground py-6"
+                        >
+                          {colorRows.length > 0 && !editingId
+                            ? 'All items are dispatched color-wise above'
+                            : 'Select a sales order to auto-fill items'}
                         </TableCell>
                       </TableRow>
                     ) : (
@@ -744,6 +1113,22 @@ export function DispatchModule() {
                         <TableRow key={idx}>
                           <TableCell className="font-mono text-sm">{item.styleNo}</TableCell>
                           <TableCell className="text-sm">{item.styleName}</TableCell>
+                          {formItems.some(it => it.color || it.size) && (
+                            <TableCell className="text-sm">
+                              {item.color ? (
+                                <span
+                                  className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold leading-none ${colorNameToClasses(item.color)}`}
+                                >
+                                  {item.color}
+                                </span>
+                              ) : (
+                                '—'
+                              )}
+                              {item.size && item.size !== '-' ? (
+                                <span className="ml-1.5 text-muted-foreground text-xs">{item.size}</span>
+                              ) : null}
+                            </TableCell>
+                          )}
                           <TableCell className="text-center tabular-nums">{item.orderedQty}</TableCell>
                           <TableCell className="text-center">
                             <Input
@@ -766,7 +1151,12 @@ export function DispatchModule() {
 
           <DialogFooter>
             <Button variant="outline" onClick={() => { setDialogOpen(false); resetForm() }}>Cancel</Button>
-            <Button onClick={handleSave} disabled={saving} className="gap-2">
+            <Button
+              onClick={handleSave}
+              disabled={saving || insufficientRows.length > 0}
+              className="gap-2"
+              title={insufficientRows.length > 0 ? 'Some color×size rows have no FG stock' : undefined}
+            >
               {saving && <span className="size-4 animate-spin border-2 border-current border-t-transparent rounded-full" />}
               {editingId ? 'Update' : 'Create Dispatch'}
             </Button>
@@ -851,6 +1241,7 @@ export function DispatchModule() {
                           <TableHead className="w-12">Img</TableHead>
                           <TableHead>Style No</TableHead>
                           <TableHead>Style Name</TableHead>
+                          <TableHead>Color · Size</TableHead>
                           <TableHead className="text-center">Ordered</TableHead>
                           <TableHead className="text-center">Dispatched</TableHead>
                         </TableRow>
@@ -869,12 +1260,27 @@ export function DispatchModule() {
                             </TableCell>
                             <TableCell className="font-mono text-sm">{it.styleNo}</TableCell>
                             <TableCell className="text-sm">{it.styleName}</TableCell>
+                            <TableCell className="text-sm">
+                              {isColorJob(it.color) ? (
+                                <span
+                                  className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold leading-none ${colorNameToClasses(it.color)}`}
+                                  title={it.colorCode ? `${it.color} (${it.colorCode})` : it.color || undefined}
+                                >
+                                  {it.color}
+                                </span>
+                              ) : (
+                                <span className="text-muted-foreground">—</span>
+                              )}
+                              {it.size && it.size !== '-' ? (
+                                <span className="ml-1.5 text-muted-foreground text-xs">{it.size}</span>
+                              ) : null}
+                            </TableCell>
                             <TableCell className="text-center tabular-nums">{it.orderedQty}</TableCell>
                             <TableCell className="text-center tabular-nums font-semibold">{it.dispatchedQty}</TableCell>
                           </TableRow>
                         ))}
                         <TableRow className="font-bold">
-                          <TableCell colSpan={3} className="text-right">Total</TableCell>
+                          <TableCell colSpan={4} className="text-right">Total</TableCell>
                           <TableCell className="text-center tabular-nums">
                             {selectedDispatch.dispatchItems.reduce((s, it) => s + it.dispatchedQty, 0)}
                           </TableCell>

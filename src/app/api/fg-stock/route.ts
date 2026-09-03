@@ -1,6 +1,6 @@
 import { supabase } from '@/lib/supabase-db'
 import { NextRequest, NextResponse } from 'next/server'
-import { generateColorCode, generateMovementNo, withComputedFields, computeBinHealth } from '@/lib/fg-color-code'
+import { generateColorCode, generateMovementNo, withComputedFields, computeBinHealth, type StockBinWithComputed } from '@/lib/fg-color-code'
 
 // ─── GET: List all FG stock bins with KPI stats + health indicators ──
 export async function GET(request: NextRequest) {
@@ -62,6 +62,45 @@ export async function GET(request: NextRequest) {
       return withComputedFields(rest)
     })
 
+    // ── lastDispatch per bin (Phase 6): latest Outward Dispatch movement →
+    // partyName / dispatchNo / date. ONE batched query for the whole page;
+    // ordered movedAt DESC so the first row seen per bin is its latest.
+    // Bins with no dispatch movement keep lastDispatch: null.
+    const lastDispatchByBin: Record<string, {
+      partyName: string | null
+      dispatchNo: string | null
+      date: string | null
+      qty: number
+    }> = {}
+    const binIds = binsWithComputed.map(b => b.id)
+    if (binIds.length > 0) {
+      const { data: dispatchMovements } = await supabase
+        .from('FGStockMovement')
+        .select('fgStockBinId, partyName, referenceNo, movedAt, quantity')
+        .in('fgStockBinId', binIds)
+        .eq('movementType', 'Outward')
+        .eq('referenceType', 'Dispatch')
+        .order('movedAt', { ascending: false })
+        .limit(1000)
+      for (const m of (dispatchMovements || []) as any[]) {
+        const binId = m.fgStockBinId as string
+        if (binId && !lastDispatchByBin[binId]) {
+          lastDispatchByBin[binId] = {
+            partyName: m.partyName || null,
+            dispatchNo: m.referenceNo || null,
+            date: m.movedAt || null,
+            qty: Number(m.quantity) || 0,
+          }
+        }
+      }
+    }
+    const binsWithLastDispatch: Array<StockBinWithComputed & {
+      lastDispatch: { partyName: string | null; dispatchNo: string | null; date: string | null; qty: number } | null
+    }> = binsWithComputed.map(b => ({
+      ...b,
+      lastDispatch: lastDispatchByBin[b.id] || null,
+    }))
+
     // ── Global stats (across ALL bins) ──
     const { data: allBins } = await supabase.from('FGStockBin').select('*')
     const totalStyles = new Set((allBins || []).map((b: any) => b.styleNo)).size
@@ -118,7 +157,7 @@ export async function GET(request: NextRequest) {
     }
 
     return NextResponse.json({
-      bins: binsWithComputed,
+      bins: binsWithLastDispatch,
       stats,
       healthDist: healthCounts,
       pagination: {

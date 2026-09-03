@@ -1,6 +1,7 @@
 import { supabase } from '@/lib/supabase-db'
 import { NextRequest, NextResponse } from 'next/server'
 import { batchResolveStyleImages } from '@/lib/style-image'
+import { deriveItemColorCode } from '@/lib/fg-color-code'
 
 // ─── GET: List dispatches with filters ────────────────────────────────────
 export async function GET(req: NextRequest) {
@@ -135,24 +136,65 @@ export async function POST(req: NextRequest) {
       .single()
     if (dErr) throw dErr
 
-    // Create dispatch items
-    const dispatchItems = items.map((item: { styleNo: string; styleName: string; orderedQty: number; dispatchedQty: number }) => ({
-      dispatchId: dispatch.id,
-      styleNo: item.styleNo,
-      styleName: item.styleName,
-      orderedQty: item.orderedQty || 0,
-      dispatchedQty: item.dispatchedQty || 0,
-    }))
+    // Create dispatch items — Phase 6: items may carry color/colorCode/size
+    // (color-wise dispatch rows built by the UI from the order's
+    // OrderItemColor breakdown). colorCode auto-derives as
+    // ${styleNo}-${XX}-01 (XX = first 2 chars of the color, uppercased —
+    // matching the FGStockBin colorCode convention) whenever a color is
+    // present but no explicit colorCode. Legacy style-level items (no color)
+    // are written unchanged.
+    const dispatchItems = items.map((item: {
+      styleNo: string
+      styleName: string
+      orderedQty: number
+      dispatchedQty: number
+      color?: string | null
+      colorCode?: string | null
+      size?: string | null
+    }) => {
+      const color = typeof item.color === 'string' && item.color.trim() !== '' ? item.color.trim() : null
+      const size = typeof item.size === 'string' && item.size.trim() !== '' ? item.size.trim() : null
+      const explicitCode = typeof item.colorCode === 'string' ? item.colorCode.trim() : ''
+      return {
+        dispatchId: dispatch.id,
+        styleNo: item.styleNo,
+        styleName: item.styleName,
+        orderedQty: item.orderedQty || 0,
+        dispatchedQty: item.dispatchedQty || 0,
+        color,
+        colorCode: explicitCode || (color ? deriveItemColorCode(item.styleNo, color) : null),
+        size,
+      }
+    })
     const { data: createdItems, error: diErr } = await supabase
       .from('DispatchItem')
       .insert(dispatchItems)
       .select('*')
+    let finalItems = createdItems
+    let warning: string | undefined
     if (diErr) {
-      await supabase.from('Dispatch').delete().eq('id', dispatch.id)
-      throw diErr
+      // Graceful degradation for DBs without the color columns yet: retry
+      // with legacy columns only (same pattern as the BOM wastage fallback).
+      const msg = String((diErr as any).message || '')
+      if (/color|colorCode|size|column .* does not exist/i.test(msg)) {
+        const stripped = dispatchItems.map(({ color, colorCode, size, ...rest }: any) => rest)
+        const { data: retryItems, error: retryErr } = await supabase
+          .from('DispatchItem')
+          .insert(stripped)
+          .select('*')
+        if (retryErr) {
+          await supabase.from('Dispatch').delete().eq('id', dispatch.id)
+          throw retryErr
+        }
+        finalItems = retryItems
+        warning = 'Dispatch created, but color/colorCode/size were not saved — run the COLOR-PRODUCTION migration SQL.'
+      } else {
+        await supabase.from('Dispatch').delete().eq('id', dispatch.id)
+        throw diErr
+      }
     }
 
-    return NextResponse.json({ ...dispatch, dispatchItems: createdItems }, { status: 201 })
+    return NextResponse.json({ ...dispatch, dispatchItems: finalItems, ...(warning ? { warning } : {}) }, { status: 201 })
   } catch (error) {
     console.error('POST /api/dispatch error:', error)
     return NextResponse.json({ error: 'Failed to create dispatch' }, { status: 500 })

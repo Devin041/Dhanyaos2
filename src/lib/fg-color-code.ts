@@ -36,6 +36,16 @@ export async function generateColorCode(
   return `${pattern}${String(maxSeq + 1).padStart(2, '0')}`
 }
 
+// Dispatch-item colorCode derivation (Phase 6).
+// ${styleNo}-${XX}-01 where XX = first 2 chars of the color, uppercased —
+// the same convention the FG auto-entry bins use (e.g. Red on EL-TEST-5B →
+// EL-TEST-5B-RE-01, Free → -FR-01). Used by POST /api/dispatch whenever an
+// item carries a color but no explicit colorCode.
+export function deriveItemColorCode(styleNo: string, color?: string | null): string {
+  const token = String(color || '').trim().slice(0, 2).toUpperCase()
+  return `${styleNo}-${token || 'NA'}-01`
+}
+
 export function generateMovementNo(): string {
   const d = new Date()
   const dateStr =

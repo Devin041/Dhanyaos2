@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase, isMissingTableError } from '@/lib/supabase-db'
+import { getActiveBom } from '@/lib/bom-requirement'
 
 /**
  * GET /api/products/[styleNo]/lifecycle
@@ -11,9 +12,11 @@ import { supabase, isMissingTableError } from '@/lib/supabase-db'
  *   - Sample info (photo, status, stage)
  *   - Costing details (estimated cost, selling price, margin)
  *   - Purchase Orders (fabric ordered, received)
+ *   - BOM (active version + line count — Phase 6)
+ *   - Fabric flow: GRNs, receipts, consumption + summary (Phase 6)
  *   - Sampling records (PP samples)
  *   - Sales Orders (qty ordered, revenue)
- *   - Production jobs (progress, stage, actual costs)
+ *   - Production jobs (progress, stage, actual costs; leaf jobs only, w/ color)
  *   - Dispatch records (shipped qty)
  *   - Invoices & Payments (billed, collected, outstanding)
  *   - Profit Analysis (estimated vs actual cost, actual profit)
@@ -118,6 +121,184 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ styl
       }
     } catch { /* ignore */ }
 
+    // ── 6b. BOM (Phase 6) ──
+    // Active BOM + line count via the shared helper (defensive version /
+    // isActive coalescing). null when the style has no active BOM.
+    let bom: any = null
+    try {
+      const activeBom = await getActiveBom(styleNo)
+      if (activeBom) {
+        const { count: lineCount } = await supabase
+          .from('BOMLine')
+          .select('*', { count: 'exact', head: true })
+          .eq('bomId', activeBom.id)
+        bom = {
+          id: activeBom.id,
+          styleNo: activeBom.styleNo ?? styleNo,
+          version: activeBom.version ?? 1,
+          isActive: activeBom.isActive ?? true,
+          lineCount: lineCount ?? 0,
+          notes: activeBom.notes ?? null,
+        }
+      }
+    } catch { /* no BOM */ }
+
+    // ── 6c. Fabric flow (Phase 6): GRNs / receipts / consumption ──
+    // Style linkage, two merged paths:
+    //   A. FabricStock.styleNo stamps (stamped from the PO at GRN approval)
+    //      → FabricReceipt rows on those stocks → their grnId → GrnNote
+    //   B. PurchaseOrder.styleNo header (or POItem.styleNo fallback for older
+    //      POs that never persisted the header) → GrnNote.poId
+    let grns: any[] = []
+    let fabricReceipts: any[] = []
+    let fabricConsumption: any[] = []
+    let fabricSummary: any = {
+      received: 0, issued: 0, consumed: 0,
+      receiptCount: 0, consumptionCount: 0, stockCount: 0, availableMeters: 0,
+    }
+    try {
+      // (a) style-stocked fabric rows
+      const { data: styleStocks } = await supabase
+        .from('FabricStock')
+        .select('id, fabricName, color, lotNumber, availableMeters')
+        .eq('styleNo', styleNo)
+      const stocks = (styleStocks || []) as any[]
+      const stockIds = stocks.map(s => s.id)
+
+      // (b) purchase orders for this style (header styleNo …)
+      const { data: headerPOs } = await supabase
+        .from('PurchaseOrder')
+        .select('id, poNumber')
+        .eq('styleNo', styleNo)
+      let poMap: Record<string, string> = Object.fromEntries(
+        ((headerPOs || []) as any[]).map(p => [p.id, p.poNumber])
+      )
+      // … or POItem.styleNo fallback (older POs kept style only on lines)
+      const { data: poiRows } = await supabase
+        .from('POItem')
+        .select('purchaseOrderId')
+        .eq('styleNo', styleNo)
+      const poiPoIds = [...new Set(((poiRows || []) as any[]).map(r => r.purchaseOrderId).filter(Boolean))]
+      const missingPoIds = poiPoIds.filter(id => !poMap[id])
+      if (missingPoIds.length > 0) {
+        const { data: extraPOs } = await supabase
+          .from('PurchaseOrder')
+          .select('id, poNumber')
+          .in('id', missingPoIds)
+        for (const p of ((extraPOs || []) as any[])) poMap[p.id] = p.poNumber
+      }
+      const poIds = Object.keys(poMap)
+
+      // (c) receipts on the style-stocked stocks (audit ledger)
+      let receipts: any[] = []
+      if (stockIds.length > 0) {
+        const { data: receiptRows } = await supabase
+          .from('FabricReceipt')
+          .select('*')
+          .in('fabricStockId', stockIds)
+          .order('receivedDate', { ascending: false })
+        receipts = (receiptRows || []) as any[]
+      }
+
+      // (d) GRN ids from BOTH paths (receipt grnIds ∪ GRNs of style POs)
+      const grnIdsFromReceipts = [...new Set(receipts.map(r => r.grnId).filter(Boolean))] as string[]
+      let grnRows: any[] = []
+      if (grnIdsFromReceipts.length > 0) {
+        const { data: rows } = await supabase
+          .from('GrnNote')
+          .select('id, grnNo, supplierName, receivedDate, status, totalReceivedQty, acceptedQty, rejectedQty, poId')
+          .in('id', grnIdsFromReceipts)
+          .order('receivedDate', { ascending: false })
+        grnRows = (rows || []) as any[]
+      }
+      if (poIds.length > 0) {
+        const { data: rows } = await supabase
+          .from('GrnNote')
+          .select('id, grnNo, supplierName, receivedDate, status, totalReceivedQty, acceptedQty, rejectedQty, poId')
+          .in('poId', poIds)
+          .order('receivedDate', { ascending: false })
+        for (const row of ((rows || []) as any[])) {
+          if (!grnRows.some(g => g.id === row.id)) grnRows.push(row)
+        }
+      }
+      grns = grnRows.map(g => ({ ...g, poNumber: g.poId ? poMap[g.poId] || null : null }))
+
+      // (e) receipts flattened with GRN/PO/supplier joins (batched)
+      const receiptGrnIds = [...new Set(receipts.map(r => r.grnId).filter(Boolean))] as string[]
+      const receiptSupplierIds = [...new Set(receipts.map(r => r.supplierId).filter(Boolean))] as string[]
+      const [grnJoinRes, supplierJoinRes] = await Promise.all([
+        receiptGrnIds.length > 0
+          ? supabase.from('GrnNote').select('id, grnNo, supplierName').in('id', receiptGrnIds)
+          : Promise.resolve({ data: [] as any[] }),
+        receiptSupplierIds.length > 0
+          ? supabase.from('Supplier').select('id, name').in('id', receiptSupplierIds)
+          : Promise.resolve({ data: [] as any[] }),
+      ])
+      const grnNoMap: Record<string, any> = Object.fromEntries(((grnJoinRes.data || []) as any[]).map(g => [g.id, g]))
+      const supplierNameMap: Record<string, any> = Object.fromEntries(((supplierJoinRes.data || []) as any[]).map(s => [s.id, s]))
+      fabricReceipts = receipts.map(r => ({
+        id: r.id,
+        fabricStockId: r.fabricStockId,
+        fabricName: r.fabricName,
+        color: r.color ?? null,
+        lotNumber: r.lotNumber ?? null,
+        receivedQty: Number(r.receivedQty) || 0,
+        acceptedQty: Number(r.acceptedQty) || 0,
+        ratePerUnit: Number(r.ratePerUnit) || 0,
+        totalValue: Number(r.totalValue) || 0,
+        receivedDate: r.receivedDate,
+        grnNo: r.grnId ? grnNoMap[r.grnId]?.grnNo || null : null,
+        poNumber: r.poId ? poMap[r.poId] || null : null,
+        supplierName:
+          (r.supplierId ? supplierNameMap[r.supplierId]?.name || null : null) ||
+          (r.grnId ? grnNoMap[r.grnId]?.supplierName || null : null),
+      }))
+
+      // (f) fabric consumption for this style's jobs (batched)
+      const { data: styleJobs } = await supabase
+        .from('ProductionJob')
+        .select('id, jobNo')
+        .eq('styleNo', styleNo)
+      const jobIds = ((styleJobs || []) as any[]).map(j => j.id)
+      if (jobIds.length > 0) {
+        const { data: consumptionRows } = await supabase
+          .from('FabricConsumption')
+          .select('*')
+          .in('productionJobId', jobIds)
+          .order('consumptionDate', { ascending: false })
+        const jobNoMap: Record<string, string> = Object.fromEntries(
+          ((styleJobs || []) as any[]).map(j => [j.id, j.jobNo])
+        )
+        fabricConsumption = ((consumptionRows || []) as any[]).map(c => ({
+          id: c.id,
+          consumptionNo: c.consumptionNo,
+          productionJobId: c.productionJobId,
+          jobNo: jobNoMap[c.productionJobId] || null,
+          fabricStockId: c.fabricStockId,
+          fabricName: c.fabricName,
+          issuedQty: Number(c.issuedQty) || 0,
+          consumedQty: Number(c.consumedQty) || 0,
+          wastageQty: Number(c.wastageQty) || 0,
+          plannedQty: Number(c.plannedQty) || 0,
+          outputQty: Number(c.outputQty) || 0,
+          consumptionPerPc: Number(c.consumptionPerPc) || 0,
+          consumptionDate: c.consumptionDate,
+        }))
+      }
+
+      // (g) summary aggregates
+      const round2 = (n: number) => Math.round((Number(n) || 0) * 100) / 100
+      fabricSummary = {
+        received: round2(fabricReceipts.reduce((s, r) => s + (Number(r.receivedQty) || 0), 0)),
+        issued: round2(fabricConsumption.reduce((s, c) => s + (Number(c.issuedQty) || 0), 0)),
+        consumed: round2(fabricConsumption.reduce((s, c) => s + (Number(c.consumedQty) || 0), 0)),
+        receiptCount: fabricReceipts.length,
+        consumptionCount: fabricConsumption.length,
+        stockCount: stocks.length,
+        availableMeters: round2(stocks.reduce((s, st) => s + (Number(st.availableMeters) || 0), 0)),
+      }
+    } catch { /* fabric flow is best-effort — sections stay empty */ }
+
     // ── 7. Dispatch ──
     let dispatches: any[] = []
     try {
@@ -200,6 +381,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ styl
       { key: 'sample', label: 'Sample Catalog', status: sample ? 'done' : 'pending', detail: sample ? `${sample.sampleNo} — ${sample.status}` : 'Not created' },
       { key: 'costing', label: 'Costing', status: costing ? 'done' : 'pending', detail: costing ? `₹${costing.totalCost} cost → ₹${costing.sellingPrice} sell` : 'No cost sheet' },
       { key: 'po', label: 'Purchase Order', status: purchaseOrders.length > 0 ? 'done' : 'pending', detail: purchaseOrders.length > 0 ? `${purchaseOrders.length} PO(s)` : 'No POs' },
+      { key: 'bom', label: 'BOM', status: bom ? 'done' : 'pending', detail: bom ? `v${bom.version} · ${bom.lineCount} lines` : 'No BOM' },
+      { key: 'fabric', label: 'GRN / Fabric', status: (grns.length > 0 || fabricReceipts.length > 0) ? 'done' : 'pending', detail: fabricSummary.received > 0 ? `${fabricSummary.received}m received · ${fabricSummary.consumed}m consumed` : (grns.length > 0 ? `${grns.length} GRN(s)` : 'No fabric receipts') },
       { key: 'sampling', label: 'Sampling', status: samplings.length > 0 ? 'done' : 'pending', detail: samplings.length > 0 ? `${samplings.length} sample(s)` : 'No sampling' },
       { key: 'sales', label: 'Sales Order', status: salesOrders.length > 0 ? 'done' : 'pending', detail: salesOrders.length > 0 ? `${salesOrders.length} order(s) — ${totalQtySold} pcs` : 'No orders' },
       { key: 'production', label: 'Production', status: productionJobs.length > 0 ? 'done' : 'pending', detail: productionDetail },
@@ -215,6 +398,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ styl
       sample,
       costing,
       purchaseOrders,
+      bom,
+      grns,
+      fabricReceipts,
+      fabricConsumption,
+      fabricSummary,
       samplings,
       salesOrders,
       productionJobs,

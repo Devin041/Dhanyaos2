@@ -65,6 +65,7 @@ import {
   BarChart3,
   Store,
   Gift,
+  Truck,
 } from 'lucide-react'
 import { FGStyleDetail } from './fg-style-detail'
 import { FGReports } from './fg-reports'
@@ -97,6 +98,14 @@ interface FGStockBin {
   sellValue: number
   firstInDate: string | null
   lastMovementDate: string | null
+  // Phase 6 — dispatched visibility: bin column + movement-derived info
+  lastDispatchDate: string | null
+  lastDispatch?: {
+    partyName: string | null
+    dispatchNo: string | null
+    date: string | null
+    qty: number
+  } | null
   location: string
   notes: string | null
   health: string
@@ -202,6 +211,25 @@ interface MatrixStyle {
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+// Phase 6 — best lastDispatch across a set of bins (latest date wins)
+function latestDispatch(bins: FGStockBin[]): FGStockBin['lastDispatch'] {
+  let best: FGStockBin['lastDispatch'] = null
+  for (const b of bins) {
+    const d = b.lastDispatch || (b.lastDispatchDate ? { partyName: null, dispatchNo: null, date: b.lastDispatchDate, qty: 0 } : null)
+    if (d && (!best || (d.date || '') > (best.date || ''))) best = d
+  }
+  return best
+}
+
+function formatDispatchDate(d: string | null | undefined): string {
+  if (!d) return '—'
+  try {
+    return format(new Date(d), 'dd MMM yy')
+  } catch {
+    return '—'
+  }
+}
 
 function formatINR(num: number): string {
   if (num >= 10000000) return `₹${(num / 10000000).toFixed(2)}Cr`
@@ -855,13 +883,14 @@ export function FGInventoryModule() {
                     <TableHead className="text-right">QC Pending</TableHead>
                     <TableHead className="text-right">Total</TableHead>
                     <TableHead className="text-right">Value</TableHead>
+                    <TableHead>Dispatched</TableHead>
                     <TableHead>Health</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {Object.keys(groupedBins).length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={12} className="py-12 text-center text-muted-foreground">
+                      <TableCell colSpan={13} className="py-12 text-center text-muted-foreground">
                         <Package className="mx-auto mb-2 h-10 w-10 text-muted-foreground/30" />
                         <p>No finished goods stock found</p>
                         <p className="text-sm">Click &quot;Add Stock&quot; or &quot;New FG GRN&quot; to get started</p>
@@ -942,10 +971,25 @@ export function FGInventoryModule() {
                                   </span>
                                 ))}
                               </div>
-                              <div className="mt-2 flex justify-between text-xs text-muted-foreground">
+                  <div className="mt-2 flex justify-between text-xs text-muted-foreground">
                                 <span>Available: {formatQty(group.sizes.reduce((a, b) => a + b.availableQty, 0))}</span>
                                 <span>Value: {formatINR(group.sizes.reduce((a, b) => a + b.stockValue, 0))}</span>
                               </div>
+                              {(() => {
+                                // Phase 6 — last dispatched client/date for this color group
+                                const ld = latestDispatch(group.sizes)
+                                if (!ld) return null
+                                return (
+                                  <div className="mt-1.5 flex items-center gap-1.5 text-xs text-muted-foreground border-t pt-1.5">
+                                    <Truck className="h-3 w-3 shrink-0" />
+                                    <span className="truncate">
+                                      Dispatched {formatDispatchDate(ld.date)}
+                                      {ld.partyName ? ` · ${ld.partyName}` : ''}
+                                      {ld.dispatchNo ? ` · ${ld.dispatchNo}` : ''}
+                                    </span>
+                                  </div>
+                                )
+                              })()}
                             </div>
                           ))}
                       </div>
@@ -1643,6 +1687,43 @@ export function FGInventoryModule() {
                 </div>
               </div>
 
+              {/* Last Dispatch (Phase 6) */}
+              {(() => {
+                const ld = selectedBin.lastDispatch || (selectedBin.lastDispatchDate
+                  ? { partyName: null, dispatchNo: null, date: selectedBin.lastDispatchDate, qty: 0 }
+                  : null)
+                if (!ld) return null
+                return (
+                  <div className="rounded-lg border border-border/60 bg-muted/10 p-4">
+                    <h4 className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
+                      <Truck className="h-3.5 w-3.5 text-primary" /> Last Dispatch
+                    </h4>
+                    <div className="space-y-2 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Dispatched To</span>
+                        <span className="font-medium">{ld.partyName || '—'}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Dispatch Date</span>
+                        <span className="font-medium">{formatDispatchDate(ld.date)}</span>
+                      </div>
+                      {ld.dispatchNo && (
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Dispatch No</span>
+                          <span className="font-mono font-medium">{ld.dispatchNo}</span>
+                        </div>
+                      )}
+                      {ld.qty > 0 && (
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Qty Dispatched</span>
+                          <span className="font-medium">{formatQty(ld.qty)} pcs</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )
+              })()}
+
               {/* Metadata */}
               <div className="rounded-lg border p-4">
                 <h4 className="mb-2 text-sm font-semibold">Details</h4>
@@ -1746,6 +1827,22 @@ function StyleGroupRow({
         <TableCell className="text-right font-medium">{formatQty(totalPieces)}</TableCell>
         <TableCell className="text-right">{formatINR(totalValue)}</TableCell>
         <TableCell>
+          {(() => {
+            // Phase 6 — most recent dispatch across this style's bins
+            const ld = latestDispatch(bins)
+            if (!ld) return <span className="text-xs text-muted-foreground">—</span>
+            return (
+              <div className="text-xs leading-tight max-w-[160px]">
+                <span className="font-medium">{formatDispatchDate(ld.date)}</span>
+                {ld.partyName && <span className="text-muted-foreground"> · {ld.partyName}</span>}
+                {ld.dispatchNo && (
+                  <span className="block font-mono text-[10px] text-muted-foreground truncate">{ld.dispatchNo}</span>
+                )}
+              </div>
+            )
+          })()}
+        </TableCell>
+        <TableCell>
           <div className="flex items-center gap-2">
             <span className="text-xs text-muted-foreground">
               {fullSets} sets · {totalAvailable - fullSets * sizes.length} orphan
@@ -1781,6 +1878,22 @@ function StyleGroupRow({
           <TableCell className="text-right text-muted-foreground">{bin.qcPendingQty}</TableCell>
           <TableCell className="text-right">{bin.totalPieces}</TableCell>
           <TableCell className="text-right text-sm">{formatINR(bin.stockValue)}</TableCell>
+          <TableCell>
+            {(() => {
+              // Phase 6 — per-bin last dispatched client + date + dispatch no
+              const ld = bin.lastDispatch || (bin.lastDispatchDate ? { partyName: null, dispatchNo: null, date: bin.lastDispatchDate, qty: 0 } : null)
+              if (!ld) return <span className="text-xs text-muted-foreground">—</span>
+              return (
+                <div className="text-xs leading-tight max-w-[160px]">
+                  <span className="font-medium">{formatDispatchDate(ld.date)}</span>
+                  {ld.partyName && <span className="text-muted-foreground"> · {ld.partyName}</span>}
+                  {ld.dispatchNo && (
+                    <span className="block font-mono text-[10px] text-muted-foreground truncate">{ld.dispatchNo}</span>
+                  )}
+                </div>
+              )
+            })()}
+          </TableCell>
           <TableCell><HealthBadge health={bin.health} /></TableCell>
         </TableRow>
       ))}
