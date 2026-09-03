@@ -1,3 +1,9 @@
+// ============================================================================
+// RETIRED — single-database consolidation. The app's only database is the
+// live Supabase PostgreSQL project. This Prisma-based seed no longer runs
+// (db:seed script removed). Kept for historical reference of demo data shapes.
+// ============================================================================
+
 import { PrismaClient } from '@prisma/client'
 import { subDays, format, startOfMonth, eachDayOfInterval } from 'date-fns'
 

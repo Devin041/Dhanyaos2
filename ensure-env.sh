@@ -49,10 +49,4 @@ ensure_line "$CLOUDINARY_NAME"
 ensure_line "$CLOUDINARY_API"
 ensure_line "$CLOUDINARY_PUBLIC"
 
-# Ensure DATABASE_URL exists
-if ! grep -q "^DATABASE_URL=" "$ENV_FILE"; then
-  echo "DATABASE_URL=file:../db/custom.db" >> "$ENV_FILE"
-  echo "Added: DATABASE_URL"
-fi
-
 echo "✅ .env verified — all credentials present"

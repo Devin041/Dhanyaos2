@@ -1,3 +1,12 @@
+// ============================================================================
+// ⚠️ DOCUMENTATION ONLY — NOT USED AT RUNTIME
+// The live database is Supabase PostgreSQL (see SUPABASE-MIGRATION*.sql).
+// This schema is kept as a readable data-model reference. Prisma was removed
+// from the app (single-database consolidation) — do NOT run prisma db push
+// against the live Supabase DB; migrations are applied via the .sql files in
+// the Supabase SQL Editor. Column-level truth = the migration SQL files.
+// ============================================================================
+
 generator client {
   provider = "prisma-client-js"
 }

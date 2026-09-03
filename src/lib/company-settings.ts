@@ -1,4 +1,12 @@
-import { db } from '@/lib/db'
+import { supabase } from '@/lib/supabase-db'
+
+// ============================================================================
+// Company Settings — SINGLE DATABASE (Supabase PostgreSQL)
+// Previously this module read from a local Prisma/SQLite file (db/custom.db),
+// which split the app across two databases. Since the single-DB consolidation
+// (see worklog Task 28) all reads/writes go to the live Supabase
+// "CompanySettings" table (row id='default'), same as every other module.
+// ============================================================================
 
 export interface CompanySettings {
   id: string
@@ -21,7 +29,7 @@ const CACHE_TTL = 60 * 1000 // 1 minute
 
 /**
  * Get company settings (with caching).
- * Returns default values if settings table is empty.
+ * Returns default values if settings row is missing or DB errors.
  */
 export async function getCompanySettings(): Promise<CompanySettings> {
   // Check cache
@@ -30,17 +38,19 @@ export async function getCompanySettings(): Promise<CompanySettings> {
   }
 
   try {
-    const settings = await db.companySettings.findUnique({
-      where: { id: 'default' },
-    })
+    const { data } = await supabase
+      .from('CompanySettings')
+      .select('id, companyName, brandName, tagline, location, phone, email, website, gstNumber, logoUrl, primaryColor')
+      .eq('id', 'default')
+      .maybeSingle()
 
-    if (settings) {
-      _cache = settings as unknown as CompanySettings
+    if (data) {
+      _cache = data as unknown as CompanySettings
       _cacheTime = Date.now()
       return _cache
     }
   } catch {
-    // DB might not be ready — use defaults
+    // Network/DB hiccup — fall through to defaults
   }
 
   // Fallback defaults
@@ -74,7 +84,7 @@ export async function getCompanyName(): Promise<string> {
 /**
  * Clear the cache (call after updating settings).
  */
-export function clearCompanySettingsCache() {
+export function clearCompanySettingsCache(): void {
   _cache = null
   _cacheTime = 0
 }
